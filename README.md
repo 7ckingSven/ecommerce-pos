@@ -1,20 +1,20 @@
 # ECommerce POS System
-> A web-based Point of Sale and E-Commerce management system built as a capstone project.
+A web-based Point of Sale and E-Commerce management system built as a capstone project.
 
 ---
 
 ## Project Overview
-The **ECommerce POS System** is a web-based application designed for small business stores to manage their day-to-day sales, inventory, customers, and orders in one unified platform. It combines the functionality of a traditional Point of Sale (POS) system with basic e-commerce management features, making it accessible directly from any browser without the need for specialized hardware or software.
+The ECommerce POS System is a web-based application designed for small business stores to manage their day-to-day sales, inventory, customers, and orders in one unified platform. It combines the functionality of a traditional Point of Sale (POS) system with basic e-commerce management features, making it accessible directly from any browser without the need for specialized hardware or software.
 
 ---
 
 ## Features
-- **User Authentication & Management** — Secure login and role-based access for admin and staff
-- **Product & Inventory Management** — Add, edit, delete products and track stock levels
-- **Sales & Checkout (POS)** — Process transactions, generate receipts, and record payments
-- **Customer Management** — Store and manage customer profiles and purchase history
-- **Order Management** — View, manage, and track all orders in real-time
-- **Reports & Analytics Dashboard** — Visual sales reports and business performance insights
+- User Authentication and Management - Secure login and role-based access for admin and staff
+- Product and Inventory Management - Add, edit, delete products and track stock levels
+- Sales and Checkout (POS) - Process transactions, generate receipts, and record payments
+- Customer Management - Store and manage customer profiles and purchase history
+- Order Management - View, manage, and track all orders in real-time
+- Reports and Analytics Dashboard - Visual sales reports and business performance insights
 
 ---
 
@@ -22,13 +22,13 @@ The **ECommerce POS System** is a web-based application designed for small busin
 
 | Layer | Technology |
 |---|---|
-| **IDE** | Visual Studio Code |
-| **Backend** | Flask (Python) |
-| **Frontend** | HTML, CSS, Bootstrap 5 |
-| **Templating** | Jinja2 (built-in Flask) |
-| **Database** | Supabase (PostgreSQL) |
-| **Version Control** | GitHub |
-| **Containerization** | Docker |
+| IDE | Visual Studio Code |
+| Backend | Flask (Python) |
+| Frontend | HTML, CSS, Bootstrap 5 |
+| Templating | Jinja2 (built-in Flask) |
+| Database | Supabase (PostgreSQL) |
+| Version Control | GitHub |
+| Containerization | Docker |
 
 ---
 
@@ -49,6 +49,8 @@ ecommerce-pos/
 │
 ├── venv/
 ├── app.py
+├── Dockerfile
+├── .dockerignore
 ├── .env
 ├── .gitignore
 ├── requirements.txt
@@ -57,12 +59,12 @@ ecommerce-pos/
 
 ---
 
-## Installation & Setup
+## Installation and Setup
 
 ### Prerequisites
 - Python 3.11
 - Git
-- Docker (optional)
+- Docker Desktop
 - Supabase account
 
 ### Steps
@@ -76,7 +78,7 @@ cd ecommerce-pos
 **2. Create and activate virtual environment**
 ```bash
 python -m venv venv
-venv\Scripts\activate  # Windows
+venv\Scripts\activate
 ```
 
 **3. Install dependencies**
@@ -93,12 +95,18 @@ SUPABASE_KEY=your_supabase_anon_key
 SECRET_KEY=your_secret_key
 ```
 
-**5. Run the application**
+**5. Run the application locally**
 ```bash
 python app.py
 ```
 
-**6. Open in browser**
+**6. Run using Docker**
+```bash
+docker build -t ecommerce-pos .
+docker run -p 5000:5000 --env-file .env ecommerce-pos
+```
+
+**7. Open in browser**
 ```
 http://127.0.0.1:5000
 ```
@@ -106,15 +114,19 @@ http://127.0.0.1:5000
 ---
 
 ## Database
-This project uses **Supabase (PostgreSQL)** as its database. Supabase provides a real-time, cloud-hosted PostgreSQL database with a built-in dashboard, authentication, and REST API support.
+This project uses Supabase (PostgreSQL) as its database. Supabase provides a real-time, cloud-hosted PostgreSQL database with a built-in dashboard, authentication, and REST API support.
+
+---
+
+## Deployment
+This project is deployed using Railway, a cloud platform that supports containerized Flask applications via Docker, ensuring consistent and reliable access to the system through a public URL.
 
 ---
 
 ## Developer
-- **Jorist Dave git add README.mdAgduma, Rhea Jane Mae Almelda, Val Cyril Calixton, Alfrancis Limo** 
-- **Project Type:** Capstone Research Project
-- **Course:** Information Technology
-- **Year:** 2026
+- Project Type: Capstone Research Project
+- Course: Information Technology
+- Year: 2026
 
 ---
 
