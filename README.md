@@ -1,24 +1,24 @@
-# 🛒 ECommerce POS System
+# ECommerce POS System
 > A web-based Point of Sale and E-Commerce management system built as a capstone project.
 
 ---
 
-## 📌 Project Overview
+## Project Overview
 The **ECommerce POS System** is a web-based application designed for small business stores to manage their day-to-day sales, inventory, customers, and orders in one unified platform. It combines the functionality of a traditional Point of Sale (POS) system with basic e-commerce management features, making it accessible directly from any browser without the need for specialized hardware or software.
 
 ---
 
-## 🎯 Features
-- 🔐 **User Authentication & Management** — Secure login and role-based access for admin and staff
-- 📦 **Product & Inventory Management** — Add, edit, delete products and track stock levels
-- 🛍️ **Sales & Checkout (POS)** — Process transactions, generate receipts, and record payments
-- 👥 **Customer Management** — Store and manage customer profiles and purchase history
-- 📋 **Order Management** — View, manage, and track all orders in real-time
-- 📊 **Reports & Analytics Dashboard** — Visual sales reports and business performance insights
+## Features
+- **User Authentication & Management** — Secure login and role-based access for admin and staff
+- **Product & Inventory Management** — Add, edit, delete products and track stock levels
+- **Sales & Checkout (POS)** — Process transactions, generate receipts, and record payments
+- **Customer Management** — Store and manage customer profiles and purchase history
+- **Order Management** — View, manage, and track all orders in real-time
+- **Reports & Analytics Dashboard** — Visual sales reports and business performance insights
 
 ---
 
-## 🛠️ Tech Stack
+## Tech Stack
 
 | Layer | Technology |
 |---|---|
@@ -32,7 +32,7 @@ The **ECommerce POS System** is a web-based application designed for small busin
 
 ---
 
-## 📁 Project Structure
+## Project Structure
 ```
 ecommerce-pos/
 │
@@ -57,7 +57,7 @@ ecommerce-pos/
 
 ---
 
-## ⚙️ Installation & Setup
+## Installation & Setup
 
 ### Prerequisites
 - Python 3.11
@@ -105,18 +105,18 @@ http://127.0.0.1:5000
 
 ---
 
-## 🗄️ Database
+## Database
 This project uses **Supabase (PostgreSQL)** as its database. Supabase provides a real-time, cloud-hosted PostgreSQL database with a built-in dashboard, authentication, and REST API support.
 
 ---
 
-## 👨‍💻 Developer
-- **Jorist Dave Agduma, Rhea Jane Mae Almelda, Val Cyril Calixton, Alfrancis Limo** 
+## Developer
+- **Jorist Dave git add README.mdAgduma, Rhea Jane Mae Almelda, Val Cyril Calixton, Alfrancis Limo** 
 - **Project Type:** Capstone Research Project
 - **Course:** Information Technology
 - **Year:** 2026
 
 ---
 
-## 📄 License
+## License
 This project is for academic purposes only.
