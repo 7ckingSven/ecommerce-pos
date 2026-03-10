@@ -16,9 +16,15 @@ supabase = create_client(
     os.getenv('SUPABASE_KEY')
 )
 
-# ─── LANDING PAGE ─────────────────────────────────────
+# ─── PUBLIC PAGES ─────────────────────────────────────
 
+# Main landing page — public product showcase
 @app.route('/')
+def index():
+    return render_template('index.html')
+
+# Login page
+@app.route('/login')
 def login():
     return render_template('login.html')
 
@@ -29,24 +35,21 @@ def staff_login():
     email    = request.form.get('email')
     password = request.form.get('password')
     # TODO: Add Supabase authentication logic here
-    # TODO: Fetch user role from users table
-    # TODO: Redirect based on role
+    # TODO: Fetch user role from users table and redirect accordingly
 
-    # Placeholder role detection — replace with real Supabase auth
-    # Example: role = supabase.table('users').select('role').eq('email', email).execute()
     role = None  # Will be fetched from Supabase
 
     if role == 'admin':
-        session['user']  = email
-        session['role']  = 'admin'
+        session['user'] = email
+        session['role'] = 'admin'
         return redirect(url_for('admin_dashboard'))
     elif role == 'cashier':
-        session['user']  = email
-        session['role']  = 'cashier'
+        session['user'] = email
+        session['role'] = 'cashier'
         return redirect(url_for('cashier_dashboard'))
     elif role == 'secretary':
-        session['user']  = email
-        session['role']  = 'secretary'
+        session['user'] = email
+        session['role'] = 'secretary'
         return redirect(url_for('secretary_dashboard'))
     else:
         flash('Staff login coming soon.', 'success')
@@ -61,6 +64,16 @@ def customer_login():
     # TODO: Add Supabase authentication logic here
     flash('Customer login coming soon.', 'success')
     return redirect(url_for('login'))
+
+# ─── CUSTOMER REGISTER ────────────────────────────────────
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        # TODO: Add Supabase registration logic here
+        flash('Registration coming soon.', 'success')
+        return redirect(url_for('login'))
+    return render_template('register.html')
 
 # ─── FORGOT PASSWORD ───────────────────────────────────
 
@@ -100,7 +113,7 @@ def customer_dashboard():
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('login'))
+    return redirect(url_for('index'))
 
 # ──────────────────────────────────────────────────────
 

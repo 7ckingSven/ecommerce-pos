@@ -1,0 +1,426 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Create Account — Triple E &amp; Fiel Collins General Merchandise</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/register.css') }}">
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <header class="navbar">
+    <div class="nav-brand">
+      <div class="nav-badge">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </div>
+      <div class="nav-brand-text">
+        <span class="nav-brand-name">Triple E &amp; Fiel Collins General Merchandise</span>
+        <span class="nav-brand-sub">E-Commerce &amp; POS System</span>
+      </div>
+    </div>
+    <div class="nav-buttons">
+      <a href="{{ url_for('index') }}" class="btn btn-outline-ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a href="{{ url_for('login') }}" class="btn btn-outline-green">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Sign In
+      </a>
+    </div>
+  </header>
+
+  <!-- PAGE WRAPPER -->
+  <main class="reg-page">
+
+    <!-- LEFT PANEL -->
+    <div class="reg-left">
+      <div class="reg-glow"></div>
+      <div class="reg-glow reg-glow-2"></div>
+
+      <div class="hero-eyebrow" style="animation-delay:0s;">
+        <span class="eyebrow-dot"></span>
+        <span class="eyebrow-text">Customer Registration</span>
+      </div>
+
+      <h1 class="reg-title">
+        Create Your<br>
+        <span class="accent">Account</span>
+      </h1>
+
+      <div class="hero-rule"></div>
+
+      <p class="reg-desc">
+        Register to start shopping, track your orders, and enjoy exclusive member benefits at Triple E and Fiel Collins General Merchandise.
+      </p>
+
+      <!-- Benefits -->
+      <div class="benefit-list">
+        <div class="benefit-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          </div>
+          <div>
+            <span class="benefit-label">Online Shopping Access</span>
+            <span class="benefit-sub">Browse and order products anytime</span>
+          </div>
+        </div>
+        <div class="benefit-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><path d="M20 12V22H4V12"/><path d="M22 7H2v5h20V7z"/><path d="M12 22V7"/><path d="M12 7H7.5a2.5 2.5 0 0 1 0-5C11 2 12 7 12 7z"/><path d="M12 7h4.5a2.5 2.5 0 0 0 0-5C13 2 12 7 12 7z"/></svg>
+          </div>
+          <div>
+            <span class="benefit-label">Member Discounts</span>
+            <span class="benefit-sub">Exclusive deals for registered members</span>
+          </div>
+        </div>
+        <div class="benefit-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          </div>
+          <div>
+            <span class="benefit-label">Order History</span>
+            <span class="benefit-sub">Track all your past and current orders</span>
+          </div>
+        </div>
+        <div class="benefit-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+          </div>
+          <div>
+            <span class="benefit-label">Credit Eligibility</span>
+            <span class="benefit-sub">Qualified members may avail credit purchases</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Step indicator -->
+      <div class="step-indicator">
+        <div class="step active" id="step1dot">
+          <span class="step-num">1</span>
+          <span class="step-label">Personal Info</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step" id="step2dot">
+          <span class="step-num">2</span>
+          <span class="step-label">Contact & Address</span>
+        </div>
+        <div class="step-line"></div>
+        <div class="step" id="step3dot">
+          <span class="step-num">3</span>
+          <span class="step-label">Account Setup</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT PANEL — FORM -->
+    <div class="reg-right">
+      <div class="reg-card">
+
+        <div class="reg-card-header">
+          <div class="reg-step-badge" id="stepBadge">Step 1 of 3</div>
+          <h2 class="reg-card-title" id="stepTitle">Personal Information</h2>
+          <p class="reg-card-sub" id="stepSub">Please enter your full legal name and personal details.</p>
+        </div>
+
+        <!-- Flash Messages -->
+        {% with messages = get_flashed_messages(with_categories=true) %}
+          {% if messages %}
+            {% for category, message in messages %}
+              <div class="flash-msg {{ category }}">{{ message }}</div>
+            {% endfor %}
+          {% endif %}
+        {% endwith %}
+
+        <form method="POST" action="{{ url_for('register') }}" id="regForm">
+
+          <!-- STEP 1 — Personal Info -->
+          <div class="form-step" id="formStep1">
+            <div class="form-row-3">
+              <div class="form-group">
+                <label class="form-label">First Name <span class="req">*</span></label>
+                <input type="text" name="first_name" class="form-input" placeholder="Juan" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Middle Name <span class="opt">(optional)</span></label>
+                <input type="text" name="middle_name" class="form-input" placeholder="Santos" />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Last Name <span class="req">*</span></label>
+                <input type="text" name="last_name" class="form-input" placeholder="Dela Cruz" required />
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label">Date of Birth <span class="req">*</span></label>
+                <input type="date" name="date_of_birth" class="form-input" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label">Gender <span class="req">*</span></label>
+                <select name="gender" class="form-input form-select" required>
+                  <option value="" disabled selected>Select gender</option>
+                  <option value="male">Male</option>
+                  <option value="female">Female</option>
+                  <option value="prefer_not_to_say">Prefer not to say</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label">Civil Status <span class="req">*</span></label>
+                <select name="civil_status" class="form-input form-select" required>
+                  <option value="" disabled selected>Select status</option>
+                  <option value="single">Single</option>
+                  <option value="married">Married</option>
+                  <option value="widowed">Widowed</option>
+                  <option value="separated">Separated</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Nationality <span class="req">*</span></label>
+                <input type="text" name="nationality" class="form-input" placeholder="Filipino" required />
+              </div>
+            </div>
+
+            <div class="step-nav">
+              <div></div>
+              <button type="button" class="btn btn-solid-green btn-full" onclick="goToStep(2)">
+                Next — Contact Details
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- STEP 2 — Contact & Address -->
+          <div class="form-step" id="formStep2" style="display:none;">
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label">Phone Number <span class="req">*</span></label>
+                <div class="input-prefix-wrap">
+                  <span class="input-prefix">+63</span>
+                  <input type="tel" name="phone" class="form-input input-with-prefix" placeholder="9XX XXX XXXX" maxlength="10" required />
+                </div>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Alternate Phone <span class="opt">(optional)</span></label>
+                <div class="input-prefix-wrap">
+                  <span class="input-prefix">+63</span>
+                  <input type="tel" name="alt_phone" class="form-input input-with-prefix" placeholder="9XX XXX XXXX" maxlength="10" />
+                </div>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">House / Unit No. &amp; Street <span class="req">*</span></label>
+              <input type="text" name="street" class="form-input" placeholder="123 Rizal Street" required />
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label">Barangay <span class="req">*</span></label>
+                <input type="text" name="barangay" class="form-input" placeholder="Barangay Poblacion" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label">City / Municipality <span class="req">*</span></label>
+                <input type="text" name="city" class="form-input" placeholder="Koronadal City" required />
+              </div>
+            </div>
+
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label">Province <span class="req">*</span></label>
+                <input type="text" name="province" class="form-input" placeholder="South Cotabato" required />
+              </div>
+              <div class="form-group">
+                <label class="form-label">ZIP Code <span class="req">*</span></label>
+                <input type="text" name="zip_code" class="form-input" placeholder="9506" maxlength="4" required />
+              </div>
+            </div>
+
+            <div class="step-nav">
+              <button type="button" class="btn btn-back" onclick="goToStep(1)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                Back
+              </button>
+              <button type="button" class="btn btn-solid-green" onclick="goToStep(3)">
+                Next — Account Setup
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>
+              </button>
+            </div>
+          </div>
+
+          <!-- STEP 3 — Account Setup -->
+          <div class="form-step" id="formStep3" style="display:none;">
+
+            <div class="form-group">
+              <label class="form-label">Email Address <span class="req">*</span></label>
+              <input type="email" name="email" class="form-input" placeholder="juandelacruz@gmail.com" required />
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Username <span class="req">*</span></label>
+              <input type="text" name="username" class="form-input" placeholder="Choose a username" required />
+              <span class="field-hint">This will be used to identify your account.</span>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Password <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="password" id="regPassword" name="password" class="form-input" placeholder="Create a strong password" required />
+                <button type="button" class="show-pass-btn" onclick="togglePassword('regPassword', 'regEyeIcon')" tabindex="-1">
+                  <svg id="regEyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+              </div>
+              <div class="password-strength" id="passStrength">
+                <div class="strength-bar"><div class="strength-fill" id="strengthFill"></div></div>
+                <span class="strength-label" id="strengthLabel">Enter a password</span>
+              </div>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Confirm Password <span class="req">*</span></label>
+              <div class="input-wrap">
+                <input type="password" id="regConfirmPassword" name="confirm_password" class="form-input" placeholder="Re-enter your password" required />
+                <button type="button" class="show-pass-btn" onclick="togglePassword('regConfirmPassword', 'regConfirmEyeIcon')" tabindex="-1">
+                  <svg id="regConfirmEyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+              </div>
+              <span class="field-hint" id="matchHint"></span>
+            </div>
+
+            <div class="show-pass-check">
+              <input type="checkbox" id="regShowPass" onchange="toggleBothPasswords()" />
+              <label for="regShowPass">Show passwords</label>
+            </div>
+
+            <!-- Terms -->
+            <div class="terms-row">
+              <input type="checkbox" id="agreeTerms" name="agree_terms" required />
+              <label for="agreeTerms">
+                I agree to the <a href="#" class="terms-link">Terms and Conditions</a> and <a href="#" class="terms-link">Privacy Policy</a> of Triple E and Fiel Collins General Merchandise.
+              </label>
+            </div>
+
+            <div class="step-nav">
+              <button type="button" class="btn btn-back" onclick="goToStep(2)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="19" y1="12" x2="5" y2="12"/><polyline points="12 19 5 12 12 5"/></svg>
+                Back
+              </button>
+              <button type="submit" class="btn btn-solid-green">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                Create Account
+              </button>
+            </div>
+          </div>
+
+        </form>
+
+        <p class="form-hint" style="margin-top:1.4rem;">Already have an account? <a href="{{ url_for('login') }}">Sign in here</a></p>
+
+      </div>
+    </div>
+  </main>
+
+  <script>
+    const EYE_OPEN  = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
+    const EYE_SLASH = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
+
+    const stepTitles = [
+      { badge: 'Step 1 of 3', title: 'Personal Information',   sub: 'Please enter your full legal name and personal details.' },
+      { badge: 'Step 2 of 3', title: 'Contact & Address',      sub: 'How can we reach you and where are you located?' },
+      { badge: 'Step 3 of 3', title: 'Account Setup',          sub: 'Set up your login credentials to complete registration.' },
+    ];
+
+    function goToStep(step) {
+      // Hide all steps
+      document.querySelectorAll('.form-step').forEach(s => s.style.display = 'none');
+      document.getElementById('formStep' + step).style.display = 'block';
+
+      // Update header text
+      const t = stepTitles[step - 1];
+      document.getElementById('stepBadge').textContent  = t.badge;
+      document.getElementById('stepTitle').textContent  = t.title;
+      document.getElementById('stepSub').textContent    = t.sub;
+
+      // Update left panel step dots
+      for (let i = 1; i <= 3; i++) {
+        const dot = document.getElementById('step' + i + 'dot');
+        dot.classList.toggle('active', i === step);
+        dot.classList.toggle('done', i < step);
+      }
+
+      // Scroll to top of card
+      document.querySelector('.reg-right').scrollTo({ top: 0, behavior: 'smooth' });
+    }
+
+    function togglePassword(inputId, iconId) {
+      const input = document.getElementById(inputId);
+      const icon  = document.getElementById(iconId);
+      input.type = input.type === 'password' ? 'text' : 'password';
+      icon.innerHTML = input.type === 'text' ? EYE_SLASH : EYE_OPEN;
+    }
+
+    function toggleBothPasswords() {
+      const checked = document.getElementById('regShowPass').checked;
+      ['regPassword', 'regConfirmPassword'].forEach(id => {
+        const input = document.getElementById(id);
+        const iconId = id === 'regPassword' ? 'regEyeIcon' : 'regConfirmEyeIcon';
+        input.type = checked ? 'text' : 'password';
+        document.getElementById(iconId).innerHTML = checked ? EYE_SLASH : EYE_OPEN;
+      });
+    }
+
+    // Password strength
+    document.getElementById('regPassword').addEventListener('input', function () {
+      const val   = this.value;
+      const fill  = document.getElementById('strengthFill');
+      const label = document.getElementById('strengthLabel');
+      let score   = 0;
+      if (val.length >= 8)              score++;
+      if (/[A-Z]/.test(val))            score++;
+      if (/[0-9]/.test(val))            score++;
+      if (/[^A-Za-z0-9]/.test(val))     score++;
+
+      const levels = [
+        { pct: '0%',   color: 'transparent', text: 'Enter a password' },
+        { pct: '25%',  color: '#ef4444',     text: 'Weak' },
+        { pct: '50%',  color: '#f97316',     text: 'Fair' },
+        { pct: '75%',  color: '#eab308',     text: 'Good' },
+        { pct: '100%', color: '#22c55e',     text: 'Strong' },
+      ];
+      const lvl = val.length === 0 ? levels[0] : levels[score];
+      fill.style.width       = lvl.pct;
+      fill.style.background  = lvl.color;
+      label.textContent      = lvl.text;
+      label.style.color      = lvl.color === 'transparent' ? 'var(--text-light)' : lvl.color;
+    });
+
+    // Password match
+    document.getElementById('regConfirmPassword').addEventListener('input', function () {
+      const pass    = document.getElementById('regPassword').value;
+      const hint    = document.getElementById('matchHint');
+      if (this.value === '') {
+        hint.textContent = '';
+      } else if (this.value === pass) {
+        hint.textContent  = 'Passwords match.';
+        hint.style.color  = '#22c55e';
+      } else {
+        hint.textContent  = 'Passwords do not match.';
+        hint.style.color  = '#ef4444';
+      }
+    });
+  </script>
+
+</body>
+</html>

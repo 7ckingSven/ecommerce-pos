@@ -1,6 +1,6 @@
 /* ============================================================
    ECommerce POS — Login Page Stylesheet
-   Theme: Modern Bold Yellow-Green | Outlined Buttons
+   Theme: Light Fresh Green | Outlined Buttons
    ============================================================ */
 
 *, *::before, *::after {
@@ -10,36 +10,47 @@
 }
 
 :root {
-  /* Yellow-Green Palette */
-  --yg-900:  #1a2e00;
-  --yg-800:  #2d4d00;
-  --yg-700:  #4a7c00;
-  --yg-600:  #65a800;
-  --yg-500:  #84cc16;
-  --yg-400:  #a3e635;
-  --yg-300:  #bef264;
-  --yg-100:  #ecfccb;
-  --yg-50:   #f7fee7;
+  /* Main Green Palette */
+  --g-900:  #14532d;
+  --g-800:  #166534;
+  --g-700:  #15803d;
+  --g-600:  #16a34a;
+  --g-500:  #22c55e;
+  --g-400:  #4ade80;
+  --g-300:  #86efac;
+  --g-200:  #bbf7d0;
+  --g-100:  #dcfce7;
+  --g-50:   #f0fdf4;
 
-  --dark:       #0d110a;
-  --dark-2:     #111a08;
-  --dark-3:     #1c2a10;
-  --surface:    #fafff5;
-  --surface-2:  #f4faeb;
-  --white:      #FFFFFF;
+  /* Yellow-Green Accent */
+  --yg-500: #84cc16;
+  --yg-400: #a3e635;
+  --yg-300: #bef264;
 
-  --text-primary:   #0d110a;
-  --text-secondary: #374151;
-  --text-muted:     #6B7280;
-  --text-light:     #9CA3AF;
+  /* Backgrounds — light and airy */
+  --dark:     #1a4731;
+  --dark-2:   #1e5438;
+  --dark-3:   #276045;
+  --surface:  #f0fdf4;
+  --surface-2:#e8faf0;
+  --surface-3:#d4f4e2;
+  --white:    #FFFFFF;
 
-  --border:      #D1D5DB;
-  --border-yg:   #bef264;
+  /* Text */
+  --text-primary:   #14532d;
+  --text-secondary: #166534;
+  --text-muted:     #4b9a6a;
+  --text-light:     #86c9a0;
 
-  --shadow-sm:   0 1px 3px rgba(0,0,0,0.08);
-  --shadow-md:   0 4px 16px rgba(0,0,0,0.10);
-  --shadow-lg:   0 12px 40px rgba(0,0,0,0.13);
-  --shadow-yg:   0 4px 20px rgba(132,204,22,0.22);
+  /* Borders */
+  --border:     #bbf7d0;
+  --border-2:   #86efac;
+
+  /* Shadows */
+  --shadow-sm:  0 1px 3px rgba(20,83,45,0.07);
+  --shadow-md:  0 4px 16px rgba(20,83,45,0.09);
+  --shadow-lg:  0 12px 40px rgba(20,83,45,0.12);
+  --shadow-g:   0 4px 20px rgba(34,197,94,0.20);
 
   --radius-sm:  6px;
   --radius-md:  10px;
@@ -77,7 +88,7 @@ html, body {
   position: absolute;
   bottom: 0; left: 0; right: 0;
   height: 2px;
-  background: linear-gradient(90deg, var(--yg-700), var(--yg-500), var(--yg-400));
+  background: linear-gradient(90deg, var(--g-600), var(--g-400), var(--yg-400), var(--g-400), var(--g-600));
 }
 
 .nav-brand {
@@ -89,12 +100,13 @@ html, body {
 .nav-badge {
   width: 36px;
   height: 36px;
-  background: linear-gradient(135deg, var(--yg-700), var(--yg-500));
+  background: linear-gradient(135deg, var(--g-600), var(--g-400));
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
+  border: 1px solid rgba(134,239,172,0.25);
 }
 
 .nav-badge svg {
@@ -123,7 +135,7 @@ html, body {
 .nav-brand-sub {
   font-size: 10px;
   font-weight: 400;
-  color: var(--yg-400);
+  color: var(--g-300);
   letter-spacing: 1px;
   text-transform: uppercase;
 }
@@ -161,49 +173,49 @@ html, body {
   flex-shrink: 0;
 }
 
-/* Outlined Ghost — Customer navbar */
+/* Ghost — Customer navbar */
 .btn-outline-ghost {
-  border-color: rgba(255,255,255,0.25);
-  color: rgba(255,255,255,0.80);
+  border-color: rgba(255,255,255,0.28);
+  color: rgba(255,255,255,0.85);
 }
 
 .btn-outline-ghost:hover {
-  border-color: var(--yg-400);
-  color: var(--yg-400);
-  background: rgba(163,230,53,0.07);
+  border-color: var(--g-300);
+  color: var(--g-200);
+  background: rgba(134,239,172,0.10);
 }
 
-/* Outlined YG — Staff navbar */
+/* Outlined — Staff navbar */
 .btn-outline-green {
-  border-color: var(--yg-500);
-  color: var(--yg-400);
+  border-color: var(--g-400);
+  color: var(--g-300);
 }
 
 .btn-outline-green:hover {
-  border-color: var(--yg-400);
-  color: var(--dark);
-  background: var(--yg-500);
-  box-shadow: var(--shadow-yg);
+  border-color: var(--g-300);
+  color: var(--g-900);
+  background: var(--g-400);
+  box-shadow: var(--shadow-g);
 }
 
-/* Solid YG — staff submit */
+/* Solid — staff submit */
 .btn-solid-green {
-  border-color: var(--yg-600);
-  background: var(--yg-700);
+  border-color: var(--g-700);
+  background: var(--g-700);
   color: var(--white);
 }
 
 .btn-solid-green:hover {
-  background: var(--yg-600);
-  border-color: var(--yg-500);
-  box-shadow: var(--shadow-yg);
+  background: var(--g-600);
+  border-color: var(--g-500);
+  box-shadow: var(--shadow-g);
   transform: translateY(-1px);
 }
 
-/* Outlined Dark — customer submit */
+/* Outlined — customer submit */
 .btn-outline-dark {
-  border-color: var(--yg-700);
-  color: var(--yg-800);
+  border-color: var(--g-600);
+  color: var(--g-700);
   background: transparent;
   width: 100%;
   justify-content: center;
@@ -213,10 +225,10 @@ html, body {
 }
 
 .btn-outline-dark:hover {
-  background: var(--yg-50);
-  border-color: var(--yg-600);
-  color: var(--yg-800);
-  box-shadow: 0 4px 12px rgba(101,168,0,0.13);
+  background: var(--g-100);
+  border-color: var(--g-500);
+  color: var(--g-800);
+  box-shadow: 0 4px 12px rgba(22,163,74,0.12);
 }
 
 .btn-full {
@@ -252,8 +264,8 @@ html, body {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(132,204,22,0.05) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(132,204,22,0.05) 1px, transparent 1px);
+    linear-gradient(rgba(74,222,128,0.05) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74,222,128,0.05) 1px, transparent 1px);
   background-size: 48px 48px;
   pointer-events: none;
 }
@@ -262,18 +274,18 @@ html, body {
   content: "";
   position: absolute;
   top: -120px; right: -120px;
-  width: 480px; height: 480px;
+  width: 500px; height: 500px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(101,168,0,0.15) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(34,197,94,0.13) 0%, transparent 65%);
   pointer-events: none;
 }
 
 .hero-glow {
   position: absolute;
   bottom: -80px; left: -80px;
-  width: 360px; height: 360px;
+  width: 380px; height: 380px;
   border-radius: 50%;
-  background: radial-gradient(circle, rgba(132,204,22,0.09) 0%, transparent 65%);
+  background: radial-gradient(circle, rgba(22,163,74,0.10) 0%, transparent 65%);
   pointer-events: none;
 }
 
@@ -289,8 +301,8 @@ html, body {
 .eyebrow-dot {
   width: 8px; height: 8px;
   border-radius: 50%;
-  background: var(--yg-500);
-  box-shadow: 0 0 8px var(--yg-500);
+  background: var(--g-400);
+  box-shadow: 0 0 8px var(--g-400);
 }
 
 .eyebrow-text {
@@ -298,7 +310,7 @@ html, body {
   font-weight: 600;
   letter-spacing: 2px;
   text-transform: uppercase;
-  color: var(--yg-400);
+  color: var(--g-300);
 }
 
 .hero-title {
@@ -312,14 +324,14 @@ html, body {
 }
 
 .hero-title .accent {
-  color: var(--yg-400);
+  color: var(--g-300);
   font-style: italic;
 }
 
 .hero-rule {
   width: 48px;
   height: 3px;
-  background: linear-gradient(90deg, var(--yg-600), var(--yg-400));
+  background: linear-gradient(90deg, var(--g-500), var(--g-300));
   border-radius: 2px;
   margin-bottom: 1.6rem;
   animation: fadeUp 0.5s 0.12s ease both;
@@ -328,7 +340,7 @@ html, body {
 .hero-desc {
   font-size: 14px;
   font-weight: 400;
-  color: rgba(255,255,255,0.50);
+  color: rgba(255,255,255,0.52);
   line-height: 1.75;
   max-width: 400px;
   margin-bottom: 3rem;
@@ -351,9 +363,9 @@ html, body {
 
 .feature-box {
   width: 36px; height: 36px;
-  border: 1px solid rgba(163,230,53,0.22);
+  border: 1px solid rgba(74,222,128,0.20);
   border-radius: var(--radius-sm);
-  background: rgba(132,204,22,0.08);
+  background: rgba(34,197,94,0.10);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -362,7 +374,7 @@ html, body {
 
 .feature-box svg {
   width: 16px; height: 16px;
-  stroke: var(--yg-400);
+  stroke: var(--g-300);
   fill: none;
   stroke-width: 1.8;
   stroke-linecap: round;
@@ -378,7 +390,7 @@ html, body {
 
 /* RIGHT PANEL */
 .hero-right {
-  background: var(--surface-2);
+  background: var(--surface);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -405,7 +417,7 @@ html, body {
   position: absolute;
   top: 0; left: 2rem; right: 2rem;
   height: 3px;
-  background: linear-gradient(90deg, var(--yg-700), var(--yg-500), var(--yg-400));
+  background: linear-gradient(90deg, var(--g-700), var(--g-500), var(--g-300));
   border-radius: 0 0 4px 4px;
 }
 
@@ -417,8 +429,8 @@ html, body {
 .card-icon-wrap {
   width: 52px; height: 52px;
   margin: 0 auto 1rem;
-  background: var(--yg-50);
-  border: 1.5px solid var(--border-yg);
+  background: var(--g-50);
+  border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
   display: flex;
   align-items: center;
@@ -428,7 +440,7 @@ html, body {
 
 .card-icon-wrap svg {
   width: 22px; height: 22px;
-  stroke: var(--yg-700);
+  stroke: var(--g-700);
   fill: none;
   stroke-width: 1.8;
   stroke-linecap: round;
@@ -477,8 +489,8 @@ html, body {
 
 .tab-item.active {
   background: var(--white);
-  border-color: var(--border-yg);
-  color: var(--yg-800);
+  border-color: var(--border-2);
+  color: var(--g-800);
   box-shadow: var(--shadow-sm);
 }
 
@@ -493,9 +505,9 @@ html, body {
 }
 
 .flash-msg.success {
-  background: var(--yg-50);
-  border-color: var(--border-yg);
-  color: var(--yg-800);
+  background: var(--g-50);
+  border-color: var(--border);
+  color: var(--g-800);
 }
 
 .flash-msg.error {
@@ -538,8 +550,8 @@ html, body {
 }
 
 .form-input:focus {
-  border-color: var(--yg-500);
-  box-shadow: 0 0 0 3px rgba(132,204,22,0.12);
+  border-color: var(--g-500);
+  box-shadow: 0 0 0 3px rgba(34,197,94,0.12);
 }
 
 .form-hint {
@@ -550,13 +562,13 @@ html, body {
 }
 
 .form-hint a {
-  color: var(--yg-700);
+  color: var(--g-700);
   font-weight: 600;
   text-decoration: none;
 }
 
 .form-hint a:hover {
-  color: var(--yg-600);
+  color: var(--g-600);
   text-decoration: underline;
 }
 
@@ -573,7 +585,7 @@ footer::before {
   content: "";
   display: block;
   height: 2px;
-  background: linear-gradient(90deg, var(--yg-900), var(--yg-700), var(--yg-500), var(--yg-700), var(--yg-900));
+  background: linear-gradient(90deg, var(--dark-3), var(--g-600), var(--g-400), var(--g-600), var(--dark-3));
   margin-bottom: 3.5rem;
   border-radius: 2px;
 }
@@ -590,7 +602,7 @@ footer::before {
   font-weight: 700;
   letter-spacing: 1.8px;
   text-transform: uppercase;
-  color: var(--yg-400);
+  color: var(--g-300);
   margin-bottom: 1rem;
 }
 
@@ -620,7 +632,7 @@ footer::before {
 
 .footer-contact-row svg {
   width: 14px; height: 14px;
-  stroke: var(--yg-500);
+  stroke: var(--g-400);
   fill: none;
   stroke-width: 1.8;
   stroke-linecap: round;
@@ -642,12 +654,12 @@ footer::before {
   content: "";
   width: 4px; height: 4px;
   border-radius: 50%;
-  background: var(--yg-500);
+  background: var(--g-400);
   flex-shrink: 0;
 }
 
 .footer-bottom {
-  border-top: 1px solid rgba(255,255,255,0.06);
+  border-top: 1px solid rgba(255,255,255,0.07);
   padding-top: 1.5rem;
   display: flex;
   align-items: center;
@@ -688,14 +700,14 @@ footer::before {
 .forgot-link {
   font-size: 11.5px;
   font-weight: 600;
-  color: var(--yg-700);
+  color: var(--g-700);
   text-decoration: none;
   letter-spacing: 0.2px;
   transition: color 0.2s ease;
 }
 
 .forgot-link:hover {
-  color: var(--yg-600);
+  color: var(--g-600);
   text-decoration: underline;
 }
 
@@ -703,7 +715,7 @@ footer::before {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.45);
+  background: rgba(20,83,45,0.40);
   z-index: 300;
   backdrop-filter: blur(3px);
 }
@@ -729,7 +741,7 @@ footer::before {
   position: absolute;
   top: 0; left: 2rem; right: 2rem;
   height: 3px;
-  background: linear-gradient(90deg, var(--yg-700), var(--yg-500), var(--yg-400));
+  background: linear-gradient(90deg, var(--g-700), var(--g-500), var(--g-300));
   border-radius: 0 0 4px 4px;
 }
 
@@ -742,8 +754,8 @@ footer::before {
 
 .modal-icon {
   width: 40px; height: 40px;
-  background: var(--yg-50);
-  border: 1.5px solid var(--border-yg);
+  background: var(--g-50);
+  border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   display: flex;
   align-items: center;
@@ -753,7 +765,7 @@ footer::before {
 
 .modal-icon svg {
   width: 18px; height: 18px;
-  stroke: var(--yg-700);
+  stroke: var(--g-700);
 }
 
 .modal-title {
@@ -797,7 +809,7 @@ footer::before {
 }
 
 .btn-cancel:hover {
-  border-color: var(--text-secondary);
+  border-color: var(--border-2);
   color: var(--text-primary);
   background: var(--surface-2);
 }
@@ -813,7 +825,7 @@ footer::before {
 }
 
 /* ============================================================
-   DISABLE TEXT SELECTION on non-content elements
+   DISABLE TEXT SELECTION
    ============================================================ */
 .navbar, .nav-brand, .nav-brand-name, .nav-brand-sub,
 .hero-eyebrow, .eyebrow-text, .hero-rule, .hero-glow,
@@ -827,7 +839,7 @@ footer::before {
 }
 
 /* ============================================================
-   SHOW PASSWORD — Input Wrapper & Toggle Button
+   SHOW PASSWORD
    ============================================================ */
 .input-wrap {
   position: relative;
@@ -854,7 +866,7 @@ footer::before {
 }
 
 .show-pass-btn:hover {
-  color: var(--yg-600);
+  color: var(--g-600);
 }
 
 .show-pass-btn svg {
@@ -868,7 +880,6 @@ footer::before {
   pointer-events: none;
 }
 
-/* Show Password Checkbox Row */
 .show-pass-check {
   display: flex;
   align-items: center;
@@ -880,7 +891,7 @@ footer::before {
 .show-pass-check input[type="checkbox"] {
   width: 14px;
   height: 14px;
-  accent-color: var(--yg-600);
+  accent-color: var(--g-600);
   cursor: pointer;
 }
 
@@ -889,4 +900,13 @@ footer::before {
   font-weight: 500;
   color: var(--text-muted);
   cursor: pointer;
+}
+
+/* ============================================================
+   INDEX PAGE — Main Content Area
+   ============================================================ */
+.index-main {
+  padding-top: 66px;
+  min-height: calc(100vh - 66px);
+  background: var(--surface);
 }
