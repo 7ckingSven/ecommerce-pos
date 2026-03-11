@@ -28,10 +28,38 @@ def index():
 def login():
     return render_template('login.html')
 
-# ─── STAFF LOGIN ───────────────────────────────────────
+# ─── STAFF PORTAL — Access Code ───────────────────────
+
+@app.route('/portal', methods=['GET', 'POST'])
+def portal():
+    if request.method == 'POST':
+        code = request.form.get('access_code')
+        if code == os.getenv('STAFF_ACCESS_CODE'):
+            session['portal_verified'] = True
+            return redirect(url_for('staff_login_page'))
+        else:
+            flash('Invalid access code. Please try again.', 'error')
+            return redirect(url_for('portal'))
+    # Clear portal session on fresh visit
+    session.pop('portal_verified', None)
+    return render_template('portal.html')
+
+# ─── STAFF LOGIN PAGE ──────────────────────────────────
+
+@app.route('/staff-login-page')
+def staff_login_page():
+    # Block direct access without portal verification
+    if not session.get('portal_verified'):
+        flash('Please enter the access code first.', 'error')
+        return redirect(url_for('portal'))
+    return render_template('staff_login.html')
 
 @app.route('/staff-login', methods=['POST'])
 def staff_login():
+    # Block direct POST access without portal verification
+    if not session.get('portal_verified'):
+        return redirect(url_for('portal'))
+
     email    = request.form.get('email')
     password = request.form.get('password')
     # TODO: Add Supabase authentication logic here
@@ -53,7 +81,7 @@ def staff_login():
         return redirect(url_for('secretary_dashboard'))
     else:
         flash('Staff login coming soon.', 'success')
-        return redirect(url_for('login'))
+        return redirect(url_for('staff_login_page'))
 
 # ─── CUSTOMER LOGIN ────────────────────────────────────
 

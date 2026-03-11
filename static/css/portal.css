@@ -1,0 +1,269 @@
+/* ============================================================
+   Portal & Staff Login — portal.css
+   Extends style.css — do not use standalone
+   ============================================================ */
+
+/* ── BODY ───────────────────────────────────────────── */
+.portal-body {
+  background: var(--dark);
+  min-height: 100vh;
+}
+
+/* ── NAVBAR ─────────────────────────────────────────── */
+.portal-navbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  z-index: 200;
+  height: 66px;
+  background: rgba(11,40,24,0.85);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(74,222,128,0.10);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 3rem;
+}
+
+.portal-navbar::after {
+  content: "";
+  position: absolute;
+  bottom: 0; left: 0; right: 0;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, var(--g-500), var(--g-300), var(--g-500), transparent);
+}
+
+.portal-verified-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--g-400);
+  background: rgba(34,197,94,0.10);
+  border: 1px solid rgba(74,222,128,0.25);
+  border-radius: 20px;
+  padding: 5px 12px;
+  letter-spacing: 0.3px;
+}
+
+/* ── MAIN ───────────────────────────────────────────── */
+.portal-main {
+  min-height: 100vh;
+  padding-top: 66px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding-bottom: 3rem;
+}
+
+/* Background grid overlay */
+.portal-grid-overlay {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(74,222,128,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(74,222,128,0.04) 1px, transparent 1px);
+  background-size: 48px 48px;
+  pointer-events: none;
+}
+
+/* Background glow circles */
+.portal-bg-circle {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.portal-bg-circle-1 {
+  width: 600px; height: 600px;
+  top: -200px; right: -150px;
+  background: radial-gradient(circle, rgba(34,197,94,0.08) 0%, transparent 65%);
+}
+
+.portal-bg-circle-2 {
+  width: 500px; height: 500px;
+  bottom: -150px; left: -100px;
+  background: radial-gradient(circle, rgba(22,163,74,0.07) 0%, transparent 65%);
+}
+
+/* ── PORTAL CARD ────────────────────────────────────── */
+.portal-card {
+  position: relative;
+  z-index: 10;
+  width: 100%;
+  max-width: 440px;
+  background: var(--white);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  padding: 2.8rem 2.5rem 2.2rem;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.22);
+  animation: fadeUp 0.5s ease both;
+  margin: 2rem 1rem;
+}
+
+.portal-card::before {
+  content: "";
+  position: absolute;
+  top: 0; left: 2rem; right: 2rem;
+  height: 3px;
+  background: linear-gradient(90deg, var(--g-700), var(--g-500), var(--g-300));
+  border-radius: 0 0 4px 4px;
+}
+
+/* Bigger card for staff login */
+.staff-login-card {
+  max-width: 460px;
+}
+
+/* ── PORTAL ICON ────────────────────────────────────── */
+.portal-icon-wrap {
+  width: 64px; height: 64px;
+  margin: 0 auto 1.6rem;
+  background: var(--g-50);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-lg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.portal-icon-wrap svg {
+  width: 28px; height: 28px;
+  stroke: var(--g-700);
+}
+
+/* ── PORTAL HEADER ──────────────────────────────────── */
+.portal-header {
+  text-align: center;
+  margin-bottom: 1.8rem;
+}
+
+.portal-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+  line-height: 1.15;
+}
+
+.portal-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.7;
+  max-width: 340px;
+  margin: 0 auto;
+}
+
+/* ── ROLE BADGES ────────────────────────────────────── */
+.role-badges {
+  display: flex;
+  justify-content: center;
+  gap: 16px;
+  margin-bottom: 1.6rem;
+}
+
+.role-badge {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+}
+
+.role-badge svg {
+  width: 36px; height: 36px;
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  stroke: var(--g-600);
+}
+
+.role-badge span {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+}
+
+/* ── SUBMIT BUTTON ──────────────────────────────────── */
+.portal-submit-btn {
+  margin-top: 0.5rem;
+}
+
+/* ── FOOTER NOTE ────────────────────────────────────── */
+.portal-footer-note {
+  display: flex;
+  align-items: flex-start;
+  gap: 7px;
+  margin-top: 1.4rem;
+  padding: 10px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 11.5px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.portal-footer-note svg {
+  stroke: var(--g-600);
+}
+
+/* ── BACK LINK ──────────────────────────────────────── */
+.portal-back-link {
+  text-align: center;
+  margin-top: 1.2rem;
+}
+
+.portal-back-link a {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-decoration: none;
+  transition: color 0.2s ease;
+}
+
+.portal-back-link a:hover {
+  color: var(--g-700);
+}
+
+.portal-back-link a svg {
+  stroke: currentColor;
+}
+
+/* ── ADMIN CONTACT BOX ──────────────────────────────── */
+.admin-contact-box {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+
+/* ── FLASH MSG with icon ─────────────────────────────── */
+.flash-msg {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+/* ── PORTAL CODE INPUT ──────────────────────────────── */
+.portal-code-input {
+  letter-spacing: 1px;
+}
+
+/* ── RESPONSIVE ─────────────────────────────────────── */
+@media (max-width: 600px) {
+  .portal-navbar { padding: 0 1.5rem; }
+  .portal-card { padding: 2rem 1.5rem; }
+  .nav-brand-text { display: none; }
+}
