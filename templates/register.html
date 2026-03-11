@@ -12,7 +12,7 @@
 
   <!-- NAVBAR -->
   <header class="navbar">
-    <a href="{{ url_for('index') }}" class="nav-brand nav-brand-link">
+    <div class="nav-brand">
       <div class="nav-badge">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       </div>
@@ -20,7 +20,17 @@
         <span class="nav-brand-name">Triple E &amp; Fiel Collins General Merchandise</span>
         <span class="nav-brand-sub">E-Commerce &amp; POS System</span>
       </div>
-    </a>
+    </div>
+    <div class="nav-buttons">
+      <a href="{{ url_for('index') }}" class="btn btn-outline-ghost">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+        Home
+      </a>
+      <a href="{{ url_for('login') }}" class="btn btn-outline-green">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+        Sign In
+      </a>
+    </div>
   </header>
 
   <!-- PAGE WRAPPER -->

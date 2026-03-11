@@ -87,10 +87,7 @@
           </div>
         </div>
 
-        <div class="show-pass-check">
-          <input type="checkbox" id="showCode" onchange="togglePassword('accessCode', 'codeEyeIcon')" />
-          <label for="showCode">Show access code</label>
-        </div>
+
 
         <button type="submit" class="btn btn-solid-green btn-full portal-submit-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
@@ -125,9 +122,7 @@
       const input = document.getElementById(inputId);
       const icon  = document.getElementById(iconId);
       input.type     = input.type === 'password' ? 'text' : 'password';
-      icon.innerHTML = input.type === 'text' ? EYE_SLASH : EYE_OPEN;
-      const cb = document.getElementById('showCode');
-      if (cb) cb.checked = input.type === 'text';
+      icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
     }
   </script>
 

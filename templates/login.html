@@ -86,8 +86,7 @@
           <div class="card-icon-wrap">
             <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
           </div>
-          <h2 class="card-title">Customer Login</h2>
-          <p class="card-subtitle">Sign in to view your orders and account</p>
+          <h2 class="card-title">Login</h2>
         </div>
 
         <!-- Flash Messages -->
@@ -99,7 +98,7 @@
           {% endif %}
         {% endwith %}
 
-        <!-- Customer Login Form -->
+        <!-- Login Form -->
         <form method="POST" action="{{ url_for('customer_login') }}">
           <div class="form-group">
             <label class="form-label">Email Address</label>
@@ -120,13 +119,9 @@
               </button>
             </div>
           </div>
-          <div class="show-pass-check">
-            <input type="checkbox" id="customerShowPass" onchange="togglePassword('customerPassword', 'customerEyeIcon')" />
-            <label for="customerShowPass">Show password</label>
-          </div>
           <button type="submit" class="btn btn-solid-green btn-full">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
-            Sign In
+            LOG IN
           </button>
         </form>
 
@@ -183,7 +178,7 @@
         <address>
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="61151308110d04040708040d020e0d0d080f1221060c00080d4f020e0c">[email&#160;protected]</a>
+            tripleefielcollins@gmail.com
           </div>
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -214,7 +209,7 @@
     </div>
   </footer>
 
-  <script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+  <script>
     const EYE_OPEN  = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
     const EYE_SLASH = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
 
@@ -222,8 +217,7 @@
       const input = document.getElementById(inputId);
       const icon  = document.getElementById(iconId);
       input.type     = input.type === 'password' ? 'text' : 'password';
-      icon.innerHTML = input.type === 'text' ? EYE_SLASH : EYE_OPEN;
-      document.getElementById('customerShowPass').checked = input.type === 'text';
+      icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
     }
 
     function openForgot(e) {
