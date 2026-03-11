@@ -10,7 +10,7 @@
 </head>
 <body class="portal-body">
 
-  <!-- MINIMAL NAVBAR -->
+  <!-- NAVBAR -->
   <header class="portal-navbar">
     <div class="nav-brand">
       <div class="nav-badge">
@@ -26,7 +26,6 @@
   <!-- PORTAL PAGE -->
   <main class="portal-main">
 
-    <!-- Background decorations -->
     <div class="portal-bg-circle portal-bg-circle-1"></div>
     <div class="portal-bg-circle portal-bg-circle-2"></div>
     <div class="portal-grid-overlay"></div>
@@ -80,14 +79,13 @@
             />
             <button type="button" class="show-pass-btn" onclick="togglePassword('accessCode', 'codeEyeIcon')" tabindex="-1">
               <svg id="codeEyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
-                <circle cx="12" cy="12" r="3"/>
+                <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
+                <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
+                <line x1="1" y1="1" x2="23" y2="23"/>
               </svg>
             </button>
           </div>
         </div>
-
-
 
         <button type="submit" class="btn btn-solid-green btn-full portal-submit-btn">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
@@ -114,17 +112,7 @@
     </div>
   </main>
 
-  <script>
-    const EYE_OPEN  = '<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/>';
-    const EYE_SLASH = '<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/>';
-
-    function togglePassword(inputId, iconId) {
-      const input = document.getElementById(inputId);
-      const icon  = document.getElementById(iconId);
-      input.type     = input.type === 'password' ? 'text' : 'password';
-      icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
-    }
-  </script>
+    <script src="{{ url_for('static', filename='js/portal.js') }}"></script>
 
 </body>
 </html>
