@@ -368,7 +368,7 @@
       const input = document.getElementById(inputId);
       const icon  = document.getElementById(iconId);
       input.type = input.type === 'password' ? 'text' : 'password';
-      icon.innerHTML = input.type === 'text' ? EYE_SLASH : EYE_OPEN;
+      icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
     }
 
     function toggleBothPasswords() {
@@ -377,7 +377,7 @@
         const input = document.getElementById(id);
         const iconId = id === 'regPassword' ? 'regEyeIcon' : 'regConfirmEyeIcon';
         input.type = checked ? 'text' : 'password';
-        document.getElementById(iconId).innerHTML = checked ? EYE_SLASH : EYE_OPEN;
+        document.getElementById(iconId).innerHTML = checked ? EYE_OPEN : EYE_SLASH;
       });
     }
 
