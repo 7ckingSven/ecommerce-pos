@@ -1,20 +1,25 @@
-# ECommerce POS System
-A web-based Point of Sale and E-Commerce management system built as a capstone project.
+# Triple E & Fiel Collins General Merchandise
+### Web-Based E-Commerce & Point of Sale Management System
+
+A capstone research project built for **Triple E and Fiel Collins General Merchandise** — a web-based application that combines e-commerce and POS functionality to manage products, inventory, orders, customers, and sales operations in one unified platform.
 
 ---
 
 ## Project Overview
-The ECommerce POS System is a web-based application designed for small business stores to manage their day-to-day sales, inventory, customers, and orders in one unified platform. It combines the functionality of a traditional Point of Sale (POS) system with basic e-commerce management features, making it accessible directly from any browser without the need for specialized hardware or software.
+This system is designed for small business store operations, providing role-based access for Admin, Cashier, and Secretary staff, as well as a customer-facing e-commerce portal. It runs entirely in the browser with no specialized hardware required.
 
 ---
 
 ## Features
-- User Authentication and Management - Secure login and role-based access for admin and staff
-- Product and Inventory Management - Add, edit, delete products and track stock levels
-- Sales and Checkout (POS) - Process transactions, generate receipts, and record payments
-- Customer Management - Store and manage customer profiles and purchase history
-- Order Management - View, manage, and track all orders in real-time
-- Reports and Analytics Dashboard - Visual sales reports and business performance insights
+- **Role-Based Access Control** — Separate dashboards for Admin, Cashier, Secretary, and Customer
+- **Staff Portal** — Secret access code entry before staff login
+- **Product Management** — Add, edit, and manage product catalog with categories and pricing *(Admin)*
+- **Inventory Management** — Monitor and manage stock levels, restocking alerts *(Secretary)*
+- **Sales & POS Checkout** — Process transactions and record payments *(Cashier)*
+- **Customer Management** — Member and non-member customer profiles
+- **Order & Credit Management** — Supports walk-in cash, cash on delivery, and credit (utang) for members
+- **Discount Management** — Percentage and fixed discounts for members
+- **Reports & Analytics** — Sales performance and business insights
 
 ---
 
@@ -23,12 +28,14 @@ The ECommerce POS System is a web-based application designed for small business 
 | Layer | Technology |
 |---|---|
 | IDE | Visual Studio Code |
-| Backend | Flask (Python) |
-| Frontend | HTML, CSS, Bootstrap 5 |
-| Templating | Jinja2 (built-in Flask) |
+| Backend | Flask (Python 3.11) |
+| Frontend | HTML + CSS + Bootstrap 5 |
+| Templating | Jinja2 |
 | Database | Supabase (PostgreSQL) |
 | Version Control | GitHub |
 | Containerization | Docker |
+| Deployment (Backend) | Railway |
+| Deployment (Frontend) | Vercel |
 
 ---
 
@@ -38,24 +45,57 @@ ecommerce-pos/
 │
 ├── static/
 │   ├── css/
-│   │   └── style.css
+│   │   ├── style.css          ← main stylesheet (light fresh green theme)
+│   │   ├── register.css       ← register page styles
+│   │   └── portal.css         ← portal & staff login styles
 │   ├── js/
-│   │   └── script.js
+│   │   ├── login.js           ← customer login: eye toggle, forgot modal
+│   │   ├── staff_login.js     ← staff login: eye toggle, forgot modal
+│   │   ├── portal.js          ← portal: eye toggle
+│   │   └── register.js        ← register: eye toggle, steps, strength meter
 │   └── img/
 │
 ├── templates/
-│   ├── base.html
-│   └── index.html
+│   ├── index.html             ← public product showcase
+│   ├── login.html             ← customer login
+│   ├── register.html          ← 3-step customer registration
+│   ├── portal.html            ← staff access code entry
+│   ├── staff_login.html       ← staff email & password login
+│   ├── admin/
+│   │   └── dashboard.html
+│   ├── cashier/
+│   │   └── dashboard.html
+│   ├── secretary/
+│   │   └── dashboard.html
+│   └── customer/
+│       └── dashboard.html
 │
 ├── venv/
-├── app.py
-├── Dockerfile
+├── app.py                     ← Flask application entry point
+├── vercel.json                ← Vercel deployment configuration
+├── Dockerfile                 ← Docker container configuration
 ├── .dockerignore
-├── .env
+├── .env                       ← environment variables (not committed)
 ├── .gitignore
 ├── requirements.txt
 └── README.md
 ```
+
+---
+
+## Routes
+
+| URL | Template | Access |
+|---|---|---|
+| `/` | `index.html` | Public |
+| `/login` | `login.html` | Customers |
+| `/register` | `register.html` | Anyone |
+| `/portal` | `portal.html` | Staff (secret URL + access code) |
+| `/staff-login-page` | `staff_login.html` | Staff (after portal verified) |
+| `/admin/dashboard` | `admin/dashboard.html` | Admin only |
+| `/cashier/dashboard` | `cashier/dashboard.html` | Cashier only |
+| `/secretary/dashboard` | `secretary/dashboard.html` | Secretary only |
+| `/customer/dashboard` | `customer/dashboard.html` | Logged-in customers |
 
 ---
 
@@ -93,12 +133,14 @@ Create a `.env` file in the root folder:
 SUPABASE_URL=your_supabase_project_url
 SUPABASE_KEY=your_supabase_anon_key
 SECRET_KEY=your_secret_key
+STAFF_ACCESS_CODE=your_staff_access_code
 ```
 
 **5. Run the application locally**
 ```bash
 python app.py
 ```
+Then open: `http://127.0.0.1:5000`
 
 **6. Run using Docker**
 ```bash
@@ -106,29 +148,43 @@ docker build -t ecommerce-pos .
 docker run -p 5000:5000 --env-file .env ecommerce-pos
 ```
 
-**7. Open in browser**
-```
-http://127.0.0.1:5000
-```
-
 ---
 
 ## Database
-This project uses Supabase (PostgreSQL) as its database. Supabase provides a real-time, cloud-hosted PostgreSQL database with a built-in dashboard, authentication, and REST API support.
+This project uses **Supabase (PostgreSQL)** as its cloud database. It consists of 9 tables:
+
+`users` → `customers` → `categories` → `discounts` → `products` → `orders` → `order_items` → `credits` → `transactions`
+
+Key business rules:
+- Credits (utang) are available to members only, due within 1 month
+- Special discounts apply to members only
+- Payment methods: walk-in cash or cash on delivery only
 
 ---
 
 ## Deployment
-This project is deployed using Railway, a cloud platform that supports containerized Flask applications via Docker, ensuring consistent and reliable access to the system through a public URL.
+
+### Backend — Railway
+The Flask application is containerized with Docker and deployed on **Railway**, which supports Docker-based deployments with environment variable configuration.
+
+### Frontend — Vercel
+Static assets and frontend delivery are handled via **Vercel** using a `vercel.json` configuration file at the project root.
 
 ---
 
-## Developer
-- Project Type: Capstone Research Project
-- Course: Information Technology
-- Year: 2026
+## Developers
+| Name | Role |
+|---|---|
+| Jorist Dave Agduma | Developer |
+| Rhea Jane Mae Almelda | Developer |
+| Val Cyril Calixton | Developer |
+| Alfrancis Limo | Developer |
+
+- **School:** STI College of Koronadal
+- **Course:** Bachelor of Science in Information Technology
+- **Capstone Deadline:** December 2026
 
 ---
 
 ## License
-This project is for academic purposes only.
+This project is developed for academic purposes only as a capstone research project of STI College of Koronadal.
