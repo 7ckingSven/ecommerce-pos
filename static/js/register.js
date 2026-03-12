@@ -8,25 +8,24 @@ const stepTitles = [
 ];
 
 function goToStep(step) {
-  // Hide all steps
   document.querySelectorAll('.form-step').forEach(s => s.style.display = 'none');
   document.getElementById('formStep' + step).style.display = 'block';
 
-  // Update header text
   const t = stepTitles[step - 1];
-  document.getElementById('stepBadge').textContent  = t.badge;
-  document.getElementById('stepTitle').textContent  = t.title;
-  document.getElementById('stepSub').textContent    = t.sub;
+  document.getElementById('stepBadge').textContent = t.badge;
+  document.getElementById('stepTitle').textContent = t.title;
+  document.getElementById('stepSub').textContent   = t.sub;
 
-  // Update left panel step dots
   for (let i = 1; i <= 3; i++) {
     const dot = document.getElementById('step' + i + 'dot');
     dot.classList.toggle('active', i === step);
     dot.classList.toggle('done', i < step);
   }
 
-  // Scroll to top of card
   document.querySelector('.reg-right').scrollTo({ top: 0, behavior: 'smooth' });
+
+  // Re-check button state for the new step
+  checkStepButton(step);
 }
 
 function togglePassword(inputId, iconId) {
@@ -36,17 +35,81 @@ function togglePassword(inputId, iconId) {
   icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
 }
 
-// Password strength
+// ─── Disable Next/Submit buttons if required inputs are empty ───
+function checkStepButton(step) {
+  if (step === 1) {
+    const btn     = document.querySelector('#formStep1 button[onclick="goToStep(2)"]');
+    const inputs  = ['first_name', 'last_name', 'date_of_birth', 'nationality'];
+    const selects = ['gender', 'civil_status'];
+    const allFilled = inputs.every(n => {
+      const el = document.querySelector(`#formStep1 [name="${n}"]`);
+      return el && el.value.trim() !== '';
+    }) && selects.every(n => {
+      const el = document.querySelector(`#formStep1 [name="${n}"]`);
+      return el && el.value !== '';
+    });
+    if (btn) btn.disabled = !allFilled;
+
+  } else if (step === 2) {
+    const btn    = document.querySelector('#formStep2 button[onclick="goToStep(3)"]');
+    const inputs = ['phone', 'street', 'barangay', 'city', 'province', 'zip_code'];
+    const allFilled = inputs.every(n => {
+      const el = document.querySelector(`#formStep2 [name="${n}"]`);
+      return el && el.value.trim() !== '';
+    });
+    if (btn) btn.disabled = !allFilled;
+
+  } else if (step === 3) {
+    const btn       = document.querySelector('#formStep3 button[type="submit"]');
+    const emailEl   = document.querySelector('#formStep3 [name="email"]');
+    const passEl    = document.getElementById('regPassword');
+    const confEl    = document.getElementById('regConfirmPassword');
+    const termsEl   = document.querySelector('#formStep3 [name="terms"]');
+    if (btn) {
+      btn.disabled = !(
+        emailEl && emailEl.value.trim() !== '' &&
+        passEl  && passEl.value.trim()  !== '' &&
+        confEl  && confEl.value.trim()  !== '' &&
+        passEl.value === confEl.value &&
+        termsEl && termsEl.checked
+      );
+    }
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function () {
+
+  // Attach input listeners for Step 1
+  ['first_name', 'last_name', 'date_of_birth', 'nationality', 'gender', 'civil_status'].forEach(name => {
+    const el = document.querySelector(`[name="${name}"]`);
+    if (el) el.addEventListener('input', () => checkStepButton(1));
+    if (el) el.addEventListener('change', () => checkStepButton(1));
+  });
+
+  // Attach input listeners for Step 2
+  ['phone', 'street', 'barangay', 'city', 'province', 'zip_code'].forEach(name => {
+    const el = document.querySelector(`[name="${name}"]`);
+    if (el) el.addEventListener('input', () => checkStepButton(2));
+  });
+
+  // Attach input listeners for Step 3
+  ['email', 'regPassword', 'regConfirmPassword'].forEach(id => {
+    const el = document.getElementById(id) || document.querySelector(`[name="${id}"]`);
+    if (el) el.addEventListener('input', () => checkStepButton(3));
+  });
+  const termsEl = document.querySelector('[name="terms"]');
+  if (termsEl) termsEl.addEventListener('change', () => checkStepButton(3));
+
+  // Password strength
   document.getElementById('regPassword').addEventListener('input', function () {
     const val   = this.value;
     const fill  = document.getElementById('strengthFill');
     const label = document.getElementById('strengthLabel');
     let score   = 0;
-    if (val.length >= 8)              score++;
-    if (/[A-Z]/.test(val))            score++;
-    if (/[0-9]/.test(val))            score++;
-    if (/[^A-Za-z0-9]/.test(val))     score++;
+    if (val.length >= 8)           score++;
+    if (/[A-Z]/.test(val))         score++;
+    if (/[0-9]/.test(val))         score++;
+    if (/[^A-Za-z0-9]/.test(val))  score++;
 
     const levels = [
       { pct: '0%',   color: 'transparent', text: 'Enter a password' },
@@ -56,24 +119,27 @@ document.addEventListener('DOMContentLoaded', function () {
       { pct: '100%', color: '#22c55e',     text: 'Strong' },
     ];
     const lvl = val.length === 0 ? levels[0] : levels[score];
-    fill.style.width       = lvl.pct;
-    fill.style.background  = lvl.color;
-    label.textContent      = lvl.text;
-    label.style.color      = lvl.color === 'transparent' ? 'var(--text-light)' : lvl.color;
+    fill.style.width      = lvl.pct;
+    fill.style.background = lvl.color;
+    label.textContent     = lvl.text;
+    label.style.color     = lvl.color === 'transparent' ? 'var(--text-light)' : lvl.color;
   });
 
   // Password match
   document.getElementById('regConfirmPassword').addEventListener('input', function () {
-    const pass    = document.getElementById('regPassword').value;
-    const hint    = document.getElementById('matchHint');
+    const pass = document.getElementById('regPassword').value;
+    const hint = document.getElementById('matchHint');
     if (this.value === '') {
       hint.textContent = '';
     } else if (this.value === pass) {
-      hint.textContent  = 'Passwords match.';
-      hint.style.color  = '#22c55e';
+      hint.textContent = 'Passwords match.';
+      hint.style.color = '#22c55e';
     } else {
-      hint.textContent  = 'Passwords do not match.';
-      hint.style.color  = '#ef4444';
+      hint.textContent = 'Passwords do not match.';
+      hint.style.color = '#ef4444';
     }
   });
+
+  // Initial check for step 1
+  checkStepButton(1);
 });

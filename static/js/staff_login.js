@@ -20,3 +20,18 @@ function closeForgot() {
 document.addEventListener('keydown', function(e) {
   if (e.key === 'Escape') closeForgot();
 });
+
+// ─── Disable login button if email or password is empty ───
+document.addEventListener('DOMContentLoaded', function () {
+  const emailInput = document.querySelector('input[name="email"]');
+  const passInput  = document.getElementById('staffPassword');
+  const loginBtn   = document.querySelector('button[type="submit"]');
+
+  function checkInputs() {
+    loginBtn.disabled = emailInput.value.trim() === '' || passInput.value.trim() === '';
+  }
+
+  emailInput.addEventListener('input', checkInputs);
+  passInput.addEventListener('input', checkInputs);
+  checkInputs(); // run on page load
+});

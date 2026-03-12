@@ -7,3 +7,16 @@ function togglePassword(inputId, iconId) {
   input.type     = input.type === 'password' ? 'text' : 'password';
   icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
 }
+
+// ─── Disable submit button if access code input is empty ───
+document.addEventListener('DOMContentLoaded', function () {
+  const codeInput  = document.getElementById('accessCode');
+  const submitBtn  = document.querySelector('button[type="submit"]');
+
+  function checkInput() {
+    submitBtn.disabled = codeInput.value.trim() === '';
+  }
+
+  codeInput.addEventListener('input', checkInput);
+  checkInput(); // run on page load
+});
