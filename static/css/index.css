@@ -237,3 +237,239 @@
     font-size: 12px;
   }
 }
+
+
+/* ============================================================
+   JOIN MEMBER BANNER — Split Layout
+   ============================================================ */
+.member-section {
+  padding: 2.5rem 3rem;
+}
+
+.member-card {
+  display: grid;
+  grid-template-columns: 1fr 420px;
+  background: #ffffff;
+  border: 1.5px solid var(--g-200);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: 0 2px 20px rgba(0,0,0,0.07);
+  min-height: 320px;
+}
+
+/* ─── LEFT — Text ─── */
+.member-left {
+  padding: 2.5rem 3rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 1rem;
+}
+
+.member-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.member-dot {
+  width: 7px;
+  height: 7px;
+  background: var(--g-500);
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.member-eyebrow span:last-child {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--g-600);
+  letter-spacing: 1px;
+  text-transform: uppercase;
+}
+
+.member-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 2rem;
+  font-weight: 700;
+  color: var(--dark);
+  line-height: 1.2;
+}
+
+.member-desc {
+  font-size: 13px;
+  color: var(--text-muted);
+  line-height: 1.6;
+  max-width: 440px;
+}
+
+.member-perks {
+  display: flex;
+  flex-direction: column;
+  gap: 0.9rem;
+  margin: 0.4rem 0;
+}
+
+.member-perk {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.perk-icon-wrap {
+  width: 36px;
+  height: 36px;
+  background: var(--g-50);
+  border: 1px solid var(--g-200);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.perk-icon-wrap svg {
+  width: 16px;
+  height: 16px;
+  stroke: var(--g-600);
+}
+
+.perk-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dark);
+  margin-bottom: 2px;
+}
+
+.perk-desc {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.member-cta {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-top: 0.4rem;
+}
+
+.member-btn {
+  padding: 11px 24px;
+  white-space: nowrap;
+}
+
+.member-note {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* ─── RIGHT — Visual ─── */
+.member-right {
+  background: linear-gradient(135deg, var(--dark) 0%, #1a4731 100%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  position: relative;
+  overflow: hidden;
+  padding: 2rem;
+}
+
+.member-visual {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.visual-circle {
+  position: absolute;
+  border-radius: 50%;
+  border: 1px solid rgba(134,239,172,0.15);
+}
+
+.visual-circle-1 {
+  width: 260px;
+  height: 260px;
+}
+
+.visual-circle-2 {
+  width: 180px;
+  height: 180px;
+  border-color: rgba(134,239,172,0.1);
+}
+
+.visual-badge-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  z-index: 1;
+}
+
+.visual-badge {
+  width: 80px;
+  height: 80px;
+  background: linear-gradient(135deg, var(--g-600), var(--g-400));
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-shadow: 0 8px 24px rgba(74,222,128,0.25);
+}
+
+.visual-badge svg {
+  width: 36px;
+  height: 36px;
+  stroke: #ffffff;
+}
+
+.visual-tag {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(134,239,172,0.2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--g-200);
+  white-space: nowrap;
+}
+
+.visual-tag svg {
+  stroke: var(--g-400);
+  flex-shrink: 0;
+}
+
+/* ─── Mobile ─── */
+@media (max-width: 768px) {
+  .member-section {
+    padding: 1.5rem 1rem;
+  }
+
+  .member-card {
+    grid-template-columns: 1fr;
+  }
+
+  .member-right {
+    display: none;
+  }
+
+  .member-left {
+    padding: 1.8rem 1.4rem;
+  }
+
+  .member-title {
+    font-size: 1.6rem;
+  }
+
+  .member-cta {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+}
