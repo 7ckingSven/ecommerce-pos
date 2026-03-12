@@ -1,6 +1,7 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session
 from supabase import create_client
 from dotenv import load_dotenv
+from datetime import timedelta
 import os
 
 # Load .env file
@@ -60,8 +61,12 @@ def staff_login():
     if not session.get('portal_verified'):
         return redirect(url_for('portal'))
 
-    email    = request.form.get('email')
-    password = request.form.get('password')
+    email       = request.form.get('email')
+    password    = request.form.get('password')
+    remember_me = request.form.get('remember_me') == 'on'
+    if remember_me:
+        app.permanent_session_lifetime = timedelta(days=30)
+        session.permanent = True
     # TODO: Add Supabase authentication logic here
     # TODO: Fetch user role from users table and redirect accordingly
 
@@ -87,8 +92,12 @@ def staff_login():
 
 @app.route('/customer-login', methods=['POST'])
 def customer_login():
-    email    = request.form.get('email')
-    password = request.form.get('password')
+    email       = request.form.get('email')
+    password    = request.form.get('password')
+    remember_me = request.form.get('remember_me') == 'on'
+    if remember_me:
+        app.permanent_session_lifetime = timedelta(days=30)
+        session.permanent = True
     # TODO: Add Supabase authentication logic here
     flash('Customer login coming soon.', 'success')
     return redirect(url_for('login'))

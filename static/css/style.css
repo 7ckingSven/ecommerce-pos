@@ -922,3 +922,70 @@ footer::before {
 .nav-brand-link:hover {
   opacity: 0.85;
 }
+
+/* ============================================================
+   REMEMBER ME CHECKBOX
+   ============================================================ */
+.remember-row {
+  display: flex;
+  align-items: center;
+  margin-bottom: 1rem;
+}
+
+.remember-label {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-muted);
+  cursor: pointer;
+  user-select: none;
+}
+
+.remember-checkbox {
+  display: none;
+}
+
+.remember-custom {
+  width: 16px;
+  height: 16px;
+  border: 1.5px solid var(--g-300);
+  border-radius: 4px;
+  background: transparent;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.remember-checkbox:checked + .remember-custom {
+  background: var(--g-600);
+  border-color: var(--g-600);
+}
+
+.remember-checkbox:checked + .remember-custom::after {
+  content: '';
+  width: 4px;
+  height: 7px;
+  border: 1.5px solid #fff;
+  border-top: none;
+  border-left: none;
+  transform: rotate(45deg) translateY(-1px);
+  display: block;
+}
+
+.remember-label:hover .remember-custom {
+  border-color: var(--g-500);
+}
+
+/* ============================================================
+   DISABLED BUTTON STATE
+   ============================================================ */
+.btn:disabled,
+button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  pointer-events: none;
+}
