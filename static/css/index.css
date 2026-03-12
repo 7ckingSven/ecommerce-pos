@@ -32,11 +32,12 @@
   flex-shrink: 0;
 }
 
-/* ─── CENTER — Search ─── */
+/* ─── CENTER — Search + Cart ─── */
 .index-nav-search {
   display: flex;
   align-items: center;
   justify-content: center;
+  gap: 12px;
   width: 100%;
 }
 

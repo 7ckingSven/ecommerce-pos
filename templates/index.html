@@ -25,7 +25,7 @@
       </div>
     </div>
 
-    <!-- CENTER — Search Bar -->
+    <!-- CENTER — Search Bar + Cart -->
     <div class="index-nav-search">
       <div class="search-wrap">
         <svg class="search-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -42,9 +42,16 @@
           Search
         </button>
       </div>
+      <button type="button" class="cart-btn" title="Cart">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
+          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
+        </svg>
+        <span class="cart-count">0</span>
+      </button>
     </div>
 
-    <!-- RIGHT — Buttons + Cart -->
+    <!-- RIGHT — Buttons -->
     <div class="index-nav-actions">
       <a href="{{ url_for('register') }}" class="btn btn-outline-ghost">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -62,13 +69,6 @@
         </svg>
         Login
       </a>
-      <button type="button" class="cart-btn" title="Cart">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="9" cy="21" r="1"/><circle cx="20" cy="21" r="1"/>
-          <path d="M1 1h4l2.68 13.39a2 2 0 0 0 2 1.61h9.72a2 2 0 0 0 2-1.61L23 6H6"/>
-        </svg>
-        <span class="cart-count">0</span>
-      </button>
     </div>
 
   </header>
