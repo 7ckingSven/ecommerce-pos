@@ -746,6 +746,7 @@
   padding: 6px 10px;
   font-family: 'Sora', sans-serif;
   font-size: 11px;
+  text-decoration: none;
   font-weight: 600;
   color: var(--g-700, #15803d);
   cursor: pointer;
