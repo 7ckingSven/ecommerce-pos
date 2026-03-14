@@ -434,3 +434,82 @@
   .form-row-2, .form-row-3 { grid-template-columns: 1fr; }
   .reg-card { padding: 2rem 1.5rem; }
 }
+
+/* ============================================================
+   MEMBERSHIP TYPE OPTIONS
+   ============================================================ */
+.membership-options {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.membership-option {
+  cursor: pointer;
+  display: block;
+}
+
+.membership-option input[type="radio"] {
+  display: none;
+}
+
+.membership-option-card {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  border: 1.5px solid var(--g-200);
+  border-radius: var(--radius-sm);
+  background: #ffffff;
+  transition: all 0.2s ease;
+}
+
+.membership-option input[type="radio"]:checked + .membership-option-card {
+  border-color: var(--g-500);
+  background: var(--g-50);
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.1);
+}
+
+.membership-option-card:hover {
+  border-color: var(--g-300);
+  background: var(--g-50);
+}
+
+.membership-option-icon {
+  width: 40px;
+  height: 40px;
+  background: var(--g-100);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.membership-option-icon svg {
+  width: 18px;
+  height: 18px;
+  stroke: var(--g-600);
+}
+
+.membership-option-icon--member {
+  background: linear-gradient(135deg, var(--g-600), var(--g-400));
+}
+
+.membership-option-icon--member svg {
+  stroke: #ffffff;
+}
+
+.membership-option-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--dark);
+  margin-bottom: 2px;
+}
+
+.membership-option-desc {
+  font-size: 11px;
+  color: var(--text-muted);
+  line-height: 1.4;
+}

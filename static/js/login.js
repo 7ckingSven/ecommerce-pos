@@ -23,7 +23,7 @@ document.addEventListener('keydown', function(e) {
 
 // ─── Disable login button if email or password is empty ───
 document.addEventListener('DOMContentLoaded', function () {
-  const emailInput = document.querySelector('input[name="email"]');
+  const emailInput = document.querySelector('input[name="login_input"]');
   const passInput  = document.getElementById('customerPassword');
   const loginBtn   = document.querySelector('button[type="submit"]');
 
