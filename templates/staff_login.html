@@ -79,12 +79,10 @@
       <!-- Staff Login Form -->
       <form method="POST" action="{{ url_for('staff_login') }}">
         <div class="form-group">
-          <label class="form-label">Email Address</label>
           <input type="email" name="email" class="form-input" placeholder="Enter your staff email" required />
         </div>
         <div class="form-group">
           <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:7px;">
-            <label class="form-label" style="margin-bottom:0;">Password</label>
             <a href="#" class="forgot-link" onclick="openForgot(event)">Forgot password?</a>
           </div>
           <div class="input-wrap">

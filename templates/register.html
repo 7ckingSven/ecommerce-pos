@@ -132,26 +132,21 @@
           <div class="form-step" id="formStep1">
             <div class="form-row-3">
               <div class="form-group">
-                <label class="form-label">First Name <span class="req">*</span></label>
                 <input type="text" name="first_name" class="form-input" placeholder="Juan" required />
               </div>
               <div class="form-group">
-                <label class="form-label">Middle Name <span class="opt">(optional)</span></label>
                 <input type="text" name="middle_name" class="form-input" placeholder="Santos" />
               </div>
               <div class="form-group">
-                <label class="form-label">Last Name <span class="req">*</span></label>
                 <input type="text" name="last_name" class="form-input" placeholder="Dela Cruz" required />
               </div>
             </div>
 
             <div class="form-row-2">
               <div class="form-group">
-                <label class="form-label">Date of Birth <span class="req">*</span></label>
                 <input type="date" name="date_of_birth" class="form-input" required />
               </div>
               <div class="form-group">
-                <label class="form-label">Gender <span class="req">*</span></label>
                 <select name="gender" class="form-input form-select" required>
                   <option value="" disabled selected>Select gender</option>
                   <option value="male">Male</option>
@@ -163,7 +158,6 @@
 
             <div class="form-row-2">
               <div class="form-group">
-                <label class="form-label">Civil Status <span class="req">*</span></label>
                 <select name="civil_status" class="form-input form-select" required>
                   <option value="" disabled selected>Select status</option>
                   <option value="single">Single</option>
@@ -173,7 +167,6 @@
                 </select>
               </div>
               <div class="form-group">
-                <label class="form-label">Nationality <span class="req">*</span></label>
                 <input type="text" name="nationality" class="form-input" placeholder="Filipino" required />
               </div>
             </div>
@@ -191,14 +184,12 @@
           <div class="form-step" id="formStep2" style="display:none;">
             <div class="form-row-2">
               <div class="form-group">
-                <label class="form-label">Phone Number <span class="req">*</span></label>
                 <div class="input-prefix-wrap">
                   <span class="input-prefix">+63</span>
                   <input type="tel" name="phone" class="form-input input-with-prefix" placeholder="9XX XXX XXXX" maxlength="10" required />
                 </div>
               </div>
               <div class="form-group">
-                <label class="form-label">Alternate Phone <span class="opt">(optional)</span></label>
                 <div class="input-prefix-wrap">
                   <span class="input-prefix">+63</span>
                   <input type="tel" name="alt_phone" class="form-input input-with-prefix" placeholder="9XX XXX XXXX" maxlength="10" />
@@ -207,28 +198,23 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label">House / Unit No. &amp; Street <span class="req">*</span></label>
               <input type="text" name="street" class="form-input" placeholder="123 Rizal Street" required />
             </div>
 
             <div class="form-row-2">
               <div class="form-group">
-                <label class="form-label">Barangay <span class="req">*</span></label>
                 <input type="text" name="barangay" class="form-input" placeholder="Barangay Poblacion" required />
               </div>
               <div class="form-group">
-                <label class="form-label">City / Municipality <span class="req">*</span></label>
                 <input type="text" name="city" class="form-input" placeholder="Koronadal City" required />
               </div>
             </div>
 
             <div class="form-row-2">
               <div class="form-group">
-                <label class="form-label">Province <span class="req">*</span></label>
                 <input type="text" name="province" class="form-input" placeholder="South Cotabato" required />
               </div>
               <div class="form-group">
-                <label class="form-label">ZIP Code <span class="req">*</span></label>
                 <input type="text" name="zip_code" class="form-input" placeholder="9506" maxlength="4" required />
               </div>
             </div>
@@ -249,18 +235,15 @@
           <div class="form-step" id="formStep3" style="display:none;">
 
             <div class="form-group">
-              <label class="form-label">Email Address <span class="req">*</span></label>
               <input type="email" name="email" class="form-input" placeholder="juandelacruz@gmail.com" required />
             </div>
 
             <div class="form-group">
-              <label class="form-label">Username <span class="req">*</span></label>
               <input type="text" name="username" class="form-input" placeholder="Choose a username" required />
-              <span class="field-hint">This will be used to identify your account.</span>
+              <span class="field-hint">You can use this to log in instead of your email or phone.</span>
             </div>
 
             <div class="form-group">
-              <label class="form-label">Password <span class="req">*</span></label>
               <div class="input-wrap">
                 <input type="password" id="regPassword" name="password" class="form-input" placeholder="Create a strong password" required />
                 <button type="button" class="show-pass-btn" onclick="togglePassword('regPassword', 'regEyeIcon')" tabindex="-1">
@@ -278,7 +261,6 @@
             </div>
 
             <div class="form-group">
-              <label class="form-label">Confirm Password <span class="req">*</span></label>
               <div class="input-wrap">
                 <input type="password" id="regConfirmPassword" name="confirm_password" class="form-input" placeholder="Re-enter your password" required />
                 <button type="button" class="show-pass-btn" onclick="togglePassword('regConfirmPassword', 'regConfirmEyeIcon')" tabindex="-1">
@@ -294,9 +276,48 @@
 
 
 
+            <!-- Membership Type -->
+            <div class="form-group">
+              <div class="membership-options">
+                <label class="membership-option">
+                  <input type="radio" name="membership_type" value="non_member" checked />
+                  <div class="membership-option-card">
+                    <div class="membership-option-icon">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                        <circle cx="12" cy="7" r="4"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <p class="membership-option-title">Regular Customer</p>
+                      <p class="membership-option-desc">Standard access to shop and order products.</p>
+                    </div>
+                  </div>
+                </label>
+                <label class="membership-option">
+                  <input type="radio" name="membership_type" value="member" />
+                  <div class="membership-option-card">
+                    <div class="membership-option-icon membership-option-icon--member">
+                      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/>
+                        <circle cx="9" cy="7" r="4"/>
+                        <path d="M23 21v-2a4 4 0 0 0-3-3.87"/>
+                        <path d="M16 3.13a4 4 0 0 1 0 7.75"/>
+                      </svg>
+                    </div>
+                    <div>
+                      <p class="membership-option-title">Member</p>
+                      <p class="membership-option-desc">Unlock discounts and credit (utang) privileges.</p>
+                    </div>
+                  </div>
+                </label>
+              </div>
+              <span class="field-hint">You can upgrade to Member anytime after registration.</span>
+            </div>
+
             <!-- Terms -->
             <div class="terms-row">
-              <input type="checkbox" id="agreeTerms" name="agree_terms" required />
+              <input type="checkbox" id="agreeTerms" name="terms" required />
               <label for="agreeTerms">
                 I agree to the <a href="#" class="terms-link">Terms and Conditions</a> and <a href="#" class="terms-link">Privacy Policy</a> of Triple E and Fiel Collins General Merchandise.
               </label>
