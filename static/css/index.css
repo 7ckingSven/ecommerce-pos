@@ -244,11 +244,18 @@
    ============================================================ */
 .member-section {
   padding: 2.5rem 3rem;
+  display: flex;
+  justify-content: center;
+}
+
+.member-card {
+  max-width: 1200px;
+  width: 100%;
 }
 
 .member-card {
   display: grid;
-  grid-template-columns: 1fr 420px;
+  grid-template-columns: 1fr 360px;
   background: #ffffff;
   border: 1.5px solid var(--g-200);
   border-radius: var(--radius);
@@ -471,5 +478,155 @@
     flex-direction: column;
     align-items: flex-start;
     gap: 0.5rem;
+  }
+}
+
+/* ============================================================
+   SECTION HEADER — shared
+   ============================================================ */
+.section-header {
+  margin-bottom: 1.5rem;
+}
+
+.section-title {
+  font-family: 'Cormorant Garamond', serif;
+  font-size: 1.4rem;
+  font-weight: 700;
+  color: var(--dark);
+  line-height: 1.2;
+}
+
+/* ============================================================
+   CATEGORIES SECTION
+   ============================================================ */
+.categories-section {
+  padding: 0 3rem 2.5rem;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.categories-section .section-header {
+  width: 100%;
+  max-width: 620px;
+}
+
+.categories-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 120px);
+  gap: 1rem;
+  justify-content: center;
+}
+
+/* ─── Category Card ─── */
+.category-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.6rem;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 0.2s ease;
+  width: 120px;
+}
+
+.category-card:hover {
+  transform: translateY(-4px);
+}
+
+.category-img-wrap {
+  width: 120px;
+  height: 120px;
+  border-radius: var(--radius);
+  overflow: hidden;
+  border: 1.5px solid var(--g-100);
+}
+
+.category-placeholder {
+  width: 100%;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.category-placeholder svg {
+  width: 34px;
+  height: 34px;
+  opacity: 0.7;
+}
+
+.category-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--dark);
+  text-align: center;
+  line-height: 1.3;
+}
+
+/* ─── Placeholder Colors per Category ─── */
+.cat-school      { background: #e8f5e9; }
+.cat-school svg  { stroke: #2e7d32; }
+
+.cat-sports      { background: #e3f2fd; }
+.cat-sports svg  { stroke: #1565c0; }
+
+.cat-computer    { background: #ede7f6; }
+.cat-computer svg{ stroke: #4527a0; }
+
+.cat-fashion     { background: #fce4ec; }
+.cat-fashion svg { stroke: #880e4f; }
+
+.cat-beauty      { background: #fff3e0; }
+.cat-beauty svg  { stroke: #e65100; }
+
+.cat-appliances  { background: #e0f7fa; }
+.cat-appliances svg { stroke: #006064; }
+
+.cat-kitchen     { background: #fff8e1; }
+.cat-kitchen svg { stroke: #f57f17; }
+
+.cat-essentials  { background: #f1f8e9; }
+.cat-essentials svg { stroke: #33691e; }
+
+.cat-trophies    { background: #fff9c4; }
+.cat-trophies svg{ stroke: #f9a825; }
+
+.cat-office      { background: #e8eaf6; }
+.cat-office svg  { stroke: #283593; }
+
+/* ─── Mobile ─── */
+@media (max-width: 768px) {
+  .categories-section {
+    padding: 0 1rem 2rem;
+  }
+
+  .categories-grid {
+    grid-template-columns: repeat(4, 80px);
+    gap: 0.75rem;
+  }
+
+  .category-card {
+    width: 80px;
+  }
+
+  .category-img-wrap {
+    width: 80px;
+    height: 80px;
+  }
+
+  .category-placeholder svg {
+    width: 24px;
+    height: 24px;
+  }
+
+  .category-label {
+    font-size: 10px;
+  }
+}
+
+@media (max-width: 400px) {
+  .categories-grid {
+    grid-template-columns: repeat(3, 80px);
   }
 }
