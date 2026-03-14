@@ -15,7 +15,7 @@
   <header class="index-navbar">
 
     <!-- LEFT — Brand -->
-    <div class="index-nav-brand">
+    <a href="{{ url_for('index') }}" class="index-nav-brand nav-brand-link">
       <div class="nav-badge">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       </div>
@@ -23,7 +23,7 @@
         <span class="nav-brand-name">Triple E &amp; Fiel Collins</span>
         <span class="nav-brand-sub">General Merchandise</span>
       </div>
-    </div>
+    </a>
 
     <!-- CENTER — Search Bar + Cart -->
     <div class="index-nav-search">
@@ -525,10 +525,10 @@
           <p class="footer-col-title">Categories</p>
           <ul class="footer-links">
             <li><a href="#">School Supplies</a></li>
-            <li><a href="#">Fashion & Accessories</a></li>
-            <li><a href="#">Beauty & Personal Care</a></li>
+            <li><a href="#">Fashion &amp; Accessories</a></li>
+            <li><a href="#">Beauty &amp; Personal Care</a></li>
             <li><a href="#">Home Appliances</a></li>
-            <li><a href="#">Kitchen & Dining</a></li>
+            <li><a href="#">Kitchen &amp; Dining</a></li>
           </ul>
         </div>
 
@@ -537,7 +537,7 @@
           <ul class="footer-contact">
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-              <a href="/cdn-cgi/l/email-protection" class="__cf_email__" data-cfemail="c7b3b5aeb7aba2a2a1aea2aba4a8ababaea9b487a0aaa6aeabe9a4a8aa">[email&#160;protected]</a>
+              tripleefielcollins@gmail.com
             </li>
             <li>
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -555,4 +555,12 @@
 
       <div class="footer-bottom">
         <p>&copy; 2026 Triple E &amp; Fiel Collins General Merchandise. All rights reserved.</p>
-        <p>Capstone Project &mdash; STI College of Koronadal &mdash; BSIT</p
+        <p>Capstone Project &mdash; STI College of Koronadal &mdash; BSIT</p>
+      </div>
+    </footer>
+  </main>
+
+  <script src="{{ url_for('static', filename='js/index.js') }}"></script>
+
+</body>
+</html>
