@@ -8,30 +8,63 @@ function togglePassword(inputId, iconId) {
   icon.innerHTML = input.type === 'text' ? EYE_OPEN : EYE_SLASH;
 }
 
+// ─── Forgot Password Modal ───
 function openForgot(e) {
   e.preventDefault();
   document.body.classList.add('modal-open');
+  document.getElementById('forgotOverlay').style.display = 'block';
+  document.getElementById('forgotModal').style.display = 'block';
 }
 
 function closeForgot() {
   document.body.classList.remove('modal-open');
+  document.getElementById('forgotOverlay').style.display = 'none';
+  document.getElementById('forgotModal').style.display = 'none';
 }
 
+// ─── Staff Access Code Modal ───
+function openAccessCode() {
+  document.body.classList.add('modal-open');
+  document.getElementById('accessCodeOverlay').style.display = 'block';
+  document.getElementById('accessCodeModal').style.display = 'block';
+  setTimeout(() => document.getElementById('accessCodeInput').focus(), 100);
+}
+
+function closeAccessCode() {
+  document.body.classList.remove('modal-open');
+  document.getElementById('accessCodeOverlay').style.display = 'none';
+  document.getElementById('accessCodeModal').style.display = 'none';
+  document.getElementById('accessCodeInput').value = '';
+}
+
+// ─── Escape key closes any open modal ───
 document.addEventListener('keydown', function(e) {
-  if (e.key === 'Escape') closeForgot();
+  if (e.key === 'Escape') {
+    closeForgot();
+    closeAccessCode();
+  }
 });
 
-// ─── Disable login button if email or password is empty ───
+// ─── Disable login button if inputs are empty ───
 document.addEventListener('DOMContentLoaded', function () {
-  const emailInput = document.querySelector('input[name="login_input"]');
+  const loginInput = document.querySelector('input[name="login_input"]');
   const passInput  = document.getElementById('customerPassword');
   const loginBtn   = document.querySelector('button[type="submit"]');
+  const codeInput  = document.getElementById('accessCodeInput');
+  const codeBtn    = document.getElementById('accessCodeSubmitBtn');
 
-  function checkInputs() {
-    loginBtn.disabled = emailInput.value.trim() === '' || passInput.value.trim() === '';
+  function checkLogin() {
+    loginBtn.disabled = loginInput.value.trim() === '' || passInput.value.trim() === '';
   }
 
-  emailInput.addEventListener('input', checkInputs);
-  passInput.addEventListener('input', checkInputs);
-  checkInputs(); // run on page load
+  function checkAccessCode() {
+    if (codeBtn) codeBtn.disabled = codeInput.value.trim() === '';
+  }
+
+  loginInput.addEventListener('input', checkLogin);
+  passInput.addEventListener('input', checkLogin);
+  if (codeInput) codeInput.addEventListener('input', checkAccessCode);
+
+  checkLogin();
+  if (codeInput) checkAccessCode();
 });

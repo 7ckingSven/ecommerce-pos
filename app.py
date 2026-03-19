@@ -24,83 +24,81 @@ supabase = create_client(
 def index():
     return render_template('index.html')
 
-# Login page
-@app.route('/login')
+# ─── UNIFIED LOGIN PAGE ───────────────────────────────
+@app.route('/login', methods=['GET'])
 def login():
-    return render_template('login.html')
+    # Check if staff access code modal should be shown
+    show_modal = session.pop('show_access_code_modal', False)
+    staff_token = session.get('staff_verified_token', '')
+    return render_template('login.html',
+        show_access_code_modal=show_modal,
+        staff_token=staff_token
+    )
 
-# ─── STAFF PORTAL — Access Code ───────────────────────
-
-@app.route('/portal', methods=['GET', 'POST'])
-def portal():
-    if request.method == 'POST':
-        code = request.form.get('access_code')
-        if code == os.getenv('STAFF_ACCESS_CODE'):
-            session['portal_verified'] = True
-            return redirect(url_for('staff_login_page'))
-        else:
-            flash('Invalid access code. Please try again.', 'error')
-            return redirect(url_for('portal'))
-    # Clear portal session on fresh visit
-    session.pop('portal_verified', None)
-    return render_template('portal.html')
-
-# ─── STAFF LOGIN PAGE ──────────────────────────────────
-
-@app.route('/staff-login-page')
-def staff_login_page():
-    # Block direct access without portal verification
-    if not session.get('portal_verified'):
-        flash('Please enter the access code first.', 'error')
-        return redirect(url_for('portal'))
-    return render_template('staff_login.html')
-
-@app.route('/staff-login', methods=['POST'])
-def staff_login():
-    # Block direct POST access without portal verification
-    if not session.get('portal_verified'):
-        return redirect(url_for('portal'))
-
-    email       = request.form.get('email')
+@app.route('/login', methods=['POST'])
+def login_post():
+    login_input = request.form.get('login_input')
     password    = request.form.get('password')
     remember_me = request.form.get('remember_me') == 'on'
+
     if remember_me:
         app.permanent_session_lifetime = timedelta(days=30)
         session.permanent = True
-    # TODO: Add Supabase authentication logic here
-    # TODO: Fetch user role from users table and redirect accordingly
 
-    role = None  # Will be fetched from Supabase
+    # TODO: Step 1 — Check customer table
+    # customer = supabase.table('customer').select('*').or_(
+    #     f'email.eq.{login_input},username.eq.{login_input},phone_number.eq.{login_input}'
+    # ).single().execute()
+    # if customer and check_password(password, customer.data['password']):
+    #     session['user_id'] = customer.data['customer_id']
+    #     session['role'] = 'customer'
+    #     return redirect(url_for('customer_dashboard'))
 
-    if role == 'admin':
-        session['user'] = email
-        session['role'] = 'admin'
-        return redirect(url_for('admin_dashboard'))
-    elif role == 'cashier':
-        session['user'] = email
-        session['role'] = 'cashier'
-        return redirect(url_for('cashier_dashboard'))
-    elif role == 'secretary':
-        session['user'] = email
-        session['role'] = 'secretary'
-        return redirect(url_for('secretary_dashboard'))
-    else:
-        flash('Staff login coming soon.', 'success')
-        return redirect(url_for('staff_login_page'))
+    # TODO: Step 2 — Check user table (staff)
+    # user = supabase.table('user').select('*').eq('username', login_input).single().execute()
+    # if user and check_password(password, user.data['password']):
+    #     session['staff_verified_token'] = user.data['user_id']
+    #     session['show_access_code_modal'] = True
+    #     return redirect(url_for('login'))
 
-# ─── CUSTOMER LOGIN ────────────────────────────────────
-
-@app.route('/customer-login', methods=['POST'])
-def customer_login():
-    email       = request.form.get('email')
-    password    = request.form.get('password')
-    remember_me = request.form.get('remember_me') == 'on'
-    if remember_me:
-        app.permanent_session_lifetime = timedelta(days=30)
-        session.permanent = True
-    # TODO: Add Supabase authentication logic here
-    flash('Customer login coming soon.', 'success')
+    flash('Login coming soon.', 'success')
     return redirect(url_for('login'))
+
+# ─── STAFF ACCESS CODE VERIFICATION ───────────────────
+@app.route('/verify-staff-code', methods=['POST'])
+def verify_staff_code():
+    access_code  = request.form.get('access_code')
+    staff_token  = request.form.get('staff_verified_token')
+
+    if access_code == os.getenv('STAFF_ACCESS_CODE'):
+        # TODO: Fetch staff role from Supabase using staff_token
+        # user = supabase.table('user').select('*').eq('user_id', staff_token).single().execute()
+        # role = user.data['role']
+        role = None  # Will be fetched from Supabase
+
+        if role == 'admin':
+            session['user'] = staff_token
+            session['role'] = 'admin'
+            session.pop('staff_verified_token', None)
+            return redirect(url_for('admin_dashboard'))
+        elif role == 'cashier':
+            session['user'] = staff_token
+            session['role'] = 'cashier'
+            session.pop('staff_verified_token', None)
+            return redirect(url_for('cashier_dashboard'))
+        elif role == 'secretary':
+            session['user'] = staff_token
+            session['role'] = 'secretary'
+            session.pop('staff_verified_token', None)
+            return redirect(url_for('secretary_dashboard'))
+        else:
+            flash('Staff verification coming soon.', 'success')
+            return redirect(url_for('login'))
+    else:
+        flash('Invalid access code. Please try again.', 'error')
+        session['show_access_code_modal'] = True
+        session['staff_verified_token'] = staff_token
+        return redirect(url_for('login'))
 
 # ─── CUSTOMER REGISTER ────────────────────────────────────
 
