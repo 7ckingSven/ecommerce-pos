@@ -1,4 +1,5 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask_cors import CORS
 from supabase import create_client
 from dotenv import load_dotenv
 from datetime import timedelta
@@ -11,24 +12,30 @@ load_dotenv()
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
 
+# Enable CORS — allows React Native mobile app to call Flask API
+CORS(app)
+
 # Initialize Supabase
 supabase = create_client(
     os.getenv('SUPABASE_URL'),
     os.getenv('SUPABASE_KEY')
 )
 
-# ─── PUBLIC PAGES ─────────────────────────────────────
+# ══════════════════════════════════════════════════════
+# WEB ROUTES — Staff & Public Pages
+# ══════════════════════════════════════════════════════
 
-# Main landing page — public product showcase
+# ─── PUBLIC ───────────────────────────────────────────
+
 @app.route('/')
 def index():
     return render_template('index.html')
 
-# ─── UNIFIED LOGIN PAGE ───────────────────────────────
+# ─── UNIFIED LOGIN ────────────────────────────────────
+
 @app.route('/login', methods=['GET'])
 def login():
-    # Check if staff access code modal should be shown
-    show_modal = session.pop('show_access_code_modal', False)
+    show_modal  = session.pop('show_access_code_modal', False)
     staff_token = session.get('staff_verified_token', '')
     return render_template('login.html',
         show_access_code_modal=show_modal,
@@ -64,11 +71,12 @@ def login_post():
     flash('Login coming soon.', 'success')
     return redirect(url_for('login'))
 
-# ─── STAFF ACCESS CODE VERIFICATION ───────────────────
+# ─── STAFF ACCESS CODE VERIFICATION ──────────────────
+
 @app.route('/verify-staff-code', methods=['POST'])
 def verify_staff_code():
-    access_code  = request.form.get('access_code')
-    staff_token  = request.form.get('staff_verified_token')
+    access_code = request.form.get('access_code')
+    staff_token = request.form.get('staff_verified_token')
 
     if access_code == os.getenv('STAFF_ACCESS_CODE'):
         # TODO: Fetch staff role from Supabase using staff_token
@@ -100,7 +108,7 @@ def verify_staff_code():
         session['staff_verified_token'] = staff_token
         return redirect(url_for('login'))
 
-# ─── CUSTOMER REGISTER ────────────────────────────────────
+# ─── REGISTER ─────────────────────────────────────────
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -110,7 +118,7 @@ def register():
         return redirect(url_for('login'))
     return render_template('register.html')
 
-# ─── FORGOT PASSWORD ───────────────────────────────────
+# ─── FORGOT PASSWORD ──────────────────────────────────
 
 @app.route('/forgot-password', methods=['POST'])
 def forgot_password():
@@ -149,6 +157,37 @@ def customer_dashboard():
 def logout():
     session.clear()
     return redirect(url_for('index'))
+
+# ══════════════════════════════════════════════════════
+# MOBILE API ROUTES — React Native Customer App
+# ══════════════════════════════════════════════════════
+
+@app.route('/api/products', methods=['GET'])
+def api_products():
+    # TODO: fetch from Supabase
+    # products = supabase.table('product').select('*').eq('is_active', True).execute()
+    # return jsonify(products.data)
+    return jsonify([])
+
+@app.route('/api/login', methods=['POST'])
+def api_login():
+    data        = request.get_json()
+    login_input = data.get('login_input')
+    password    = data.get('password')
+    # TODO: check customer table in Supabase
+    return jsonify({'message': 'Login coming soon'})
+
+@app.route('/api/register', methods=['POST'])
+def api_register():
+    data = request.get_json()
+    # TODO: insert into customer table in Supabase
+    return jsonify({'message': 'Register coming soon'})
+
+@app.route('/api/products/search', methods=['GET'])
+def api_search():
+    query = request.args.get('q', '')
+    # TODO: search products by name in Supabase
+    return jsonify([])
 
 # ──────────────────────────────────────────────────────
 
