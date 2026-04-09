@@ -58,3 +58,14 @@ static/uploads/
 # Distribution
 *.zip
 *.tar.gz
+
+# React Native
+mobile/node_modules/
+mobile/.bundle/
+mobile/android/.gradle/
+mobile/android/app/build/
+mobile/ios/Pods/
+
+# Backend
+backend/.env
+backend/venv/
