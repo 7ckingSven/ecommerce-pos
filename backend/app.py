@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from datetime import timedelta
 import os
 
-# Load .env file
+# Load .env fileZ
 load_dotenv()
 
 # Initialize Flask
