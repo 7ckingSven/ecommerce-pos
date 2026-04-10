@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Triple E &amp; Fiel Collins General Merchandise</title>
+  <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+</head>
+<body>
+
+  <!-- NAVBAR -->
+  <header class="navbar">
+    <a href="{{ url_for('landing') }}" class="nav-brand nav-brand-link">
+      <div class="nav-badge">
+        <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      </div>
+      <div class="nav-brand-text">
+        <span class="nav-brand-name">Triple E &amp; Fiel Collins General Merchandise</span>
+        <span class="nav-brand-sub">E-Commerce &amp; POS System</span>
+      </div>
+    </a>
+    <div class="nav-buttons">
+      <a href="{{ url_for('login') }}" class="btn btn-outline-green">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+          <polyline points="10 17 15 12 10 7"/>
+          <line x1="15" y1="12" x2="3" y2="12"/>
+        </svg>
+        Sign In
+      </a>
+    </div>
+  </header>
+
+  <!-- HERO -->
+  <main class="hero">
+
+    <!-- LEFT — Intro -->
+    <div class="hero-left">
+      <div class="hero-glow"></div>
+      <div class="hero-eyebrow">
+        <span class="eyebrow-dot"></span>
+        <span class="eyebrow-text">Welcome to Our System</span>
+      </div>
+      <h1 class="hero-title">
+        Your One-Stop<br>
+        <span class="accent">Shopping</span><br>
+        Experience at<br>
+        Triple E &amp; Fiel Collins<br>
+        General Merchandise
+      </h1>
+      <div class="hero-rule"></div>
+      <p class="hero-desc">
+        Shop conveniently from your phone or visit us in store.
+        We offer a wide range of products for every need —
+        from school supplies to home essentials.
+      </p>
+      <div class="feature-list">
+        <div class="feature-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          </div>
+          <span class="feature-label">Wide range of products available</span>
+        </div>
+        <div class="feature-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+          </div>
+          <span class="feature-label">Shop anytime via our mobile app</span>
+        </div>
+        <div class="feature-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+          </div>
+          <span class="feature-label">Exclusive member discounts and perks</span>
+        </div>
+        <div class="feature-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+          </div>
+          <span class="feature-label">Buy now, pay later for members</span>
+        </div>
+        <div class="feature-row">
+          <div class="feature-box">
+            <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+          </div>
+          <span class="feature-label">Located in Koronadal City, South Cotabato</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT — App Download Card -->
+    <div class="hero-right">
+      <div class="landing-card">
+
+        <!-- Card Top -->
+        <div class="card-top">
+          <div class="card-icon-wrap">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+              <rect x="5" y="2" width="14" height="20" rx="2"/>
+              <line x1="12" y1="18" x2="12.01" y2="18"/>
+            </svg>
+          </div>
+          <h2 class="card-title">Get the App</h2>
+        </div>
+
+        <p class="landing-card-desc">
+          Download our mobile app and start shopping from anywhere. Available for Android.
+        </p>
+
+        <!-- QR Code -->
+        <div class="landing-qr-wrap">
+          <div class="landing-qr-box">
+            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="landing-qr-svg">
+              <rect x="10" y="10" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3"/>
+              <rect x="17" y="17" width="16" height="16" fill="currentColor"/>
+              <rect x="60" y="10" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3"/>
+              <rect x="67" y="17" width="16" height="16" fill="currentColor"/>
+              <rect x="10" y="60" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3"/>
+              <rect x="17" y="67" width="16" height="16" fill="currentColor"/>
+              <rect x="60" y="60" width="8" height="8" fill="currentColor"/>
+              <rect x="72" y="60" width="8" height="8" fill="currentColor"/>
+              <rect x="84" y="60" width="8" height="8" fill="currentColor"/>
+              <rect x="60" y="72" width="8" height="8" fill="currentColor"/>
+              <rect x="84" y="72" width="8" height="8" fill="currentColor"/>
+              <rect x="60" y="84" width="8" height="8" fill="currentColor"/>
+              <rect x="72" y="84" width="8" height="8" fill="currentColor"/>
+              <rect x="84" y="84" width="8" height="8" fill="currentColor"/>
+              <rect x="44" y="10" width="8" height="8" fill="currentColor"/>
+              <rect x="44" y="22" width="8" height="8" fill="currentColor"/>
+              <rect x="44" y="44" width="8" height="8" fill="currentColor"/>
+              <rect x="10" y="44" width="8" height="8" fill="currentColor"/>
+              <rect x="22" y="44" width="8" height="8" fill="currentColor"/>
+              <rect x="44" y="56" width="8" height="8" fill="currentColor"/>
+            </svg>
+            <p class="landing-qr-label">Scan to Download</p>
+          </div>
+        </div>
+
+        <!-- Download Button -->
+        <a href="#" class="btn btn-solid-green btn-full">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download APK
+        </a>
+
+        <div class="landing-divider-row">
+          <div class="landing-divider-line"></div>
+          <span class="landing-divider-text">already have an account?</span>
+          <div class="landing-divider-line"></div>
+        </div>
+
+        <!-- Sign In Button -->
+        <a href="{{ url_for('login') }}" class="btn btn-outline-green btn-full">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+            <polyline points="10 17 15 12 10 7"/>
+            <line x1="15" y1="12" x2="3" y2="12"/>
+          </svg>
+          Sign In
+        </a>
+
+        <p class="form-hint" style="margin-top:0.8rem;">
+          No account yet? <a href="{{ url_for('register') }}">Register here</a>
+        </p>
+
+        <p class="landing-coming-soon">Android app — available soon</p>
+
+      </div>
+    </div>
+
+  </main>
+
+  <!-- FOOTER -->
+  <footer>
+    <div class="footer-grid">
+      <div class="footer-col">
+        <p class="footer-col-title">About Us</p>
+        <p>
+          Triple E and Fiel Collins General Merchandise is a store located in
+          Koronadal City, South Cotabato offering a wide variety of products
+          for customers. This system is a capstone project by BSIT students
+          of STI College of Koronadal.
+        </p>
+      </div>
+      <div class="footer-col">
+        <p class="footer-col-title">Contact Us</p>
+        <address>
+          <div class="footer-contact-row">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
+            tripleefielcollins@gmail.com
+          </div>
+          <div class="footer-contact-row">
+            <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+            Koronadal City, South Cotabato
+          </div>
+          <div class="footer-contact-row">
+            <svg viewBox="0 0 24 24"><path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.69 12 19.79 19.79 0 0 1 1.6 3.4 2 2 0 0 1 3.56 1.22h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L7.91 8.73a16 16 0 0 0 6 6l.38-.38a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 21 16.92z"/></svg>
+            +63 900 000 0000
+          </div>
+          <div class="footer-contact-row">
+            <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            STI College of Koronadal
+          </div>
+        </address>
+      </div>
+      <div class="footer-col">
+        <p class="footer-col-title">The Developers</p>
+        <p style="margin-bottom:0.6rem;"><strong>BSIT Students — STI College of Koronadal</strong></p>
+        <div class="dev-item">Jorist Dave Agduma</div>
+        <div class="dev-item">Rhea Jane Mae Almelda</div>
+        <div class="dev-item">Val Cyril Calixton</div>
+        <div class="dev-item">Alfrancis Limo</div>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      <span>&copy; 2026 Triple E &amp; Fiel Collins General Merchandise. All rights reserved.</span>
+      <span>Capstone Project &mdash; STI College of Koronadal</span>
+    </div>
+  </footer>
+
+</body>
+</html>

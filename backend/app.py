@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from datetime import timedelta
 import os
 
-# Load .env fileZ
+# Load .env file
 load_dotenv()
 
 # Initialize Flask
@@ -28,6 +28,10 @@ supabase = create_client(
 # ─── PUBLIC ───────────────────────────────────────────
 
 @app.route('/')
+def landing():
+    return render_template('landing.html')
+
+@app.route('/home')
 def index():
     return render_template('index.html')
 
