@@ -181,7 +181,7 @@ This project uses **Supabase (PostgreSQL)** with **14 tables** and Row Level Sec
 ### Key Business Rules
 - Credits (utang) are for **members only**, due within 1 month
 - Special discounts apply to **members only** (`applicable_to` field)
-- Payment methods: **walk-in cash** or **cash on delivery** only
+- Payment methods: **walk-in cash**, **cash on delivery**, or **GCash** (reference number only)
 - Staff roles: **Admin**, **Cashier**, **Secretary**
 - Customers can log in via **email**, **username**, or **phone number**
 
