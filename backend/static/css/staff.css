@@ -1,0 +1,338 @@
+/* ============================================================
+   STAFF DASHBOARD — Extra Styles (extends admin.css)
+   ============================================================ */
+
+/* ─── POS Layout ─── */
+.pos-layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  gap: 1rem;
+  height: calc(100vh - 64px - 3rem);
+}
+
+/* ─── POS Left ─── */
+.pos-left {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  overflow: hidden;
+}
+
+.pos-search-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 0 12px;
+  transition: border-color 0.2s;
+}
+.pos-search-wrap:focus-within { border-color: var(--g-600); }
+
+/* ─── Category Chips ─── */
+.pos-cats {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.pos-cat {
+  padding: 5px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  font-family: 'Sora', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.pos-cat:hover { border-color: var(--g-600); color: var(--g-400); }
+.pos-cat.active { background: var(--g-600); border-color: var(--g-600); color: #ffffff; }
+
+/* ─── Product Grid ─── */
+.pos-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 0.75rem;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+.pos-product-card {
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.75rem;
+  cursor: pointer;
+  transition: all 0.2s;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pos-product-card:hover {
+  border-color: var(--g-600);
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+.pos-product-card.out-of-stock {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.pos-product-img {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--surface-2);
+}
+.pos-product-img-placeholder {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  background: var(--surface-2);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+}
+.pos-product-name {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+.pos-product-price {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--g-400);
+  font-family: 'JetBrains Mono', monospace;
+}
+.pos-product-stock {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+/* ─── POS Right ─── */
+.pos-right {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pos-order-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 1.2rem;
+  border-bottom: 1px solid var(--border);
+}
+.pos-order-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.pos-customer-wrap {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+/* ─── Order Items ─── */
+.pos-order-items {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.pos-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  text-align: center;
+  padding: 2rem;
+}
+.pos-empty p { font-size: 13px; color: var(--text-muted); font-weight: 500; }
+.pos-empty span { font-size: 11px; color: var(--text-muted); }
+
+.pos-order-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
+.pos-order-item-name {
+  flex: 1;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.pos-order-item-price {
+  font-size: 12px;
+  color: var(--g-400);
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+}
+.pos-qty-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.pos-qty-btn {
+  width: 22px;
+  height: 22px;
+  border-radius: 4px;
+  border: 1px solid var(--border);
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+  font-family: 'Sora', sans-serif;
+}
+.pos-qty-btn:hover { background: var(--g-600); color: #fff; border-color: var(--g-600); }
+.pos-qty-val {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  min-width: 20px;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+}
+.pos-remove-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 2px;
+  border-radius: 4px;
+  transition: all 0.2s;
+  display: flex;
+}
+.pos-remove-btn:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+
+/* ─── Summary ─── */
+.pos-summary {
+  padding: 0.75rem 1.2rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pos-summary-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.pos-summary-total {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text);
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+  margin-top: 2px;
+}
+
+/* ─── Payment ─── */
+.pos-payment {
+  padding: 0.75rem 1.2rem;
+  border-top: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.pos-payment-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.pos-payment-methods {
+  display: flex;
+  gap: 6px;
+}
+.pos-pay-btn {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 8px 6px;
+  border-radius: var(--radius-sm);
+  border: 1.5px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  font-family: 'Sora', sans-serif;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.pos-pay-btn:hover { border-color: var(--g-600); color: var(--g-400); }
+.pos-pay-btn.active { background: rgba(22,163,74,0.12); border-color: var(--g-600); color: var(--g-400); }
+.pos-refno, .pos-cash-input { display: flex; flex-direction: column; gap: 6px; }
+
+/* ─── Checkout Button ─── */
+.pos-checkout-btn {
+  margin: 0 1.2rem 1rem;
+  justify-content: center;
+  padding: 12px;
+  font-size: 14px;
+}
+.pos-checkout-btn:disabled {
+  background: var(--surface-2);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+/* ─── Receipt ─── */
+.receipt {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+  color: var(--text);
+  line-height: 1.8;
+}
+.receipt-header { text-align: center; margin-bottom: 1rem; }
+.receipt-divider { border: none; border-top: 1px dashed var(--border); margin: 0.5rem 0; }
+.receipt-row { display: flex; justify-content: space-between; }
+.receipt-total { font-weight: 700; font-size: 14px; }
+.receipt-footer { text-align: center; margin-top: 1rem; font-size: 11px; color: var(--text-muted); }
+
+/* ─── Responsive ─── */
+@media (max-width: 1100px) {
+  .pos-layout { grid-template-columns: 1fr 320px; }
+}
+@media (max-width: 900px) {
+  .pos-layout { grid-template-columns: 1fr; height: auto; }
+  .pos-right { min-height: 400px; }
+}

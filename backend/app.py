@@ -247,6 +247,11 @@ def admin_dashboard():
 def staff_dashboard():
     return render_template('staff/dashboard.html')
 
+@app.route('/admin/dashboard')
+@login_required(role='admin')
+def admin_dashboard_page():
+    return render_template('admin/dashboard.html')
+
 @app.route('/customer/dashboard')
 @login_required(role='customer')
 def customer_dashboard():
@@ -857,6 +862,161 @@ def admin_get_customers():
     try:
         res = supabase.table('customer').select('*').execute()
         return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ══════════════════════════════════════════════════════
+# STAFF API ROUTES — Dashboard Data
+# ══════════════════════════════════════════════════════
+
+def staff_required(f):
+    """Decorator to protect staff API routes."""
+    @wraps(f)
+    def decorated(*args, **kwargs):
+        if session.get('role') not in ('admin', 'staff'):
+            return jsonify({'error': 'Unauthorized'}), 401
+        return f(*args, **kwargs)
+    return decorated
+
+# ─── Staff Orders ─────────────────────────────────────
+
+@app.route('/api/staff/orders', methods=['GET'])
+@staff_required
+def staff_get_orders():
+    try:
+        res = supabase.table('order').select(
+            '*, customer(fname, lname), staff(fname, lname), order_item(*, product(product_name)), payment(*)'
+        ).order('date', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders', methods=['POST'])
+@staff_required
+def staff_place_order():
+    try:
+        data           = request.get_json()
+        cart_items     = data.get('cart_items', [])
+        payment_method = data.get('payment_method', '')
+        ref_no         = data.get('ref_no', '')
+        order_type     = data.get('order_type', 'walk_in')
+        quantity       = data.get('quantity', 0)
+        total          = data.get('total', 0)
+
+        if not cart_items or not payment_method:
+            return jsonify({'error': 'Cart items and payment method are required.'}), 400
+
+        if payment_method == 'gcash' and not ref_no:
+            return jsonify({'error': 'GCash reference number is required.'}), 400
+
+        # Create order
+        order_res = supabase.table('order').insert({
+            'staff_id':   session.get('staff_id'),
+            'order_type': order_type,
+            'quantity':   quantity,
+            'total':      total,
+            'ref_no':     ref_no if ref_no else None,
+            'status':     'completed',
+        }).execute()
+
+        order_id = order_res.data[0]['order_id']
+
+        # Create order items
+        supabase.table('order_item').insert([{
+            'order_id':   order_id,
+            'product_id': item['product_id'],
+            'quantity':   item['quantity'],
+            'price':      item['price'],
+        } for item in cart_items]).execute()
+
+        # Create payment
+        supabase.table('payment').insert({
+            'order_id':       order_id,
+            'payment_method': payment_method,
+            'total':          total,
+            'ref_no':         ref_no if ref_no else None,
+            'status':         'paid',
+        }).execute()
+
+        # Deduct stock
+        for item in cart_items:
+            prod = supabase.table('product').select('quantity').eq('product_id', item['product_id']).execute()
+            if prod.data:
+                new_qty = max(prod.data[0]['quantity'] - item['quantity'], 0)
+                supabase.table('product').update({
+                    'quantity':   new_qty,
+                    'updated_at': 'now()'
+                }).eq('product_id', item['product_id']).execute()
+
+        return jsonify({
+            'message':  'Order processed successfully.',
+            'order_id': order_id,
+            'total':    total,
+        }), 201
+
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders/<order_id>', methods=['PUT'])
+@staff_required
+def staff_update_order(order_id):
+    try:
+        data   = request.get_json()
+        status = data.get('status')
+        supabase.table('order').update({'status': status}).eq('order_id', order_id).execute()
+        return jsonify({'message': 'Order updated.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ─── Staff Inventory ──────────────────────────────────
+
+@app.route('/api/staff/inventory', methods=['GET'])
+@staff_required
+def staff_get_inventory():
+    try:
+        res = supabase.table('inventory').select(
+            '*, product(product_name, category)'
+        ).order('date', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/inventory', methods=['POST'])
+@staff_required
+def staff_add_inventory():
+    try:
+        data        = request.get_json()
+        product_id  = data.get('product_id')
+        qty_added   = int(data.get('quantity', 0))
+        from_branch = data.get('from_branch')
+        to_branch   = data.get('to_branch')
+        note        = data.get('note', '')
+
+        if not product_id or qty_added <= 0:
+            return jsonify({'error': 'Product and quantity are required.'}), 400
+
+        prod_res   = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
+        qty_before = prod_res.data[0]['quantity'] if prod_res.data else 0
+        qty_after  = qty_before + qty_added
+
+        supabase.table('inventory').insert({
+            'product_id':      product_id,
+            'staff_id':        session.get('staff_id'),
+            'quantity_added':  qty_added,
+            'quantity_before': qty_before,
+            'quantity_after':  qty_after,
+            'from_branch':     from_branch,
+            'to_branch':       to_branch,
+            'note':            note,
+        }).execute()
+
+        supabase.table('product').update({
+            'quantity':   qty_after,
+            'updated_at': 'now()'
+        }).eq('product_id', product_id).execute()
+
+        return jsonify({'message': 'Stock updated.', 'quantity_after': qty_after}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
