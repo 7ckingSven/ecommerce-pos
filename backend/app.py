@@ -111,7 +111,7 @@ def login_post():
                 session['role']        = 'customer'
                 session['name']        = f"{customer['fname']} {customer['lname']}"
                 return redirect(url_for('customer_dashboard'))
-        else:
+        elif user['role'] in ('admin', 'staff'):
             session['staff_verified_token']   = user['user_id']
             session['show_access_code_modal'] = True
             return redirect(url_for('login'))
@@ -149,10 +149,8 @@ def verify_staff_code():
 
                 if user['role'] == 'admin':
                     return redirect(url_for('admin_dashboard'))
-                elif user['role'] == 'cashier':
-                    return redirect(url_for('cashier_dashboard'))
-                elif user['role'] == 'secretary':
-                    return redirect(url_for('secretary_dashboard'))
+                elif user['role'] == 'staff':
+                    return redirect(url_for('staff_dashboard'))
 
         except Exception as e:
             print(f"Staff verification error: {e}")
@@ -244,15 +242,10 @@ def forgot_password():
 def admin_dashboard():
     return render_template('admin/dashboard.html')
 
-@app.route('/cashier/dashboard')
-@login_required(role='cashier')
-def cashier_dashboard():
-    return render_template('cashier/dashboard.html')
-
-@app.route('/secretary/dashboard')
-@login_required(role='secretary')
-def secretary_dashboard():
-    return render_template('secretary/dashboard.html')
+@app.route('/staff/dashboard')
+@login_required(role='staff')
+def staff_dashboard():
+    return render_template('staff/dashboard.html')
 
 @app.route('/customer/dashboard')
 @login_required(role='customer')
@@ -305,7 +298,7 @@ def api_login():
         if not check_password(password, user['password']):
             return jsonify({'error': 'Invalid credentials.'}), 401
 
-        if user['role'] != 'customer':
+        if user['role'] not in ('customer',):
             return jsonify({'error': 'Access denied.'}), 403
 
         customer_res = supabase.table('customer').select('*').eq('user_id', user['user_id']).execute()
