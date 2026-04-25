@@ -2,7 +2,7 @@
 // STAFF DASHBOARD — Triple E & Fiel Collins
 // ══════════════════════════════════════════════════════
 
-// ─── Theme + Sidebar (shared with admin) ──────────────
+// ─── Theme + Sidebar ──────────────────────────────────
 function toggleTheme() {
   const html  = document.documentElement;
   const theme = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
@@ -28,10 +28,10 @@ updateDate();
 
 // ─── Section Navigation ───────────────────────────────
 const pageTitles = {
-  pos:       ['Point of Sale',    'Process walk-in transactions'],
-  inventory: ['Inventory',        'Track and manage stock levels'],
-  orders:    ['Orders',           'View and manage all orders'],
-  summary:   ['Sales Summary',    "Today's sales overview"],
+  pos:       ['Point of Sale',  'Process walk-in transactions'],
+  inventory: ['Inventory',      'Track and manage stock levels'],
+  orders:    ['Orders',         'View and manage all orders'],
+  summary:   ['Sales Summary',  "Today's sales overview"],
 };
 
 function showSection(name, el) {
@@ -59,34 +59,68 @@ function showToast(msg, type = 'success') {
   setTimeout(() => t.classList.remove('show'), 3000);
 }
 
-function badge(text, type) {
+// ─── Helpers ──────────────────────────────────────────
+function badge(text) {
   const map = {
-    active:'green', inactive:'gray', pending:'yellow',
-    processing:'blue', completed:'green', cancelled:'red',
-    online:'blue', walk_in:'green', paid:'green', failed:'red',
-    gcash:'blue', walk_in_cash:'green', cash_on_delivery:'yellow',
+    active: 'green', inactive: 'gray', pending: 'yellow',
+    processing: 'blue', completed: 'green', cancelled: 'red',
+    online: 'blue', walk_in: 'green', paid: 'green', failed: 'red',
+    gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
   };
-  return `<span class="badge badge--${map[text]||'gray'}">${text.replace(/_/g,' ')}</span>`;
+  return `<span class="badge badge--${map[text] || 'gray'}">${text.replace(/_/g, ' ')}</span>`;
 }
 
 function peso(val) {
-  return '₱' + Number(val||0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+  return '₱' + Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
 }
 
 function shortId(id) {
-  return id ? id.slice(0,8).toUpperCase() : '—';
+  return id ? id.slice(0, 8).toUpperCase() : '—';
+}
+
+// ══════════════════════════════════════════════════════
+// GLOBAL STATE
+// ══════════════════════════════════════════════════════
+let posProducts     = [];
+let orderItems      = [];
+let selectedPayment = 'walk_in_cash';
+let invProducts     = [];
+let staffOrders     = [];
+let allBranches     = [];
+
+// ══════════════════════════════════════════════════════
+// BRANCHES
+// ══════════════════════════════════════════════════════
+async function loadBranches() {
+  try {
+    const res   = await fetch('/api/staff/branches');
+    allBranches = await res.json();
+    populateBranchSelects();
+  } catch (e) { console.error('Branches error:', e); }
+}
+
+function populateBranchSelects() {
+  const options = `<option value="">Select branch</option>` +
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+
+  // POS branch selector
+  const posBranch = document.getElementById('posBranch');
+  if (posBranch) posBranch.innerHTML = `<option value="">Select branch for this transaction *</option>` +
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+
+  // Stock modal branch selects
+  ['stockFromBranch', 'stockToBranch'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.innerHTML = options;
+  });
 }
 
 // ══════════════════════════════════════════════════════
 // POS
 // ══════════════════════════════════════════════════════
-let posProducts    = [];
-let orderItems     = [];
-let selectedPayment = 'walk_in_cash';
-
 async function loadPosProducts() {
   try {
-    const res = await fetch('/api/products');
+    const res   = await fetch('/api/products');
     posProducts = await res.json();
     renderPosProducts(posProducts);
     populateCategories(posProducts);
@@ -103,8 +137,7 @@ function populateCategories(products) {
 function filterPosCategory(cat, el) {
   document.querySelectorAll('.pos-cat').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  const filtered = cat ? posProducts.filter(p => p.category === cat) : posProducts;
-  renderPosProducts(filtered);
+  renderPosProducts(cat ? posProducts.filter(p => p.category === cat) : posProducts);
 }
 
 function searchProducts(q) {
@@ -122,19 +155,32 @@ function renderPosProducts(products) {
     wrap.innerHTML = '<div class="table-empty" style="grid-column:1/-1;">No products found</div>';
     return;
   }
-  wrap.innerHTML = products.map(p => `
-    <div class="pos-product-card${p.quantity <= 0 ? ' out-of-stock' : ''}"
-         onclick="${p.quantity > 0 ? `addToOrder('${p.product_id}', '${p.product_name.replace(/'/g,"\\'")}', ${p.price}, ${p.quantity})` : ''}">
-      ${p.image_url
-        ? `<img src="${p.image_url}" class="pos-product-img" alt="${p.product_name}"/>`
-        : `<div class="pos-product-img-placeholder">
-             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:28px;height:28px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
-           </div>`
-      }
-      <div class="pos-product-name">${p.product_name}</div>
-      <div class="pos-product-price">${peso(p.price)}</div>
-      <div class="pos-product-stock">${p.quantity <= 0 ? '⚠️ Out of stock' : `Stock: ${p.quantity}`}</div>
-    </div>`).join('');
+  wrap.innerHTML = products.map(p => {
+    // Compute display price with discount if applicable
+    const disc          = p.discount;
+    const discountedPx  = disc ? p.price * (1 - disc.percentage / 100) : null;
+    const priceDisplay  = discountedPx !== null
+      ? `<div class="pos-product-price" style="text-decoration:line-through;color:var(--text-muted);font-size:11px;">${peso(p.price)}</div>
+         <div class="pos-product-price" style="color:var(--g-400);">${peso(discountedPx)}</div>
+         <div style="font-size:10px;color:var(--g-400);">${disc.discount_name} −${disc.percentage}%</div>`
+      : `<div class="pos-product-price">${peso(p.price)}</div>`;
+
+    const effectivePrice = discountedPx !== null ? discountedPx : p.price;
+
+    return `
+      <div class="pos-product-card${p.quantity <= 0 ? ' out-of-stock' : ''}"
+           onclick="${p.quantity > 0 ? `addToOrder('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', ${effectivePrice}, ${p.quantity})` : ''}">
+        ${p.image_url
+          ? `<img src="${p.image_url}" class="pos-product-img" alt="${p.product_name}"/>`
+          : `<div class="pos-product-img-placeholder">
+               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:28px;height:28px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
+             </div>`
+        }
+        <div class="pos-product-name">${p.product_name}</div>
+        ${priceDisplay}
+        <div class="pos-product-stock">${p.quantity <= 0 ? '⚠️ Out of stock' : `Stock: ${p.quantity}`}</div>
+      </div>`;
+  }).join('');
 }
 
 function addToOrder(productId, name, price, maxStock) {
@@ -184,7 +230,6 @@ function renderOrderItems() {
     document.getElementById('posCheckoutBtn').disabled = true;
     return;
   }
-
   wrap.innerHTML = orderItems.map(item => `
     <div class="pos-order-item">
       <div class="pos-order-item-name" title="${item.name}">${item.name}</div>
@@ -198,7 +243,6 @@ function renderOrderItems() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>`).join('');
-
   document.getElementById('posCheckoutBtn').disabled = false;
 }
 
@@ -214,17 +258,17 @@ function clearOrder() {
   orderItems = [];
   renderOrderItems();
   updateTotal();
-  document.getElementById('posCustomer').value    = '';
+  document.getElementById('posCustomer').value     = '';
   document.getElementById('posCashReceived').value = '';
-  document.getElementById('posChange').value       = '';
-  document.getElementById('posGcashRef').value     = '';
+  document.getElementById('posChange').value        = '';
+  document.getElementById('posGcashRef').value      = '';
 }
 
 function selectPayment(method, el) {
   selectedPayment = method;
   document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  document.getElementById('posRefNo').style.display    = method === 'gcash' ? 'flex' : 'none';
+  document.getElementById('posRefNo').style.display     = method === 'gcash' ? 'flex' : 'none';
   document.getElementById('posCashInput').style.display = method === 'walk_in_cash' ? 'flex' : 'none';
 }
 
@@ -233,12 +277,19 @@ function computeChange() {
   const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
   const change   = received - total;
   const input    = document.getElementById('posChange');
-  input.value    = change >= 0 ? peso(change) : '—';
+  input.value       = change >= 0 ? peso(change) : '—';
   input.style.color = change >= 0 ? 'var(--g-400)' : '#ef4444';
 }
 
 async function processOrder() {
   if (!orderItems.length) return;
+
+  // Branch is required for Sales_Transaction
+  const branchId = document.getElementById('posBranch').value;
+  if (!branchId) {
+    showToast('Please select the branch for this transaction.', 'error');
+    return;
+  }
 
   const refNo = document.getElementById('posGcashRef').value.trim();
   if (selectedPayment === 'gcash' && !refNo) {
@@ -268,6 +319,7 @@ async function processOrder() {
         total,
         ref_no:         refNo || null,
         payment_method: selectedPayment,
+        branch_id:      branchId,             // ← sent to create Sales_Transaction
         cart_items:     orderItems.map(i => ({
           product_id: i.product_id,
           quantity:   i.quantity,
@@ -298,10 +350,15 @@ function showReceipt(data) {
   const change   = received - total;
   const now      = new Date();
 
+  // Get branch name for receipt
+  const branchId   = document.getElementById('posBranch').value;
+  const branchName = allBranches.find(b => b.branch_id === branchId)?.branch_name || '';
+
   document.getElementById('receiptContent').innerHTML = `
     <div class="receipt-header">
       <strong>Triple E & Fiel Collins</strong><br>
       <span>General Merchandise</span><br>
+      ${branchName ? `<span>${branchName} Branch</span><br>` : ''}
       <span>Koronadal City, South Cotabato</span><br>
       <span style="font-size:11px;color:var(--text-muted);">${now.toLocaleString('en-PH')}</span>
     </div>
@@ -369,15 +426,13 @@ function printReceipt() {
 // ══════════════════════════════════════════════════════
 // INVENTORY
 // ══════════════════════════════════════════════════════
-let invProducts = [];
-
 async function loadInventory() {
   try {
     const [prodRes, invRes] = await Promise.all([
       fetch('/api/products'),
       fetch('/api/staff/inventory'),
     ]);
-    invProducts  = await prodRes.json();
+    invProducts   = await prodRes.json();
     const invData = await invRes.json();
 
     // Stats
@@ -389,10 +444,9 @@ async function loadInventory() {
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     document.getElementById('invRecentRestocks').textContent = invData.filter(i => new Date(i.date) >= oneWeekAgo).length;
 
-    // Product table
     renderInvProducts(invProducts);
 
-    // History table
+    // History — read nested branch names from FK join
     document.getElementById('invHistoryBody').innerHTML = invData.length
       ? invData.map(i => `
           <tr>
@@ -400,8 +454,8 @@ async function loadInventory() {
             <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
             <td>${i.quantity_before}</td>
             <td>${i.quantity_after}</td>
-            <td>${i.from_branch}</td>
-            <td>${i.to_branch}</td>
+            <td>${i.from_branch?.branch_name || '—'}</td>
+            <td>${i.to_branch?.branch_name   || '—'}</td>
             <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
             <td>${i.note || '—'}</td>
           </tr>`).join('')
@@ -447,16 +501,22 @@ function filterInventorySearch(q) {
   renderInvProducts(filtered);
 }
 
-function openStockModal(productId = '', productName = '') {
+function openStockModal(productId = '') {
   const sel = document.getElementById('stockProduct');
   sel.innerHTML = '<option value="">Select product</option>' +
-    invProducts.map(p => `<option value="${p.product_id}" ${p.product_id === productId ? 'selected' : ''}>${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+    invProducts.map(p =>
+      `<option value="${p.product_id}" ${p.product_id === productId ? 'selected' : ''}>${p.product_name} (Stock: ${p.quantity})</option>`
+    ).join('');
+
+  // Re-populate branch selects in case they weren't loaded yet
+  populateBranchSelects();
+
   document.getElementById('stockModalOverlay').classList.add('open');
   document.getElementById('stockModal').classList.add('open');
 }
 
-function quickAddStock(productId, name, qty) {
-  openStockModal(productId, name);
+function quickAddStock(productId) {
+  openStockModal(productId);
 }
 
 function closeStockModal() {
@@ -468,11 +528,11 @@ function closeStockModal() {
 async function submitStock(e) {
   e.preventDefault();
   const data = {
-    product_id:  document.getElementById('stockProduct').value,
-    quantity:    parseInt(document.getElementById('stockQty').value),
-    from_branch: document.getElementById('stockFromBranch').value,
-    to_branch:   document.getElementById('stockToBranch').value,
-    note:        document.getElementById('stockNote').value,
+    product_id:     document.getElementById('stockProduct').value,
+    quantity:       parseInt(document.getElementById('stockQty').value),
+    from_branch_id: document.getElementById('stockFromBranch').value,  // ← FK
+    to_branch_id:   document.getElementById('stockToBranch').value,    // ← FK
+    note:           document.getElementById('stockNote').value,
   };
   try {
     const res = await fetch('/api/staff/inventory', {
@@ -495,8 +555,6 @@ async function submitStock(e) {
 // ══════════════════════════════════════════════════════
 // ORDERS
 // ══════════════════════════════════════════════════════
-let staffOrders = [];
-
 async function loadOrders() {
   try {
     const res   = await fetch('/api/staff/orders');
@@ -531,8 +589,7 @@ function renderStaffOrders(orders) {
 }
 
 function filterStaffOrders(status) {
-  const filtered = status ? staffOrders.filter(o => o.status === status) : staffOrders;
-  renderStaffOrders(filtered);
+  renderStaffOrders(status ? staffOrders.filter(o => o.status === status) : staffOrders);
 }
 
 async function updateOrderStatus(id, status) {
@@ -556,11 +613,14 @@ async function loadSummary() {
     const orders = await res.json();
     const today  = new Date().toLocaleDateString('en-PH');
 
-    const todayOrders = orders.filter(o => {
-      return new Date(o.date).toLocaleDateString('en-PH') === today;
-    });
+    const todayOrders = orders.filter(o =>
+      new Date(o.date).toLocaleDateString('en-PH') === today
+    );
 
-    const todayTotal  = todayOrders.filter(o => o.status === 'completed').reduce((s, o) => s + Number(o.total||0), 0);
+    const todayTotal = todayOrders
+      .filter(o => o.status === 'completed')
+      .reduce((s, o) => s + Number(o.total || 0), 0);
+
     document.getElementById('summaryToday').textContent  = peso(todayTotal);
     document.getElementById('summaryOrders').textContent = todayOrders.length;
     document.getElementById('summaryWalkin').textContent = todayOrders.filter(o => o.order_type === 'walk_in').length;
@@ -574,7 +634,7 @@ async function loadSummary() {
             <td>${badge(o.order_type)}</td>
             <td>${o.payment ? badge(o.payment.payment_method) : '—'}</td>
             <td>${peso(o.total)}</td>
-            <td>${new Date(o.date).toLocaleTimeString('en-PH', {hour:'2-digit',minute:'2-digit'})}</td>
+            <td>${new Date(o.date).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}</td>
             <td>${badge(o.status)}</td>
           </tr>`).join('')
       : '<tr><td colspan="7" class="table-empty">No transactions today yet</td></tr>';
@@ -583,6 +643,7 @@ async function loadSummary() {
 }
 
 // ─── Init ─────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
+  await loadBranches();   // load branches first — needed by POS + stock modal
   loadPosProducts();
 });
