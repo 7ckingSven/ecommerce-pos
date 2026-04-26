@@ -96,7 +96,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 1.2rem;
+  padding: 1.2rem 0.75rem;  /* matches nav padding so logo aligns with icons */
   border-bottom: 1px solid var(--border);
   min-height: 66px;
   overflow: hidden;
@@ -301,6 +301,12 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 /* Main shifts left to match collapsed sidebar */
 .sidebar.collapsed + .main {
   margin-left: 60px;
+}
+
+/* Center brand/logo when collapsed — matches nav icon alignment */
+.sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 1.2rem 0;
 }
 
 /* Hide brand text */
