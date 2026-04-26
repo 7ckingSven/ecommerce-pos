@@ -119,15 +119,10 @@ def login_post():
             flash('Invalid credentials. Please try again.', 'error')
             return redirect(url_for('login'))
 
+        # Web login is for admin and staff ONLY — customers use mobile app
         if user['role'] == 'customer':
-            customer_res = supabase.table('customer').select('*').eq('user_id', user['user_id']).execute()
-            if customer_res.data:
-                customer = customer_res.data[0]
-                session['user_id']     = user['user_id']
-                session['customer_id'] = customer['customer_id']
-                session['role']        = 'customer'
-                session['name']        = f"{customer['fname']} {customer['lname']}"
-                return redirect(url_for('customer_dashboard'))
+            flash('Customers must log in through the mobile app.', 'error')
+            return redirect(url_for('login'))
         elif user['role'] in ('admin', 'staff'):
             session['staff_verified_token']   = user['user_id']
             session['show_access_code_modal'] = True
