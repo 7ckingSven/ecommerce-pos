@@ -10,10 +10,7 @@
 </head>
 <body>
 
-  <!-- ─── SIDEBAR ───────────────────────────────────── -->
   <aside class="sidebar" id="sidebar">
-
-    <!-- Brand -->
     <div class="sidebar-brand">
       <img src="{{ url_for('static', filename='img/favicon.png') }}" alt="Logo" class="sidebar-logo"/>
       <div class="sidebar-brand-text">
@@ -22,7 +19,6 @@
       </div>
     </div>
 
-    <!-- Nav -->
     <nav class="sidebar-nav">
       <div class="nav-section-label">Main</div>
       <a href="#" class="nav-item active" onclick="showSection('overview', this)" data-tooltip="Overview">
@@ -57,7 +53,6 @@
       </a>
     </nav>
 
-    <!-- Sidebar Footer -->
     <div class="sidebar-footer">
       <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
         <span class="theme-icon-dark">
@@ -70,7 +65,6 @@
         </span>
         <div class="theme-toggle-thumb"></div>
       </button>
-
       <div class="sidebar-user">
         <div class="sidebar-user-avatar">{{ session.name[0] if session.name else 'A' }}</div>
         <div class="sidebar-user-info">
@@ -84,10 +78,7 @@
     </div>
   </aside>
 
-  <!-- ─── MAIN CONTENT ───────────────────────────────── -->
   <main class="main">
-
-    <!-- Topbar -->
     <header class="topbar">
       <div class="topbar-left">
         <button class="sidebar-toggle" onclick="toggleSidebar()">
@@ -104,378 +95,108 @@
       </div>
     </header>
 
-    <!-- ─── OVERVIEW SECTION ───────────────────────── -->
+    <!-- OVERVIEW -->
     <section class="section active" id="section-overview">
       <div class="stat-grid">
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--green">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Total Products</span>
-            <span class="stat-value" id="statProducts">—</span>
-            <span class="stat-sub">Active products</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--blue">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Total Orders</span>
-            <span class="stat-value" id="statOrders">—</span>
-            <span class="stat-sub">All time</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--yellow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Total Sales</span>
-            <span class="stat-value" id="statSales">—</span>
-            <span class="stat-sub">Revenue</span>
-          </div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--red">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Low Stock</span>
-            <span class="stat-value" id="statLowStock">—</span>
-            <span class="stat-sub">Items need restock</span>
-          </div>
-        </div>
+        <div class="stat-card"><div class="stat-icon stat-icon--green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg></div><div class="stat-info"><span class="stat-label">Total Products</span><span class="stat-value" id="statProducts">—</span><span class="stat-sub">Active products</span></div></div>
+        <div class="stat-card"><div class="stat-icon stat-icon--blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg></div><div class="stat-info"><span class="stat-label">Total Orders</span><span class="stat-value" id="statOrders">—</span><span class="stat-sub">All time</span></div></div>
+        <div class="stat-card"><div class="stat-icon stat-icon--yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-info"><span class="stat-label">Total Sales</span><span class="stat-value" id="statSales">—</span><span class="stat-sub">Revenue</span></div></div>
+        <div class="stat-card"><div class="stat-icon stat-icon--red"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg></div><div class="stat-info"><span class="stat-label">Low Stock</span><span class="stat-value" id="statLowStock">—</span><span class="stat-sub">Items need restock</span></div></div>
       </div>
-
       <div class="dashboard-grid">
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Recent Orders</h3>
-            <button class="btn-text" onclick="showSection('orders', document.querySelector('.nav-item:nth-child(4)'))">View all</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Order ID</th><th>Customer</th><th>Type</th><th>Total</th><th>Status</th></tr></thead>
-              <tbody id="recentOrdersBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">Low Stock Alert</h3>
-            <button class="btn-text" onclick="showSection('inventory', document.querySelector('.nav-item:nth-child(3)'))">Manage</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Product</th><th>Category</th><th>Stock</th></tr></thead>
-              <tbody id="lowStockBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
+        <div class="card"><div class="card-header"><h3 class="card-title">Recent Orders</h3><button class="btn-text" onclick="showSection('orders', document.querySelector('[onclick*=orders]'))">View all</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Order ID</th><th>Customer</th><th>Type</th><th>Total</th><th>Status</th></tr></thead><tbody id="recentOrdersBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody></table></div></div>
+        <div class="card"><div class="card-header"><h3 class="card-title">Low Stock Alert</h3><button class="btn-text" onclick="showSection('inventory', document.querySelector('[onclick*=inventory]'))">Manage</button></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Stock</th></tr></thead><tbody id="lowStockBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody></table></div></div>
       </div>
     </section>
 
-    <!-- ─── PRODUCTS SECTION ───────────────────────── -->
+    <!-- PRODUCTS -->
     <section class="section" id="section-products">
       <div class="section-toolbar">
-        <div class="search-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-input" placeholder="Search products..." oninput="filterProducts(this.value)"/>
-        </div>
+        <div class="search-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="search-input" placeholder="Search products..." oninput="filterProducts(this.value)"/></div>
         <div class="toolbar-right">
-          <select class="filter-select" onchange="filterByCategory(this.value)" id="categoryFilter">
-            <option value="">All Categories</option>
-          </select>
-          <button class="btn btn-solid-green" onclick="openProductModal()">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-            Add Product
-          </button>
+          <select class="filter-select" onchange="filterByCategory(this.value)" id="categoryFilter"><option value="">All Categories</option></select>
+          <button class="btn btn-solid-green" onclick="openProductModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Product</button>
         </div>
       </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Image</th><th>Product Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Discount</th><th>Stock</th><th>Status</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="productsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>Image</th><th>Product Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Discount</th><th>Stock</th><th>Status</th><th>Actions</th></tr></thead><tbody id="productsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody></table></div></div>
     </section>
 
-    <!-- ─── INVENTORY SECTION ──────────────────────── -->
+    <!-- INVENTORY -->
     <section class="section" id="section-inventory">
       <div class="section-toolbar">
-        <div class="search-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-input" placeholder="Search inventory..."/>
-        </div>
-        <button class="btn btn-solid-green" onclick="openInventoryModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add Stock
-        </button>
+        <div class="search-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="search-input" placeholder="Search inventory..."/></div>
+        <button class="btn btn-solid-green" onclick="openInventoryModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Stock</button>
       </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Product</th><th>Staff</th><th>Qty Added</th><th>Before</th><th>After</th><th>From Branch</th><th>To Branch</th><th>Date</th><th>Note</th></tr>
-            </thead>
-            <tbody id="inventoryBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Staff</th><th>Qty Added</th><th>Before</th><th>After</th><th>From Branch</th><th>To Branch</th><th>Date</th><th>Note</th></tr></thead><tbody id="inventoryBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody></table></div></div>
     </section>
 
-    <!-- ─── ORDERS SECTION ────────────────────────── -->
+    <!-- ORDERS -->
     <section class="section" id="section-orders">
       <div class="section-toolbar">
-        <div class="search-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-input" placeholder="Search orders..."/>
-        </div>
-        <select class="filter-select" onchange="filterOrders(this.value)">
-          <option value="">All Types</option>
-          <option value="online">Online</option>
-          <option value="walk_in">Walk-in</option>
-        </select>
-        <select class="filter-select" onchange="filterOrderStatus(this.value)">
-          <option value="">All Status</option>
-          <option value="pending">Pending</option>
-          <option value="processing">Processing</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
+        <div class="search-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="search-input" placeholder="Search orders..."/></div>
+        <select class="filter-select" onchange="filterOrders(this.value)"><option value="">All Types</option><option value="online">Online</option><option value="walk_in">Walk-in</option></select>
+        <select class="filter-select" onchange="filterOrderStatus(this.value)"><option value="">All Status</option><option value="pending">Pending</option><option value="processing">Processing</option><option value="completed">Completed</option><option value="cancelled">Cancelled</option></select>
       </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Order ID</th><th>Customer</th><th>Staff</th><th>Type</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="ordersBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>Order ID</th><th>Customer</th><th>Staff</th><th>Type</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Actions</th></tr></thead><tbody id="ordersBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody></table></div></div>
     </section>
 
-    <!-- ─── SALES REPORTS SECTION ─────────────────── -->
+    <!-- SALES REPORTS -->
     <section class="section" id="section-sales">
       <div class="stat-grid">
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--green">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-          </div>
-          <div class="stat-info"><span class="stat-label">Total Revenue</span><span class="stat-value" id="salesTotal">—</span><span class="stat-sub">All orders</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--blue">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
-          </div>
-          <div class="stat-info"><span class="stat-label">Online Sales</span><span class="stat-value" id="salesOnline">—</span><span class="stat-sub">Mobile app orders</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--yellow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-          </div>
-          <div class="stat-info"><span class="stat-label">Walk-in Sales</span><span class="stat-value" id="salesWalkin">—</span><span class="stat-sub">POS transactions</span></div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-icon stat-icon--green">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
-          </div>
-          <div class="stat-info"><span class="stat-label">Total Customers</span><span class="stat-value" id="salesCustomers">—</span><span class="stat-sub">Registered</span></div>
-        </div>
+        <div class="stat-card"><div class="stat-icon stat-icon--green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg></div><div class="stat-info"><span class="stat-label">Total Revenue</span><span class="stat-value" id="salesTotal">—</span><span class="stat-sub">All orders</span></div></div>
+        <div class="stat-card"><div class="stat-icon stat-icon--blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg></div><div class="stat-info"><span class="stat-label">Online Sales</span><span class="stat-value" id="salesOnline">—</span><span class="stat-sub">Mobile app orders</span></div></div>
+        <div class="stat-card"><div class="stat-icon stat-icon--yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg></div><div class="stat-info"><span class="stat-label">Walk-in Sales</span><span class="stat-value" id="salesWalkin">—</span><span class="stat-sub">POS transactions</span></div></div>
+        <div class="stat-card"><div class="stat-icon stat-icon--green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg></div><div class="stat-info"><span class="stat-label">Total Customers</span><span class="stat-value" id="salesCustomers">—</span><span class="stat-sub">Registered</span></div></div>
       </div>
       <div class="dashboard-grid">
-        <div class="card">
-          <div class="card-header"><h3 class="card-title">Sales by Payment Method</h3></div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Payment Method</th><th>Orders</th><th>Total</th></tr></thead>
-              <tbody id="paymentBreakdownBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-        <div class="card">
-          <div class="card-header"><h3 class="card-title">Top Selling Products</h3></div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
-              <tbody id="topProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
+        <div class="card"><div class="card-header"><h3 class="card-title">Sales by Payment Method</h3></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Payment Method</th><th>Orders</th><th>Total</th></tr></thead><tbody id="paymentBreakdownBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody></table></div></div>
+        <div class="card"><div class="card-header"><h3 class="card-title">Top Selling Products</h3></div><div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead><tbody id="topProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody></table></div></div>
       </div>
     </section>
 
-    <!-- ─── DISCOUNTS SECTION ─────────────────────── -->
+    <!-- DISCOUNTS -->
     <section class="section" id="section-discounts">
       <div class="section-toolbar">
-        <div class="search-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-input" placeholder="Search discounts..." oninput="filterDiscounts(this.value)"/>
-        </div>
-        <button class="btn btn-solid-green" onclick="openDiscountModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add Discount
-        </button>
+        <div class="search-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="search-input" placeholder="Search discounts..." oninput="filterDiscounts(this.value)"/></div>
+        <button class="btn btn-solid-green" onclick="openDiscountModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Discount</button>
       </div>
-
-      <!-- Discounts Table -->
       <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Discount List</h3>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Discount Name</th>
-                <th>Percentage</th>
-                <th>Assigned Products</th>
-                <th>Created</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody id="discountsBody">
-              <tr><td colspan="5" class="table-empty">Loading...</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="card-header"><h3 class="card-title">Discount List</h3></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Discount Name</th><th>Percentage</th><th>Assigned Products</th><th>Created</th><th>Actions</th></tr></thead><tbody id="discountsBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody></table></div>
       </div>
-
-      <!-- Products with Discounts -->
       <div class="card" style="margin-top:1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Products with Discounts</h3>
-          <button class="btn-text" onclick="loadDiscountedProducts()">Refresh</button>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th>Category</th>
-                <th>Original Price</th>
-                <th>Discount</th>
-                <th>Discounted Price</th>
-                <th>Action</th>
-              </tr>
-            </thead>
-            <tbody id="discountedProductsBody">
-              <tr><td colspan="6" class="table-empty">Loading...</td></tr>
-            </tbody>
-          </table>
-        </div>
+        <div class="card-header"><h3 class="card-title">Products with Discounts</h3><button class="btn-text" onclick="loadDiscountedProducts()">Refresh</button></div>
+        <div class="table-wrap"><table class="data-table"><thead><tr><th>Product</th><th>Category</th><th>Original Price</th><th>Discount</th><th>Discounted Price</th><th>Action</th></tr></thead><tbody id="discountedProductsBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody></table></div>
       </div>
     </section>
 
-    <!-- ─── USER MANAGEMENT SECTION ───────────────── -->
+    <!-- USER MANAGEMENT -->
     <section class="section" id="section-users">
       <div class="section-toolbar">
-        <div class="search-wrap">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-input" placeholder="Search users..."/>
-        </div>
-        <select class="filter-select" onchange="filterUserRole(this.value)">
-          <option value="">All Roles</option>
-          <option value="admin">Admin</option>
-          <option value="staff">Staff</option>
-          <option value="customer">Customer</option>
-        </select>
-        <button class="btn btn-solid-green" onclick="openUserModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Add Staff
-        </button>
+        <div class="search-wrap"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="search-input" placeholder="Search users..."/></div>
+        <select class="filter-select" onchange="filterUserRole(this.value)"><option value="">All Roles</option><option value="admin">Admin</option><option value="staff">Staff</option><option value="customer">Customer</option></select>
+        <button class="btn btn-solid-green" onclick="openUserModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>Add Staff</button>
       </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr>
-            </thead>
-            <tbody id="usersBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
+      <div class="card"><div class="table-wrap"><table class="data-table"><thead><tr><th>Name</th><th>Username</th><th>Email</th><th>Role</th><th>Status</th><th>Created</th><th>Actions</th></tr></thead><tbody id="usersBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody></table></div></div>
     </section>
-
   </main>
 
-  <!-- ═══════════════════════════════════════════════
-       MODALS
-  ═══════════════════════════════════════════════ -->
+  <!-- MODALS -->
 
   <!-- Product Modal -->
   <div class="modal-overlay" id="productModalOverlay" onclick="closeProductModal()"></div>
   <div class="modal" id="productModal">
-    <div class="modal-header">
-      <h3 class="modal-title" id="productModalTitle">Add Product</h3>
-      <button class="modal-close" onclick="closeProductModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
+    <div class="modal-header"><h3 class="modal-title" id="productModalTitle">Add Product</h3><button class="modal-close" onclick="closeProductModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <form id="productForm" onsubmit="submitProduct(event)">
         <input type="hidden" id="productId"/>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Product Name <span class="req">*</span></label>
-            <input type="text" id="pName" class="form-input" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Brand</label>
-            <input type="text" id="pBrand" class="form-input"/>
-          </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Category <span class="req">*</span></label>
-            <input type="text" id="pCategory" class="form-input" required placeholder="e.g. School Supplies"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Price (₱) <span class="req">*</span></label>
-            <input type="number" id="pPrice" class="form-input" step="0.01" min="0" required/>
-          </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Stock Quantity <span class="req">*</span></label>
-            <input type="number" id="pQuantity" class="form-input" min="0" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Status</label>
-            <select id="pStatus" class="form-input form-select">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
-        </div>
-        <!-- Discount assignment -->
-        <div class="form-group">
-          <label class="form-label">Discount (optional)</label>
-          <select id="pDiscount" class="form-input form-select">
-            <option value="">No Discount</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Description</label>
-          <textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..."></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Product Image</label>
-          <input type="file" id="pImage" class="form-input" accept="image/jpg,image/jpeg,image/png"/>
-          <span class="field-hint">JPG, JPEG, PNG only. Max 5MB.</span>
-          <img id="pImagePreview" style="display:none;margin-top:8px;max-height:120px;border-radius:8px;"/>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeProductModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save Product</button>
-        </div>
+        <div class="form-row-2"><div class="form-group"><label class="form-label">Product Name <span class="req">*</span></label><input type="text" id="pName" class="form-input" required/></div><div class="form-group"><label class="form-label">Brand</label><input type="text" id="pBrand" class="form-input"/></div></div>
+        <div class="form-row-2"><div class="form-group"><label class="form-label">Category <span class="req">*</span></label><input type="text" id="pCategory" class="form-input" required placeholder="e.g. School Supplies"/></div><div class="form-group"><label class="form-label">Price (₱) <span class="req">*</span></label><input type="number" id="pPrice" class="form-input" step="0.01" min="0" required/></div></div>
+        <div class="form-row-2"><div class="form-group"><label class="form-label">Stock Quantity <span class="req">*</span></label><input type="number" id="pQuantity" class="form-input" min="0" required/></div><div class="form-group"><label class="form-label">Status</label><select id="pStatus" class="form-input form-select"><option value="active">Active</option><option value="inactive">Inactive</option></select></div></div>
+        <div class="form-group"><label class="form-label">Discount (optional)</label><select id="pDiscount" class="form-input form-select"><option value="">No Discount</option></select></div>
+        <div class="form-group"><label class="form-label">Description</label><textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..."></textarea></div>
+        <div class="form-group"><label class="form-label">Product Image</label><input type="file" id="pImage" class="form-input" accept="image/jpg,image/jpeg,image/png"/><span class="field-hint">JPG, JPEG, PNG only. Max 5MB.</span><img id="pImagePreview" style="display:none;margin-top:8px;max-height:120px;border-radius:8px;"/></div>
+        <div class="modal-footer"><button type="button" class="btn btn-cancel" onclick="closeProductModal()">Cancel</button><button type="submit" class="btn btn-solid-green">Save Product</button></div>
       </form>
     </div>
   </div>
@@ -483,101 +204,42 @@
   <!-- Discount Modal -->
   <div class="modal-overlay" id="discountModalOverlay" onclick="closeDiscountModal()"></div>
   <div class="modal" id="discountModal">
-    <div class="modal-header">
-      <h3 class="modal-title" id="discountModalTitle">Add Discount</h3>
-      <button class="modal-close" onclick="closeDiscountModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
+    <div class="modal-header"><h3 class="modal-title" id="discountModalTitle">Add Discount</h3><button class="modal-close" onclick="closeDiscountModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <form id="discountForm" onsubmit="submitDiscount(event)">
         <input type="hidden" id="discountId"/>
         <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Discount Name <span class="req">*</span></label>
-            <input type="text" id="dName" class="form-input" required placeholder="e.g. Senior Citizen, Sale"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Percentage (%) <span class="req">*</span></label>
-            <input type="number" id="dPercentage" class="form-input" step="0.01" min="0.01" max="100" required placeholder="e.g. 10"/>
-          </div>
+          <div class="form-group"><label class="form-label">Discount Name <span class="req">*</span></label><input type="text" id="dName" class="form-input" required placeholder="e.g. Senior Citizen, Sale"/></div>
+          <div class="form-group"><label class="form-label">Percentage (%) <span class="req">*</span></label><input type="number" id="dPercentage" class="form-input" step="0.01" min="0.01" max="100" required placeholder="e.g. 10"/></div>
         </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeDiscountModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save Discount</button>
-        </div>
+        <div class="modal-footer"><button type="button" class="btn btn-cancel" onclick="closeDiscountModal()">Cancel</button><button type="submit" class="btn btn-solid-green">Save Discount</button></div>
       </form>
     </div>
   </div>
 
-  <!-- Assign Discount to Products Modal -->
+  <!-- Assign Discount Modal -->
   <div class="modal-overlay" id="assignModalOverlay" onclick="closeAssignModal()"></div>
   <div class="modal" id="assignModal" style="max-width:560px;">
-    <div class="modal-header">
-      <h3 class="modal-title" id="assignModalTitle">Assign Discount to Products</h3>
-      <button class="modal-close" onclick="closeAssignModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
+    <div class="modal-header"><h3 class="modal-title" id="assignModalTitle">Assign Discount to Products</h3><button class="modal-close" onclick="closeAssignModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem;">Select products to apply this discount to. Uncheck to remove discount from a product.</p>
-      <div class="search-wrap" style="margin-bottom:1rem;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" class="search-input" placeholder="Search products..." oninput="filterAssignProducts(this.value)"/>
-      </div>
-      <div id="assignProductList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
-        <p class="table-empty">Loading products...</p>
-      </div>
-      <div class="modal-footer" style="margin-top:1rem;">
-        <button type="button" class="btn btn-cancel" onclick="closeAssignModal()">Cancel</button>
-        <button type="button" class="btn btn-solid-green" onclick="submitAssign()">Apply</button>
-      </div>
+      <div class="search-wrap" style="margin-bottom:1rem;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg><input type="text" class="search-input" placeholder="Search products..." oninput="filterAssignProducts(this.value)"/></div>
+      <div id="assignProductList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"><p class="table-empty">Loading products...</p></div>
+      <div class="modal-footer" style="margin-top:1rem;"><button type="button" class="btn btn-cancel" onclick="closeAssignModal()">Cancel</button><button type="button" class="btn btn-solid-green" onclick="submitAssign()">Apply</button></div>
     </div>
   </div>
 
   <!-- Inventory Modal -->
   <div class="modal-overlay" id="inventoryModalOverlay" onclick="closeInventoryModal()"></div>
   <div class="modal" id="inventoryModal">
-    <div class="modal-header">
-      <h3 class="modal-title">Add Stock</h3>
-      <button class="modal-close" onclick="closeInventoryModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
+    <div class="modal-header"><h3 class="modal-title">Add Stock</h3><button class="modal-close" onclick="closeInventoryModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <form id="inventoryForm" onsubmit="submitInventory(event)">
-        <div class="form-group">
-          <label class="form-label">Product <span class="req">*</span></label>
-          <select id="invProduct" class="form-input form-select" required>
-            <option value="">Select product</option>
-          </select>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Quantity to Add <span class="req">*</span></label>
-            <input type="number" id="invQty" class="form-input" min="1" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">From Branch <span class="req">*</span></label>
-            <select id="invFromBranch" class="form-input form-select" required>
-              <option value="">Select branch</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">To Branch <span class="req">*</span></label>
-          <select id="invToBranch" class="form-input form-select" required>
-            <option value="">Select branch</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Note</label>
-          <textarea id="invNote" class="form-input form-textarea" rows="2" placeholder="Optional remarks..."></textarea>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeInventoryModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Add Stock</button>
-        </div>
+        <div class="form-group"><label class="form-label">Product <span class="req">*</span></label><select id="invProduct" class="form-input form-select" required><option value="">Select product</option></select></div>
+        <div class="form-row-2"><div class="form-group"><label class="form-label">Quantity to Add <span class="req">*</span></label><input type="number" id="invQty" class="form-input" min="1" required/></div><div class="form-group"><label class="form-label">From Branch <span class="req">*</span></label><select id="invFromBranch" class="form-input form-select" required><option value="">Select branch</option></select></div></div>
+        <div class="form-group"><label class="form-label">To Branch <span class="req">*</span></label><select id="invToBranch" class="form-input form-select" required><option value="">Select branch</option></select></div>
+        <div class="form-group"><label class="form-label">Note</label><textarea id="invNote" class="form-input form-textarea" rows="2" placeholder="Optional remarks..."></textarea></div>
+        <div class="modal-footer"><button type="button" class="btn btn-cancel" onclick="closeInventoryModal()">Cancel</button><button type="submit" class="btn btn-solid-green">Add Stock</button></div>
       </form>
     </div>
   </div>
@@ -585,73 +247,25 @@
   <!-- User Modal -->
   <div class="modal-overlay" id="userModalOverlay" onclick="closeUserModal()"></div>
   <div class="modal" id="userModal">
-    <div class="modal-header">
-      <h3 class="modal-title" id="userModalTitle">Add Staff</h3>
-      <button class="modal-close" onclick="closeUserModal()">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-      </button>
-    </div>
+    <div class="modal-header"><h3 class="modal-title" id="userModalTitle">Add Staff</h3><button class="modal-close" onclick="closeUserModal()"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button></div>
     <div class="modal-body">
       <form id="userForm" onsubmit="submitUser(event)">
         <input type="hidden" id="userId"/>
-        <div class="form-row-3">
-          <div class="form-group">
-            <label class="form-label">First Name <span class="req">*</span></label>
-            <input type="text" id="uFname" class="form-input" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">MI</label>
-            <input type="text" id="uMi" class="form-input" maxlength="5"/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Last Name <span class="req">*</span></label>
-            <input type="text" id="uLname" class="form-input" required/>
-          </div>
-        </div>
+        <div class="form-row-3"><div class="form-group"><label class="form-label">First Name <span class="req">*</span></label><input type="text" id="uFname" class="form-input" required/></div><div class="form-group"><label class="form-label">MI</label><input type="text" id="uMi" class="form-input" maxlength="5"/></div><div class="form-group"><label class="form-label">Last Name <span class="req">*</span></label><input type="text" id="uLname" class="form-input" required/></div></div>
+        <div class="form-row-2"><div class="form-group"><label class="form-label">Email <span class="req">*</span></label><input type="email" id="uEmail" class="form-input" required/></div><div class="form-group"><label class="form-label">Phone</label><input type="tel" id="uPhone" class="form-input" maxlength="11" placeholder="09XXXXXXXXX"/></div></div>
         <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Email <span class="req">*</span></label>
-            <input type="email" id="uEmail" class="form-input" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Phone</label>
-            <input type="tel" id="uPhone" class="form-input" maxlength="11" placeholder="09XXXXXXXXX"/>
-          </div>
+          <div class="form-group"><label class="form-label">Username <span class="req">*</span></label><input type="text" id="uUsername" class="form-input" required/></div>
+          <!-- Role is always Staff — Admin can only be added via SQL for security -->
+          <div class="form-group"><label class="form-label">Role</label><select id="uRole" class="form-input form-select"><option value="staff">Staff</option></select></div>
         </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Username <span class="req">*</span></label>
-            <input type="text" id="uUsername" class="form-input" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Role <span class="req">*</span></label>
-            <select id="uRole" class="form-input form-select" required>
-              <option value="staff">Staff</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Branch</label>
-          <select id="uBranch" class="form-input form-select">
-            <option value="">Select branch</option>
-          </select>
-        </div>
-        <div class="form-group" id="uPasswordGroup">
-          <label class="form-label">Password <span class="req">*</span></label>
-          <input type="password" id="uPassword" class="form-input" placeholder="Minimum 8 characters"/>
-        </div>
-        <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeUserModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save</button>
-        </div>
+        <div class="form-group"><label class="form-label">Branch</label><select id="uBranch" class="form-input form-select"><option value="">Select branch</option></select></div>
+        <div class="form-group" id="uPasswordGroup"><label class="form-label">Password <span class="req">*</span></label><input type="password" id="uPassword" class="form-input" placeholder="Minimum 8 characters"/></div>
+        <div class="modal-footer"><button type="button" class="btn btn-cancel" onclick="closeUserModal()">Cancel</button><button type="submit" class="btn btn-solid-green">Save</button></div>
       </form>
     </div>
   </div>
 
-  <!-- Toast Notification -->
   <div class="toast" id="toast"></div>
-
   <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 </body>
 </html>
