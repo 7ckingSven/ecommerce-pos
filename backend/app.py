@@ -521,7 +521,7 @@ def api_get_orders():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         res = supabase.table('order').select(
-            '*, order_item(*, product(product_name, image_url, price)), payment(*)'
+            '*, order_item(order_item_id, product_id, qty, price, product(product_name, image_url, price)), payment(*)'
         ).eq('customer_id', customer_id).order('date', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -554,7 +554,6 @@ def api_place_order():
             'order_type':  'online',
             'quantity':    quantity,
             'total':       total,
-            'ref_no':      ref_no if ref_no else None,
             'status':      'pending'
         }).execute()
 
@@ -562,7 +561,7 @@ def api_place_order():
         order_items = [{
             'order_id':   order_id,
             'product_id': item['product_id'],
-            'quantity':   item['quantity'],
+            'qty':        item['quantity'],   # schema uses qty not quantity
             'price':      item['price']
         } for item in cart_items]
 
@@ -573,7 +572,7 @@ def api_place_order():
             'customer_id':    customer_id,
             'payment_method': payment_method,
             'total':          total,
-            'ref_no':         ref_no if ref_no else None,
+            'ref_no':         ref_no if ref_no else None,  # ref_no lives on payment
             'status':         'paid' if payment_method == 'gcash' else 'pending'
         }).execute()
 
@@ -883,7 +882,6 @@ def admin_add_inventory():
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
-            'branch_id':       to_branch_id,
             'quantity_added':  qty_added,
             'quantity_before': qty_before,
             'quantity_after':  qty_after,
@@ -908,7 +906,7 @@ def admin_add_inventory():
 def admin_get_orders():
     try:
         res = supabase.table('order').select(
-            '*, customer(fname, lname), staff(fname, lname), order_item(*, product(product_name)), payment(*)'
+            '*, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(*)'
         ).order('date', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -1064,7 +1062,7 @@ def staff_get_branches():
 def staff_get_orders():
     try:
         res = supabase.table('order').select(
-            '*, customer(fname, lname), staff(fname, lname), order_item(*, product(product_name)), payment(*)'
+            '*, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(*)'
         ).order('date', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -1095,7 +1093,6 @@ def staff_place_order():
             'order_type': order_type,
             'quantity':   quantity,
             'total':      total,
-            'ref_no':     ref_no if ref_no else None,
             'status':     'completed',
         }).execute()
 
@@ -1105,7 +1102,7 @@ def staff_place_order():
         supabase.table('order_item').insert([{
             'order_id':   order_id,
             'product_id': item['product_id'],
-            'quantity':   item['quantity'],
+            'qty':        item['quantity'],   # schema uses qty not quantity
             'price':      item['price'],
         } for item in cart_items]).execute()
 
@@ -1114,7 +1111,7 @@ def staff_place_order():
             'order_id':       order_id,
             'payment_method': payment_method,
             'total':          total,
-            'ref_no':         ref_no if ref_no else None,
+            'ref_no':         ref_no if ref_no else None,  # ref_no lives on payment
             'status':         'paid',
         }).execute()
 
@@ -1195,7 +1192,6 @@ def staff_add_inventory():
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
-            'branch_id':       to_branch_id,
             'quantity_added':  qty_added,
             'quantity_before': qty_before,
             'quantity_after':  qty_after,
@@ -1214,14 +1210,6 @@ def staff_add_inventory():
         return jsonify({'error': str(e)}), 500
 
 # ──────────────────────────────────────────────────────
-
-@app.route('/dev-login-admin')
-def dev_login_admin():
-    session['user_id'] = 1
-    session['staff_id'] = 1
-    session['role'] = 'admin'
-    session['name'] = 'Dev Admin'
-    return redirect(url_for('admin_dashboard'))
 
 if __name__ == '__main__':
     app.run(host='0.0.0.0', port=5000, debug=True)
