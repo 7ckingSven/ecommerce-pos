@@ -764,13 +764,19 @@ async function loadUsers() {
 
 function renderUsers(users) {
   document.getElementById('usersBody').innerHTML = users.length
-    ? users.map(u => `
+    ? users.map(u => {
+        const s = Array.isArray(u.staff)    ? u.staff[0]    : u.staff;
+        const c = Array.isArray(u.customer) ? u.customer[0] : u.customer;
+        const name = s?.fname
+          ? `${s.fname} ${s.mi ? s.mi.trim() + ' ' : ''}${s.lname || ''}`.trim()
+          : c?.fname
+            ? `${c.fname} ${c.lname || ''}`.trim()
+            : u.username;
+        return `
         <tr>
-          <td>${u.staff
-            ? `${u.staff.fname} ${u.staff.mi ? u.staff.mi + ' ' : ''}${u.staff.lname}`
-            : u.customer ? `${u.customer.fname} ${u.customer.lname}` : '—'}</td>
+          <td>${name}</td>
           <td>${u.username}</td>
-          <td>${u.staff?.email || u.customer?.email || '—'}</td>
+          <td>${s?.email || c?.email || '—'}</td>
           <td>${badge(u.role)}</td>
           <td>${badge(u.status)}</td>
           <td>${new Date(u.created_at).toLocaleDateString('en-PH')}</td>
@@ -790,7 +796,8 @@ function renderUsers(users) {
               </button>
             </div>
           </td>
-        </tr>`).join('')
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="7" class="table-empty">No users found</td></tr>';
 }
 
@@ -799,21 +806,25 @@ function filterUserRole(role) {
 }
 
 function openUserModal(user = null) {
+  // staff and customer come back as arrays from Supabase — normalize to object
+  const s = user ? (Array.isArray(user.staff)    ? user.staff[0]    : user.staff)    : null;
+  const c = user ? (Array.isArray(user.customer) ? user.customer[0] : user.customer) : null;
+
   document.getElementById('userModalTitle').textContent = user ? 'Edit Staff' : 'Add Staff';
   document.getElementById('userId').value     = user?.user_id || '';
-  document.getElementById('uFname').value     = user?.staff?.fname || '';
-  document.getElementById('uMi').value        = user?.staff?.mi || '';
-  document.getElementById('uLname').value     = user?.staff?.lname || '';
-  document.getElementById('uEmail').value     = user?.staff?.email || '';
-  document.getElementById('uPhone').value     = user?.staff?.phone_number || '';
+  document.getElementById('uFname').value     = s?.fname || '';
+  document.getElementById('uMi').value        = s?.mi?.trim() || '';
+  document.getElementById('uLname').value     = s?.lname || '';
+  document.getElementById('uEmail').value     = s?.email || c?.email || '';
+  document.getElementById('uPhone').value     = s?.phone_number || '';
   document.getElementById('uUsername').value  = user?.username || '';
   document.getElementById('uRole').value      = user?.role || 'staff';
   document.getElementById('uPasswordGroup').style.display = user ? 'none' : 'block';
 
   // Populate branch dropdown
   populateBranchSelects('uBranch');
-  if (user?.staff?.branch_id) {
-    document.getElementById('uBranch').value = user.staff.branch_id;
+  if (s?.branch_id) {
+    document.getElementById('uBranch').value = s.branch_id;
   }
 
   document.getElementById('userModalOverlay').classList.add('open');
