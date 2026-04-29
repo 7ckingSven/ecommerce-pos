@@ -593,6 +593,23 @@ def api_place_order():
 
 
 # ══════════════════════════════════════════════════════
+
+# ─── CUSTOMER PROFILE ─────────────────────────────────
+
+@app.route('/api/customer/profile', methods=['GET'])
+def api_customer_profile():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        res = supabase.table('customer').select('*').eq('customer_id', customer_id).execute()
+        if not res.data:
+            return jsonify({'error': 'Customer not found.'}), 404
+        return jsonify(res.data[0]), 200
+    except Exception as e:
+        print(f'Customer profile error: {e}')
+        return jsonify({'error': 'Failed to fetch profile.'}), 500
+
 # ADMIN API ROUTES — Dashboard Data
 # ══════════════════════════════════════════════════════
 
