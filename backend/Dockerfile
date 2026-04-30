@@ -18,3 +18,7 @@ EXPOSE 5000
 
 # Run the Flask app
 CMD ["python", "app.py"]
+
+# TO UPDATE: docker build -t ecommerce-pos .
+
+# TO RUN: docker run -p 5000:5000 --env-file .env ecommerce-pos
