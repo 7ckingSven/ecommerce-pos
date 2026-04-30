@@ -23,21 +23,21 @@
 
     <nav class="sidebar-nav">
       <div class="nav-section-label">Main</div>
-      <a href="#" class="nav-item active" onclick="showSection('pos', this)">
+      <a href="#" class="nav-item active" onclick="showSection('pos', this)" data-tooltip="POS">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
-        POS
+        <span>POS</span>
       </a>
-      <a href="#" class="nav-item" onclick="showSection('inventory', this)">
+      <a href="#" class="nav-item" onclick="showSection('inventory', this)" data-tooltip="Inventory">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
-        Inventory
+        <span>Inventory</span>
       </a>
-      <a href="#" class="nav-item" onclick="showSection('orders', this)">
+      <a href="#" class="nav-item" onclick="showSection('orders', this)" data-tooltip="Orders">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-        Orders
+        <span>Orders</span>
       </a>
-      <a href="#" class="nav-item" onclick="showSection('summary', this)">
+      <a href="#" class="nav-item" onclick="showSection('summary', this)" data-tooltip="Sales Summary">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
-        Sales Summary
+        <span>Sales Summary</span>
       </a>
     </nav>
 
@@ -45,11 +45,11 @@
       <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">
         <span class="theme-icon-dark">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
-          Dark
+          <span>Dark</span>
         </span>
         <span class="theme-icon-light">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
-          Light
+          <span>Light</span>
         </span>
       </button>
 
@@ -114,10 +114,18 @@
             <button class="btn-text" onclick="clearOrder()">Clear</button>
           </div>
 
-          <!-- Customer Search (optional) -->
+          <!-- Branch selector for this transaction -->
+          <div class="pos-customer-wrap" style="margin-bottom:8px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <select id="posBranch" class="search-input" style="font-size:12px;border:none;background:transparent;cursor:pointer;">
+              <option value="">Select branch for this transaction *</option>
+            </select>
+          </div>
+
+          <!-- Customer name (optional) -->
           <div class="pos-customer-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="8" r="4"/></svg>
-            <input type="text" id="posCustomer" class="search-input" placeholder="Customer name (optional — for walk-in)" style="font-size:12px;"/>
+            <input type="text" id="posCustomer" class="search-input" placeholder="Customer name (optional)" style="font-size:12px;"/>
           </div>
 
           <!-- Order Items -->
@@ -201,94 +209,53 @@
         </button>
       </div>
 
-      <!-- Stock Overview Cards -->
       <div class="stat-grid" style="margin-bottom:1rem;">
         <div class="stat-card">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Total Products</span>
-            <span class="stat-value" id="invTotalProducts">—</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Total Products</span><span class="stat-value" id="invTotalProducts">—</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Low Stock</span>
-            <span class="stat-value" id="invLowStock">—</span>
-            <span class="stat-sub">≤ 10 units</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Low Stock</span><span class="stat-value" id="invLowStock">—</span><span class="stat-sub">≤ 10 units</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--red">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Out of Stock</span>
-            <span class="stat-value" id="invOutOfStock">—</span>
-            <span class="stat-sub">0 units</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Out of Stock</span><span class="stat-value" id="invOutOfStock">—</span><span class="stat-sub">0 units</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Recent Restocks</span>
-            <span class="stat-value" id="invRecentRestocks">—</span>
-            <span class="stat-sub">This week</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Recent Restocks</span><span class="stat-value" id="invRecentRestocks">—</span><span class="stat-sub">This week</span></div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Product Stock Levels</h3>
-        </div>
+        <div class="card-header"><h3 class="card-title">Product Stock Levels</h3></div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr>
-                <th>Product</th>
-                <th>Brand</th>
-                <th>Category</th>
-                <th>Price</th>
-                <th>Stock</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
+              <tr><th>Product</th><th>Brand</th><th>Category</th><th>Price</th><th>Stock</th><th>Status</th><th>Action</th></tr>
             </thead>
-            <tbody id="invProductsBody">
-              <tr><td colspan="7" class="table-empty">Loading...</td></tr>
-            </tbody>
+            <tbody id="invProductsBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
 
       <div class="card" style="margin-top:1rem;">
-        <div class="card-header">
-          <h3 class="card-title">Stock Movement History</h3>
-        </div>
+        <div class="card-header"><h3 class="card-title">Stock Movement History</h3></div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr>
-                <th>Product</th>
-                <th>Qty Added</th>
-                <th>Before</th>
-                <th>After</th>
-                <th>From Branch</th>
-                <th>To Branch</th>
-                <th>Date</th>
-                <th>Note</th>
-              </tr>
+              <tr><th>Product</th><th>Qty Added</th><th>Before</th><th>After</th><th>From Branch</th><th>To Branch</th><th>Date</th><th>Note</th></tr>
             </thead>
-            <tbody id="invHistoryBody">
-              <tr><td colspan="8" class="table-empty">Loading...</td></tr>
-            </tbody>
+            <tbody id="invHistoryBody"><tr><td colspan="8" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -313,21 +280,9 @@
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr>
-                <th>Order ID</th>
-                <th>Customer</th>
-                <th>Type</th>
-                <th>Items</th>
-                <th>Total</th>
-                <th>Payment</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th>Action</th>
-              </tr>
+              <tr><th>Order ID</th><th>Customer</th><th>Type</th><th>Items</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Action</th></tr>
             </thead>
-            <tbody id="staffOrdersBody">
-              <tr><td colspan="9" class="table-empty">Loading...</td></tr>
-            </tbody>
+            <tbody id="staffOrdersBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -340,60 +295,36 @@
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Today's Sales</span>
-            <span class="stat-value" id="summaryToday">—</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Today's Sales</span><span class="stat-value" id="summaryToday">—</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Today's Orders</span>
-            <span class="stat-value" id="summaryOrders">—</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Today's Orders</span><span class="stat-value" id="summaryOrders">—</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Walk-in Orders</span>
-            <span class="stat-value" id="summaryWalkin">—</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Walk-in Orders</span><span class="stat-value" id="summaryWalkin">—</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
           </div>
-          <div class="stat-info">
-            <span class="stat-label">Online Orders</span>
-            <span class="stat-value" id="summaryOnline">—</span>
-          </div>
+          <div class="stat-info"><span class="stat-label">Online Orders</span><span class="stat-value" id="summaryOnline">—</span></div>
         </div>
       </div>
 
       <div class="card">
-        <div class="card-header">
-          <h3 class="card-title">Today's Transactions</h3>
-        </div>
+        <div class="card-header"><h3 class="card-title">Today's Transactions</h3></div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr>
-                <th>Order ID</th>
-                <th>Customer</th>
-                <th>Type</th>
-                <th>Payment</th>
-                <th>Total</th>
-                <th>Time</th>
-                <th>Status</th>
-              </tr>
+              <tr><th>Order ID</th><th>Customer</th><th>Type</th><th>Payment</th><th>Total</th><th>Time</th><th>Status</th></tr>
             </thead>
-            <tbody id="summaryTodayBody">
-              <tr><td colspan="7" class="table-empty">Loading...</td></tr>
-            </tbody>
+            <tbody id="summaryTodayBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -427,19 +358,17 @@
           </div>
           <div class="form-group">
             <label class="form-label">From Branch <span class="req">*</span></label>
+            <!-- Populated dynamically from /api/staff/branches -->
             <select id="stockFromBranch" class="form-input form-select" required>
               <option value="">Select branch</option>
-              <option value="Triple E">Triple E</option>
-              <option value="Fiel Collins">Fiel Collins</option>
             </select>
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">To Branch <span class="req">*</span></label>
+          <!-- Populated dynamically from /api/staff/branches -->
           <select id="stockToBranch" class="form-input form-select" required>
             <option value="">Select branch</option>
-            <option value="Triple E">Triple E</option>
-            <option value="Fiel Collins">Fiel Collins</option>
           </select>
         </div>
         <div class="form-group">
