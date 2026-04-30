@@ -329,6 +329,118 @@
 .receipt-total { font-weight: 700; font-size: 14px; }
 .receipt-footer { text-align: center; margin-top: 1rem; font-size: 11px; color: var(--text-muted); }
 
+/* ══════════════════════════════════════════════════════
+   SIDEBAR COLLAPSE — Staff (same logic as admin.css)
+   ══════════════════════════════════════════════════════ */
+
+/* Nav item spans wrap text — required for collapse to work */
+.sidebar-nav .nav-item span {
+  overflow: hidden;
+  white-space: nowrap;
+  transition: opacity var(--transition);
+}
+
+/* Collapsed width */
+.sidebar.collapsed {
+  width: 60px;
+}
+
+.sidebar.collapsed + .main {
+  margin-left: 60px;
+}
+
+/* Center brand/logo */
+.sidebar.collapsed .sidebar-brand {
+  justify-content: center;
+  padding: 1.2rem 12px;
+  min-height: 66px;
+}
+.sidebar.collapsed .sidebar-brand-text {
+  opacity: 0;
+  width: 0;
+  pointer-events: none;
+}
+
+/* Hide section labels */
+.sidebar.collapsed .nav-section-label {
+  opacity: 0;
+  height: 0;
+  padding: 0;
+  margin: 0;
+  pointer-events: none;
+}
+
+/* Center nav icons */
+.sidebar.collapsed .nav-item {
+  justify-content: center;
+  padding: 9px 0;
+  gap: 0;
+}
+.sidebar.collapsed .nav-item span {
+  opacity: 0;
+  width: 0;
+  pointer-events: none;
+}
+
+/* Theme toggle — icon only */
+.sidebar.collapsed .theme-toggle {
+  justify-content: center;
+  padding: 8px;
+}
+.sidebar.collapsed .theme-icon-dark span,
+.sidebar.collapsed .theme-icon-light span {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+.sidebar.collapsed .theme-icon-dark,
+.sidebar.collapsed .theme-icon-light {
+  flex: unset;
+  gap: 0;
+}
+
+/* User row — avatar only */
+.sidebar.collapsed .sidebar-user {
+  justify-content: center;
+  padding: 8px 4px;
+}
+.sidebar.collapsed .sidebar-user-info {
+  opacity: 0;
+  width: 0;
+  pointer-events: none;
+}
+.sidebar.collapsed .sidebar-logout {
+  display: none;
+}
+
+/* Tooltips on hover when collapsed */
+.sidebar.collapsed .nav-item {
+  position: relative;
+}
+.sidebar.collapsed .nav-item::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 12px);
+  top: 50%;
+  transform: translateY(-50%);
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 5px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease;
+  z-index: 200;
+  box-shadow: 0 4px 12px var(--shadow);
+}
+.sidebar.collapsed .nav-item:hover::after {
+  opacity: 1;
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 1100px) {
   .pos-layout { grid-template-columns: 1fr 320px; }
@@ -336,4 +448,8 @@
 @media (max-width: 900px) {
   .pos-layout { grid-template-columns: 1fr; height: auto; }
   .pos-right { min-height: 400px; }
+}
+@media (max-width: 768px) {
+  .sidebar.collapsed { width: 240px !important; }
+  .sidebar.collapsed + .main { margin-left: 0 !important; }
 }
