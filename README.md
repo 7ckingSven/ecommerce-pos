@@ -7,12 +7,13 @@ A capstone project built for **Triple E and Fiel Collins General Merchandise** �
 
 ## Project Overview
 
-This system serves two types of users:
+This system serves three types of users:
 
-- **Staff (Web — Desktop)** — Admin, Cashier, and Secretary access the system through a web browser on desktop. Each role has a dedicated dashboard for managing products, inventory, POS, orders, and reports.
-- **Customers (Mobile — Android)** — Customers use a React Native Android app to browse products, place orders, manage their cart, and view their membership and credit.
+- **Admin (Web — Desktop)** — Access the system through a web browser on desktop with full control over products, discounts, users, reports, and audit trail.
+- **Staff (Web — Desktop)** — Access the system through a web browser on desktop to manage POS, inventory (including branch transfers), discounts, products, users, and sales reports.
+- **Customers (Mobile — Android)** — Customers use a React Native Android app to browse products, place orders, manage their cart, and view order history.
 
-A single unified login handles all users. Staff credentials trigger an additional access code verification before redirecting to the appropriate dashboard.
+A single unified login handles all users. Admin and Staff credentials trigger an additional access code verification before redirecting to their respective dashboard.
 
 ---
 
@@ -23,20 +24,28 @@ A single unified login handles all users. Staff credentials trigger an additiona
 - Filter products by category
 - Add to cart and checkout
 - View order history
-- Member and non-member registration
-- Credit (utang) tracking for members
-- Exclusive member discounts
+- User registration
+
+### Admin (Web System)
+- **Product Management** — Add, edit, delete products and manage product catalog
+- **Inventory Management** — Track stock levels with branch identification (source branch and receiving branch)
+- **Discount Management** — Create and manage product discounts
+- **User Management** — Manage Admin and Staff user accounts
+- **Sales Report** — View and analyze sales data and trends
 
 ### Staff (Web System)
-- **Admin** — Product management, discount management, user management, reports, audit trail
-- **Cashier** — POS checkout, order processing, sales transactions
-- **Secretary** — Inventory management, membership management, credit management
+- **POS (Sales Management)** — Process customer checkout and manage sales transactions
+- **Inventory Management** — View stock levels, manage branch transfers with source/destination tracking
+- **Product Management** — View product catalog and stock information
+- **Discount Management** — View and apply active discounts
+- **User Management** — View and manage staff accounts
+- **Sales Report** — View sales summary and transaction history
 
 ### System-Wide
-- Unified login for all users (customers + staff)
-- Staff access code verification modal
+- Unified login for all users (customers + admin/staff)
+- Admin and Staff access code verification modal
 - Role-based dashboard routing
-- Supabase PostgreSQL database with RLS
+- Supabase PostgreSQL database with Row Level Security (RLS)
 - CORS-enabled Flask API for mobile
 
 ---
@@ -54,8 +63,7 @@ A single unified login handles all users. Staff credentials trigger an additiona
 | Mobile Navigation | React Navigation v6 (Bottom Tabs + Stack) |
 | Version Control | GitHub |
 | Containerization | Docker |
-| Deployment (Backend) | Railway |
-| Deployment (Frontend) | Vercel |
+| Deployment | Render |
 
 ---
 
@@ -64,33 +72,34 @@ A single unified login handles all users. Staff credentials trigger an additiona
 ```
 ecommerce-pos/
 │
-├── backend/                          ← Flask web system (Staff)
+├── backend/                          ← Flask web system (Admin & Staff)
 │   ├── static/
 │   │   ├── css/
 │   │   │   ├── style.css             ← main stylesheet (dark green theme)
 │   │   │   ├── index.css             ← public product showcase styles
 │   │   │   ├── landing.css           ← landing page styles
-│   │   │   └── register.css          ← registration page styles
+│   │   │   ├── register.css          ← registration page styles
+│   │   │   ├── admin.css             ← admin dashboard styles
+│   │   │   └── staff.css             ← staff dashboard styles
 │   │   ├── js/
 │   │   │   ├── login.js              ← unified login: eye toggle, modals
 │   │   │   ├── register.js           ← 3-step registration flow
-│   │   │   └── index.js              ← public showcase interactions
+│   │   │   ├── index.js              ← public showcase interactions
+│   │   │   ├── admin.js              ← admin dashboard functionality
+│   │   │   └── staff.js              ← staff dashboard functionality
 │   │   └── img/
 │   │       └── favicon.png           ← TE logo (also used as mobile app icon)
 │   │
 │   ├── templates/
+│   │   ├── base.html                 ← base template
 │   │   ├── landing.html              ← public landing page (APK download + Staff Login)
 │   │   ├── index.html                ← public product showcase (/home)
 │   │   ├── login.html                ← unified login (customers + staff)
 │   │   ├── register.html             ← 3-step customer registration
 │   │   ├── admin/
-│   │   │   └── dashboard.html        ← admin dashboard (pending)
-│   │   ├── cashier/
-│   │   │   └── dashboard.html        ← cashier dashboard (pending)
-│   │   ├── secretary/
-│   │   │   └── dashboard.html        ← secretary dashboard (pending)
-│   │   └── customer/
-│   │       └── dashboard.html        ← customer web dashboard (pending)
+│   │   │   └── dashboard.html        ← admin dashboard
+│   │   └── staff/
+│   │       └── dashboard.html        ← staff dashboard
 │   │
 │   ├── venv/                         ← Python virtual environment (not committed)
 │   ├── app.py                        ← Flask routes + mobile API endpoints
@@ -109,17 +118,33 @@ ecommerce-pos/
 │   │   │   ├── LoginScreen.js        ← unified login with Feather icons
 │   │   │   ├── RegisterScreen.js     ← 3-step registration
 │   │   │   ├── HomeScreen.js         ← product grid with search + categories
-│   │   │   └── CartScreen.js         ← shopping cart
+│   │   │   ├── ProductDetailScreen.js ← product details
+│   │   │   ├── CartScreen.js         ← shopping cart
+│   │   │   ├── CheckOutScreen.js     ← checkout process
+│   │   │   ├── OrdersScreen.js       ← order history
+│   │   │   └── ProfileScreen.js      ← user profile
 │   │   ├── services/
 │   │   │   ├── api.js                ← axios instance (base URL config)
 │   │   │   ├── authService.js        ← login, register, logout
-│   │   │   └── productService.js     ← product and catalog API calls
+│   │   │   ├── productService.js     ← product and catalog API calls
+│   │   │   ├── cartService.js        ← cart management
+│   │   │   └── orderService.js       ← order management
 │   │   └── utils/
 │   │       └── constants.js          ← colors, spacing, typography, API URL
 │   ├── android/                      ← Android build files
 │   ├── ios/                          ← iOS build files
 │   ├── App.tsx                       ← app entry point
-│   └── package.json
+│   ├── package.json
+│   ├── app.json
+│   ├── babel.config.js
+│   ├── metro.config.js
+│   ├── tsconfig.json
+│   ├── jest.config.js
+│   ├── index.js
+│   ├── app.js
+│   ├── Gemfile
+│   └── __tests__/
+│       └── App.test.tsx
 │
 ├── .gitignore
 └── README.md
@@ -139,9 +164,7 @@ ecommerce-pos/
 | `/register` | `register.html` | Anyone |
 | `/verify-staff-code` | — | Staff (POST — access code check) |
 | `/admin/dashboard` | `admin/dashboard.html` | Admin only |
-| `/cashier/dashboard` | `cashier/dashboard.html` | Cashier only |
-| `/secretary/dashboard` | `secretary/dashboard.html` | Secretary only |
-| `/customer/dashboard` | `customer/dashboard.html` | Logged-in customers |
+| `/staff/dashboard` | `staff/dashboard.html` | Staff only |
 | `/logout` | — | All users |
 
 ### Mobile API Routes (Flask)
@@ -162,11 +185,11 @@ Single /login page
        ↓
 User submits credentials
        ↓
-Flask checks Customer table → match → Customer Dashboard
+Flask checks Customer table → match → Customer Mobile Dashboard
        ↓ no match
-Flask checks User table (staff) → match → Access Code Modal
+Flask checks User table (admin/staff) → match → Access Code Modal
        ↓ correct code
-Redirect to role dashboard (Admin / Cashier / Secretary)
+Redirect to role dashboard (Admin / Staff)
 ```
 
 ---
@@ -179,11 +202,11 @@ This project uses **Supabase (PostgreSQL)** with **14 tables** and Row Level Sec
 `customer` → `membership` → `credit` → `staff` → `user` → `product_catalog` → `product` → `inventory` → `price_history` → `discount` → `shopping_cart` → `cart_item` → `order` → `sales_transaction`
 
 ### Key Business Rules
-- Credits (utang) are for **members only**, due within 1 month
-- Special discounts apply to **members only** (`applicable_to` field)
 - Payment methods: **walk-in cash**, **cash on delivery**, or **GCash** (reference number only)
-- Staff roles: **Admin**, **Cashier**, **Secretary**
+- **Inventory Tracking** — Stock movements tracked by source branch and receiving branch
+- User types: **Admin**, **Staff**, **Customer**
 - Customers can log in via **email**, **username**, or **phone number**
+- System Scope: Product Management, Inventory Management, Discount Management, POS (Sales Management), User Management, Sales Reporting
 
 ---
 
