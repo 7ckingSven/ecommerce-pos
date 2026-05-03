@@ -196,10 +196,10 @@ Redirect to role dashboard (Admin / Staff)
 
 ## Database
 
-This project uses **Supabase (PostgreSQL)** with **14 tables** and Row Level Security (RLS) enabled.
+This project uses **Supabase (PostgreSQL)** with **12 tables** and Row Level Security (RLS) enabled.
 
 ### Tables
-`customer` → `membership` → `credit` → `staff` → `user` → `product_catalog` → `product` → `inventory` → `price_history` → `discount` → `shopping_cart` → `cart_item` → `order` → `sales_transaction`
+`branch` → `customer` → `user` → `staff` → `product` → `inventory` → `discount` → `order` → `order_item` → `payment` → `cart` → `sales_transaction`
 
 ### Key Business Rules
 - Payment methods: **walk-in cash**, **cash on delivery**, or **GCash** (reference number only)
