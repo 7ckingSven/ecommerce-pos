@@ -72,15 +72,15 @@
         </div>
         <div class="feature-row">
           <div class="feature-box">
-            <svg viewBox="0 0 24 24"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+            <svg viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
           </div>
-          <span class="feature-label">Exclusive member discounts and perks</span>
+          <span class="feature-label">Seamless inventory management</span>
         </div>
         <div class="feature-row">
           <div class="feature-box">
-            <svg viewBox="0 0 24 24"><rect x="1" y="4" width="22" height="16" rx="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
+            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
           </div>
-          <span class="feature-label">Buy now, pay later for members</span>
+          <span class="feature-label">Fast and secure checkout</span>
         </div>
         <div class="feature-row">
           <div class="feature-box">
@@ -113,34 +113,13 @@
         <!-- QR Code -->
         <div class="landing-qr-wrap">
           <div class="landing-qr-box">
-            <svg viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg" class="landing-qr-svg">
-              <rect x="10" y="10" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3"/>
-              <rect x="17" y="17" width="16" height="16" fill="currentColor"/>
-              <rect x="60" y="10" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3"/>
-              <rect x="67" y="17" width="16" height="16" fill="currentColor"/>
-              <rect x="10" y="60" width="30" height="30" fill="none" stroke="currentColor" stroke-width="3"/>
-              <rect x="17" y="67" width="16" height="16" fill="currentColor"/>
-              <rect x="60" y="60" width="8" height="8" fill="currentColor"/>
-              <rect x="72" y="60" width="8" height="8" fill="currentColor"/>
-              <rect x="84" y="60" width="8" height="8" fill="currentColor"/>
-              <rect x="60" y="72" width="8" height="8" fill="currentColor"/>
-              <rect x="84" y="72" width="8" height="8" fill="currentColor"/>
-              <rect x="60" y="84" width="8" height="8" fill="currentColor"/>
-              <rect x="72" y="84" width="8" height="8" fill="currentColor"/>
-              <rect x="84" y="84" width="8" height="8" fill="currentColor"/>
-              <rect x="44" y="10" width="8" height="8" fill="currentColor"/>
-              <rect x="44" y="22" width="8" height="8" fill="currentColor"/>
-              <rect x="44" y="44" width="8" height="8" fill="currentColor"/>
-              <rect x="10" y="44" width="8" height="8" fill="currentColor"/>
-              <rect x="22" y="44" width="8" height="8" fill="currentColor"/>
-              <rect x="44" y="56" width="8" height="8" fill="currentColor"/>
-            </svg>
+            <img src="{{ url_for('static', filename='img/app-qr-code.png') }}" alt="Scan to Download APK" class="landing-qr-img"/>
             <p class="landing-qr-label">Scan to Download</p>
           </div>
         </div>
 
         <!-- Download Button -->
-        <a href="#" class="btn btn-solid-green btn-full">
+        <a href="https://drive.google.com/uc?export=download&id=1HFlELra4fHJ9O1HC3occ1F76vtm6B3w5" class="btn btn-solid-green btn-full" download>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/>
@@ -169,7 +148,7 @@
           No account yet? <a href="{{ url_for('register') }}">Register here</a>
         </p>
 
-        <p class="landing-coming-soon">Android app — available soon</p>
+        <p class="landing-coming-soon">Download Android app to get started</p>
 
       </div>
     </div>

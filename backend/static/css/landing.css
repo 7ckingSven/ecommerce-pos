@@ -46,6 +46,13 @@
   color: var(--dark);
 }
 
+.landing-qr-img {
+  width: 140px;
+  height: 140px;
+  border-radius: 4px;
+  object-fit: contain;
+}
+
 .landing-qr-label {
   font-size: 11px;
   color: var(--text-muted);
