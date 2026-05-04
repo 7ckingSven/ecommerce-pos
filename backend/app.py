@@ -175,6 +175,71 @@ def verify_staff_code():
 
     return redirect(url_for('login'))
 
+# ─── REGISTER ─────────────────────────────────────────
+
+@app.route('/register', methods=['GET', 'POST'])
+def register():
+    if request.method == 'POST':
+        fname        = request.form.get('fname', '').strip()
+        mi           = request.form.get('mi', '').strip()
+        lname        = request.form.get('lname', '').strip()
+        email        = request.form.get('email', '').strip()
+        username     = request.form.get('username', '').strip()
+        phone_number = request.form.get('phone_number', '').strip()
+        password     = request.form.get('password', '')
+        address      = request.form.get('address', '').strip()
+        dob          = request.form.get('dob', '')
+        gender       = request.form.get('gender', '')
+
+        if not all([fname, lname, email, username, phone_number, password]):
+            flash('Please fill in all required fields.', 'error')
+            return redirect(url_for('register'))
+
+        try:
+            if supabase.table('user').select('user_id').eq('username', username).execute().data:
+                flash('Username already taken. Please choose another.', 'error')
+                return redirect(url_for('register'))
+
+            if supabase.table('customer').select('customer_id').eq('email', email).execute().data:
+                flash('Email already registered.', 'error')
+                return redirect(url_for('register'))
+
+            if supabase.table('customer').select('customer_id').eq('phone_number', phone_number).execute().data:
+                flash('Phone number already registered.', 'error')
+                return redirect(url_for('register'))
+
+            hashed   = hash_password(password)
+            user_res = supabase.table('user').insert({
+                'username': username,
+                'password': hashed,
+                'role':     'customer',
+                'status':   'active'
+            }).execute()
+
+            user_id = user_res.data[0]['user_id']
+
+            supabase.table('customer').insert({
+                'user_id':      user_id,
+                'fname':        fname,
+                'mi':           mi,
+                'lname':        lname,
+                'phone_number': phone_number,
+                'email':        email,
+                'address':      address,
+                'dob':          dob if dob else None,
+                'gender':       gender if gender else None
+            }).execute()
+
+            flash('Account created successfully! Please log in.', 'success')
+            return redirect(url_for('login'))
+
+        except Exception as e:
+            print(f"Registration error: {e}")
+            flash('Registration failed. Please try again.', 'error')
+            return redirect(url_for('register'))
+
+    return render_template('register.html')
+
 # ─── FORGOT PASSWORD ──────────────────────────────────
 
 @app.route('/forgot-password', methods=['POST'])
