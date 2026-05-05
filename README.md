@@ -162,6 +162,8 @@ ecommerce-pos/
 | `/home` | `index.html` | Public — product showcase |
 | `/login` | `login.html` | All users (unified) |
 | `/register` | `register.html` | Anyone |
+| `/forgot-password` | `forgot_password.html` | Public — request OTP via email |
+| `/verify-otp` | `verify_otp.html` | Public — enter OTP and reset password |
 | `/verify-staff-code` | — | Staff (POST — access code check) |
 | `/admin/dashboard` | `admin/dashboard.html` | Admin only |
 | `/staff/dashboard` | `staff/dashboard.html` | Staff only |
@@ -173,6 +175,8 @@ ecommerce-pos/
 |---|---|---|
 | `/api/login` | POST | Customer login |
 | `/api/register` | POST | Customer registration |
+| `/api/forgot-password` | POST | Request OTP for password reset (email or SMS) |
+| `/api/verify-otp-mobile` | POST | Verify OTP and reset password |
 | `/api/products` | GET | Get all active products |
 | `/api/products/search` | GET | Search products by name |
 
@@ -207,6 +211,37 @@ This project uses **Supabase (PostgreSQL)** with **12 tables** and Row Level Sec
 - User types: **Admin**, **Staff**, **Customer**
 - Customers can log in via **email**, **username**, or **phone number**
 - System Scope: Product Management, Inventory Management, Discount Management, POS (Sales Management), User Management, Sales Reporting
+
+---
+
+## Authentication & Password Reset
+
+### Login System
+- **Unified login** at `/login` for all user types (customers, admin, staff)
+- Web users (admin/staff) require an additional **access code verification** modal after login
+- Mobile customers authenticate via API tokens
+
+### Password Reset with OTP
+The system uses **Supabase Auth's native OTP feature** for secure password recovery:
+
+**Web Users (Admin/Staff):**
+1. Click "Forgot Password?" link on login page → `/forgot-password`
+2. Enter email address
+3. Supabase sends OTP via email
+4. Enter OTP + new password → `/verify-otp`
+5. Password is securely updated and user redirected to login
+
+**Mobile Users (Customers):**
+1. Call `/api/forgot-password` with email/phone and method (email/SMS)
+2. Supabase sends OTP via selected method
+3. Call `/api/verify-otp-mobile` with OTP and new password
+4. Password is updated, user can log in with new credentials
+
+### Security Features
+- OTP tokens are time-limited (typically 10 minutes)
+- Session-based email/OTP tracking prevents token bypass
+- Password hashing with secure algorithms
+- Supabase Auth prevents account enumeration (same response for existing/non-existing emails)
 
 ---
 

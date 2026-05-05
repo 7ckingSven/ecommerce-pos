@@ -173,10 +173,91 @@ def verify_staff_code():
 
 # ─── FORGOT PASSWORD ──────────────────────────────────
 
-@app.route('/forgot-password', methods=['POST'])
+@app.route('/forgot-password', methods=['GET', 'POST'])
 def forgot_password():
-    flash('If this email is registered, a reset link has been sent.', 'success')
-    return redirect(url_for('login'))
+    if request.method == 'POST':
+        email = request.form.get('email', '').strip()
+        
+        if not email:
+            flash('Please enter your email address.', 'error')
+            return redirect(url_for('forgot_password'))
+        
+        try:
+            # Check if user exists
+            user_res = supabase.table('user').select('user_id').eq('email', email).execute()
+            
+            if not user_res.data:
+                # Security: Don't reveal if email exists
+                flash('If this email is registered, an OTP has been sent.', 'success')
+                return redirect(url_for('login'))
+            
+            # Use Supabase Auth to send OTP
+            auth_response = supabase.auth.sign_in_with_otp({
+                'email': email,
+                'options': {'should_create_user': False}
+            })
+            
+            session['otp_email'] = email
+            session['otp_sent'] = True
+            flash('OTP sent to your email. Check your inbox.', 'success')
+            return redirect(url_for('verify_otp'))
+            
+        except Exception as e:
+            print(f"Forgot password error: {e}")
+            flash('An error occurred. Please try again.', 'error')
+            return redirect(url_for('forgot_password'))
+    
+    return render_template('forgot_password.html')
+
+@app.route('/verify-otp', methods=['GET', 'POST'])
+def verify_otp():
+    if not session.get('otp_sent'):
+        return redirect(url_for('forgot_password'))
+    
+    if request.method == 'POST':
+        otp = request.form.get('otp', '').strip()
+        password = request.form.get('password', '')
+        password_confirm = request.form.get('password_confirm', '')
+        
+        if not otp or not password or not password_confirm:
+            flash('Please fill in all fields.', 'error')
+            return redirect(url_for('verify_otp'))
+        
+        if password != password_confirm:
+            flash('Passwords do not match.', 'error')
+            return redirect(url_for('verify_otp'))
+        
+        try:
+            email = session.get('otp_email')
+            
+            # Verify OTP with Supabase Auth
+            verified = supabase.auth.verify_otp({
+                'email': email,
+                'token': otp,
+                'type': 'email'
+            })
+            
+            if verified:
+                # Update password in database
+                hashed = hash_password(password)
+                supabase.table('user').update({
+                    'password': hashed
+                }).eq('email', email).execute()
+                
+                # Clear session
+                session.pop('otp_email', None)
+                session.pop('otp_sent', None)
+                
+                flash('Password reset successfully! Please log in.', 'success')
+                return redirect(url_for('login'))
+            
+        except Exception as e:
+            print(f"OTP verification error: {e}")
+            flash('Invalid OTP. Please try again.', 'error')
+            return redirect(url_for('verify_otp'))
+    
+    return render_template('verify_otp.html')
+
 
 # ─── DASHBOARDS ───────────────────────────────────────
 
@@ -314,6 +395,100 @@ def api_register():
     except Exception as e:
         print(f"API register error: {e}")
         return jsonify({'error': 'Registration failed.'}), 500
+
+# ─── FORGOT PASSWORD ──────────────────────────────────
+
+@app.route('/api/forgot-password', methods=['POST'])
+def api_forgot_password():
+    """Request OTP for password reset via email or SMS"""
+    data = request.get_json()
+    contact = data.get('contact', '').strip()  # email or phone
+    method = data.get('method', 'email')  # 'email' or 'sms'
+    
+    if not contact:
+        return jsonify({'error': 'Email or phone number required.'}), 400
+    
+    try:
+        # Check if customer exists
+        if method == 'email':
+            customer = supabase.table('customer').select('customer_id, email').eq('email', contact).execute()
+        else:  # SMS
+            customer = supabase.table('customer').select('customer_id, phone_number').eq('phone_number', contact).execute()
+        
+        if not customer.data:
+            # Security: Don't reveal if account exists
+            return jsonify({'message': 'If account exists, OTP has been sent.'}), 200
+        
+        # Send OTP via Supabase Auth
+        if method == 'email':
+            supabase.auth.sign_in_with_otp({
+                'email': contact,
+                'options': {'should_create_user': False}
+            })
+        else:
+            # For SMS, use Supabase phone sign-in
+            supabase.auth.sign_in_with_phone({
+                'phone': contact,
+                'options': {'should_create_user': False}
+            })
+        
+        return jsonify({
+            'message': f'OTP sent to your {method}.',
+            'method': method,
+            'contact': contact
+        }), 200
+        
+    except Exception as e:
+        print(f"API forgot password error: {e}")
+        return jsonify({'error': 'Failed to send OTP.'}), 500
+
+@app.route('/api/verify-otp-mobile', methods=['POST'])
+def api_verify_otp():
+    """Verify OTP and reset password"""
+    data = request.get_json()
+    contact = data.get('contact', '').strip()
+    otp = data.get('otp', '').strip()
+    password = data.get('password', '')
+    method = data.get('method', 'email')  # 'email' or 'sms'
+    
+    if not all([contact, otp, password]):
+        return jsonify({'error': 'All fields required.'}), 400
+    
+    try:
+        # Verify OTP with Supabase Auth
+        verified = supabase.auth.verify_otp({
+            'email' if method == 'email' else 'phone': contact,
+            'token': otp,
+            'type': method  # 'email' or 'sms'
+        })
+        
+        if verified:
+            # Find customer by email or phone
+            if method == 'email':
+                user_res = supabase.table('user').select('user_id').eq('email', contact).execute()
+            else:
+                customer = supabase.table('customer').select('user_id').eq('phone_number', contact).execute()
+                if customer.data:
+                    user_res = supabase.table('user').select('user_id').eq('user_id', customer.data[0]['user_id']).execute()
+            
+            if user_res.data:
+                user_id = user_res.data[0]['user_id']
+                hashed = hash_password(password)
+                
+                # Update password
+                supabase.table('user').update({
+                    'password': hashed
+                }).eq('user_id', user_id).execute()
+                
+                return jsonify({'message': 'Password reset successfully.'}), 200
+            else:
+                return jsonify({'error': 'User not found.'}), 404
+        else:
+            return jsonify({'error': 'Invalid OTP.'}), 401
+        
+    except Exception as e:
+        print(f"API OTP verification error: {e}")
+        return jsonify({'error': 'OTP verification failed.'}), 500
 
 # ─── PRODUCTS ─────────────────────────────────────────
 
