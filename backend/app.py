@@ -75,7 +75,7 @@ def landing():
 
 @app.route('/home')
 def index():
-    return render_template('index.html')
+    return render_template('landing.html')
 
 # ─── UNIFIED LOGIN ────────────────────────────────────
 
