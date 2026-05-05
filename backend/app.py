@@ -73,10 +73,6 @@ def staff_required(f):
 def landing():
     return render_template('landing.html')
 
-@app.route('/home')
-def index():
-    return render_template('landing.html')
-
 # ─── UNIFIED LOGIN ────────────────────────────────────
 
 @app.route('/login', methods=['GET'])
