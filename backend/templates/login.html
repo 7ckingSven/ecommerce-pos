@@ -125,7 +125,7 @@
           </div>
           <div class="form-group">
             <div style="display:flex; justify-content:flex-end; margin-bottom:7px;">
-              <a href="#" class="forgot-link" onclick="openForgot(event)">Forgot password?</a>
+              <a href="{{ url_for('forgot_password') }}" class="forgot-link">Forgot password?</a>
             </div>
             <div class="input-wrap">
               <input
@@ -164,45 +164,6 @@
         </form>
 
 
-
-        <!-- ─── FORGOT PASSWORD MODAL ─────────────────── -->
-        <div id="forgotOverlay" class="modal-overlay" onclick="closeForgot()"></div>
-        <div id="forgotModal" class="modal-box">
-          <div class="modal-header">
-            <div class="modal-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <circle cx="12" cy="12" r="10"/>
-                <line x1="12" y1="8" x2="12" y2="12"/>
-                <line x1="12" y1="16" x2="12.01" y2="16"/>
-              </svg>
-            </div>
-            <div>
-              <h3 class="modal-title">Reset Password</h3>
-              <p class="modal-desc">Enter your registered email and we'll send you a verification code.</p>
-            </div>
-            <button class="modal-close" onclick="closeForgot()">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <line x1="18" y1="6" x2="6" y2="18"/>
-                <line x1="6" y1="6" x2="18" y2="18"/>
-              </svg>
-            </button>
-          </div>
-          <form method="POST" action="{{ url_for('forgot_password') }}">
-            <div class="form-group">
-              <input type="email" name="email" class="form-input" placeholder="Enter your registered email" required />
-            </div>
-            <div style="display:flex; gap:10px; margin-top:1.2rem;">
-              <button type="button" class="btn btn-cancel" onclick="closeForgot()">Cancel</button>
-              <button type="submit" class="btn btn-solid-green" style="flex:1; justify-content:center; padding:11px 20px;">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
-                  <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-                  <polyline points="22,6 12,13 2,6"/>
-                </svg>
-                Send Code
-              </button>
-            </div>
-          </form>
-        </div>
 
         <!-- ─── STAFF ACCESS CODE MODAL ───────────────── -->
         <div id="accessCodeOverlay" class="modal-overlay"></div>
