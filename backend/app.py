@@ -161,7 +161,7 @@ def forgot_password():
             if not staff_res.data:
                 # Security: Don't reveal if email exists
                 flash('If this email is registered, an OTP has been sent.', 'success')
-                return redirect(url_for('login'))
+                return redirect(url_for('forgot_password'))
             
             staff = staff_res.data[0]
             user_id = staff['user_id']
@@ -212,6 +212,16 @@ def verify_otp():
             return redirect(url_for('verify_otp'))
         
         try:
+            # Check if OTP has expired (15 minutes)
+            otp_created_at = session.get('otp_created_at')
+            if otp_created_at:
+                created = datetime.fromisoformat(otp_created_at)
+                if (datetime.now() - created).total_seconds() > 900:  # 15 minutes
+                    session.pop('otp_code', None)
+                    session.pop('otp_sent', None)
+                    flash('OTP has expired. Please request a new one.', 'error')
+                    return redirect(url_for('forgot_password'))
+            
             # Check if OTP matches
             stored_otp = session.get('otp_code', '')
             if otp != stored_otp:
