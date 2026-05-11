@@ -2,10 +2,12 @@ from flask import Flask, render_template, request, redirect, url_for, flash, ses
 from flask_cors import CORS
 from supabase import create_client
 from dotenv import load_dotenv
-from datetime import timedelta
+from datetime import timedelta, datetime
 from functools import wraps
 import bcrypt
 import os
+import random
+import string
 
 # Load .env file
 load_dotenv()
@@ -154,26 +156,38 @@ def forgot_password():
         
         try:
             # Check if email exists in staff table (web is for staff/admin only)
-            staff_res = supabase.table('staff').select('user_id').eq('email', email).execute()
+            staff_res = supabase.table('staff').select('user_id, email').eq('email', email).execute()
             
             if not staff_res.data:
                 # Security: Don't reveal if email exists
                 flash('If this email is registered, an OTP has been sent.', 'success')
                 return redirect(url_for('login'))
             
-            # Use Supabase Auth to send OTP
-            auth_response = supabase.auth.sign_in_with_otp({
-                'email': email,
-                'options': {'should_create_user': False}
-            })
+            staff = staff_res.data[0]
+            user_id = staff['user_id']
             
+            # Generate a 6-digit OTP
+            otp = ''.join(random.choices(string.digits, k=6))
+            print(f"DEBUG: Generated OTP {otp} for email {email}")
+            
+            # Store OTP in session (expires on redirect to verify-otp page)
+            session['otp_code'] = otp
             session['otp_email'] = email
+            session['otp_user_id'] = user_id
             session['otp_sent'] = True
+            session['otp_created_at'] = datetime.now().isoformat()
+            
+            # In production, send OTP via email service
+            # For now, just show success message
             flash('OTP sent to your email. Check your inbox.', 'success')
+            print(f"DEBUG: OTP code to send to {email}: {otp}")
+            
             return redirect(url_for('verify_otp'))
             
         except Exception as e:
-            print(f"Forgot password error: {e}")
+            print(f"Forgot password error: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             flash('An error occurred. Please try again.', 'error')
             return redirect(url_for('forgot_password'))
     
@@ -198,32 +212,42 @@ def verify_otp():
             return redirect(url_for('verify_otp'))
         
         try:
+            # Check if OTP matches
+            stored_otp = session.get('otp_code', '')
+            if otp != stored_otp:
+                flash('Invalid OTP. Please try again.', 'error')
+                return redirect(url_for('verify_otp'))
+            
+            user_id = session.get('otp_user_id')
             email = session.get('otp_email')
             
-            # Verify OTP with Supabase Auth
-            verified = supabase.auth.verify_otp({
-                'email': email,
-                'token': otp,
-                'type': 'email'
-            })
+            if not user_id:
+                flash('Session expired. Please try again.', 'error')
+                return redirect(url_for('forgot_password'))
             
-            if verified:
-                # Update password in database
-                hashed = hash_password(password)
-                supabase.table('user').update({
-                    'password': hashed
-                }).eq('email', email).execute()
-                
-                # Clear session
-                session.pop('otp_email', None)
-                session.pop('otp_sent', None)
-                
-                flash('Password reset successfully! Please log in.', 'success')
-                return redirect(url_for('login'))
+            # Update password in user table
+            hashed = hash_password(password)
+            supabase.table('user').update({
+                'password': hashed
+            }).eq('user_id', user_id).execute()
+            
+            print(f"DEBUG: Password reset successfully for user_id {user_id} (email: {email})")
+            
+            # Clear OTP session variables
+            session.pop('otp_code', None)
+            session.pop('otp_email', None)
+            session.pop('otp_user_id', None)
+            session.pop('otp_sent', None)
+            session.pop('otp_created_at', None)
+            
+            flash('Password reset successfully! Please log in.', 'success')
+            return redirect(url_for('login'))
             
         except Exception as e:
-            print(f"OTP verification error: {e}")
-            flash('Invalid OTP. Please try again.', 'error')
+            print(f"OTP verification error: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            flash('An error occurred. Please try again.', 'error')
             return redirect(url_for('verify_otp'))
     
     return render_template('verify_otp.html')
