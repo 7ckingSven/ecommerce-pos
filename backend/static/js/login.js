@@ -51,24 +51,6 @@ function closeForgot() {
   closeActiveModal();
 }
 
-// ─── Staff Access Code Modal ──────────────────────────
-function openAccessCode() {
-  openModal('accessCodeOverlay', 'accessCodeModal');
-  // Focus the access code input after modal opens
-  setTimeout(() => {
-    const input = document.getElementById('accessCodeInput');
-    if (input) input.focus();
-  }, 100);
-}
-
-function closeAccessCode() {
-  closeActiveModal();
-  const input = document.getElementById('accessCodeInput');
-  if (input) input.value = '';
-  // Re-enable submit button check
-  checkAccessCode();
-}
-
 // ─── Escape key closes any open modal ─────────────────
 document.addEventListener('keydown', function (e) {
   if (e.key === 'Escape' && activeModal) closeActiveModal();
@@ -79,8 +61,6 @@ document.addEventListener('DOMContentLoaded', function () {
   const loginInput  = document.querySelector('input[name="login_input"]');
   const passInput   = document.getElementById('customerPassword');
   const loginBtn    = document.getElementById('loginSubmitBtn');
-  const codeInput   = document.getElementById('accessCodeInput');
-  const codeBtn     = document.getElementById('accessCodeSubmitBtn');
 
   // Login button — disabled until both fields have values
   function checkLogin() {
@@ -90,17 +70,9 @@ document.addEventListener('DOMContentLoaded', function () {
       !passInput  || passInput.value.trim()  === '';
   }
 
-  // Access code button — disabled until code field has a value
-  function checkAccessCode() {
-    if (!codeBtn || !codeInput) return;
-    codeBtn.disabled = codeInput.value.trim() === '';
-  }
-
   if (loginInput) loginInput.addEventListener('input', checkLogin);
   if (passInput)  passInput.addEventListener('input',  checkLogin);
-  if (codeInput)  codeInput.addEventListener('input',  checkAccessCode);
 
   // Run on load
   checkLogin();
-  checkAccessCode();
 });

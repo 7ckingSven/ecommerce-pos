@@ -77,12 +77,7 @@ def landing():
 
 @app.route('/login', methods=['GET'])
 def login():
-    show_modal  = session.pop('show_access_code_modal', False)
-    staff_token = session.get('staff_verified_token', '')
-    return render_template('login.html',
-        show_access_code_modal=show_modal,
-        staff_token=staff_token
-    )
+    return render_template('login.html')
 
 @app.route('/login', methods=['POST'])
 def login_post():
@@ -120,54 +115,29 @@ def login_post():
             flash('Customers must log in through the mobile app.', 'error')
             return redirect(url_for('login'))
         elif user['role'] in ('admin', 'staff'):
-            session['staff_verified_token']   = user['user_id']
-            session['show_access_code_modal'] = True
-            return redirect(url_for('login'))
-
-    except Exception as e:
-        print(f"Login error: {e}")
-        flash('Something went wrong. Please try again.', 'error')
-
-    return redirect(url_for('login'))
-
-# ─── STAFF ACCESS CODE VERIFICATION ──────────────────
-
-@app.route('/verify-staff-code', methods=['POST'])
-def verify_staff_code():
-    access_code = request.form.get('access_code', '')
-    staff_token = request.form.get('staff_verified_token', '')
-
-    if access_code == os.getenv('STAFF_ACCESS_CODE'):
-        try:
-            user_res = supabase.table('user').select('*').eq('user_id', staff_token).execute()
-            if not user_res.data:
-                flash('Invalid staff credentials.', 'error')
-                return redirect(url_for('login'))
-
-            user      = user_res.data[0]
-            staff_res = supabase.table('staff').select('*').eq('user_id', staff_token).execute()
-
+            # Direct login without access code
+            staff_res = supabase.table('staff').select('*').eq('user_id', user['user_id']).execute()
+            
             if staff_res.data:
                 staff = staff_res.data[0]
                 session['user_id']  = user['user_id']
                 session['staff_id'] = staff['staff_id']
                 session['role']     = user['role']
                 session['name']     = f"{staff['fname']} {staff['lname']}"
-                session.pop('staff_verified_token', None)
-
+                
                 if user['role'] == 'admin':
+                    flash('Welcome, Admin!', 'success')
                     return redirect(url_for('admin_dashboard'))
                 elif user['role'] == 'staff':
+                    flash('Welcome, Staff!', 'success')
                     return redirect(url_for('staff_dashboard'))
+            else:
+                flash('Staff information not found.', 'error')
+                return redirect(url_for('login'))
 
-        except Exception as e:
-            print(f"Staff verification error: {e}")
-            flash('Something went wrong. Please try again.', 'error')
-            return redirect(url_for('login'))
-    else:
-        flash('Invalid access code. Please try again.', 'error')
-        session['show_access_code_modal'] = True
-        session['staff_verified_token']   = staff_token
+    except Exception as e:
+        print(f"Login error: {e}")
+        flash('Something went wrong. Please try again.', 'error')
 
     return redirect(url_for('login'))
 

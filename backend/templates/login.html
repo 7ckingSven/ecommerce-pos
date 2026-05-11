@@ -91,16 +91,6 @@
           <p class="card-subtitle" style="font-size:12px;color:#6b7280;margin-top:4px;">Admin &amp; Staff access only</p>
         </div>
 
-        <!-- Auto-open access code modal if redirected back after credentials verified -->
-        {% if show_access_code_modal %}
-        <script>
-          document.addEventListener('DOMContentLoaded', function() {
-            document.getElementById('staffVerifiedToken').value = '{{ staff_token }}';
-            openAccessCode();
-          });
-        </script>
-        {% endif %}
-
         <!-- Flash Messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
@@ -163,57 +153,6 @@
           </button>
         </form>
 
-
-
-        <!-- ─── STAFF ACCESS CODE MODAL ───────────────── -->
-        <div id="accessCodeOverlay" class="modal-overlay"></div>
-        <div id="accessCodeModal" class="modal-box">
-          <div class="modal-header">
-            <div class="modal-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
-                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
-                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-              </svg>
-            </div>
-            <div>
-              <h3 class="modal-title">Staff Access Code</h3>
-              <p class="modal-desc">Enter the staff access code to continue.</p>
-            </div>
-          </div>
-          <form method="POST" action="{{ url_for('verify_staff_code') }}">
-            <!-- Hidden field — carries the user_id token set by Flask after credentials pass -->
-            <input type="hidden" name="staff_verified_token" id="staffVerifiedToken" value="{{ staff_token }}"/>
-            <div class="form-group">
-              <div class="input-wrap">
-                <input
-                  type="password"
-                  id="accessCodeInput"
-                  name="access_code"
-                  class="form-input"
-                  placeholder="Enter access code"
-                  autocomplete="off"
-                  required
-                />
-                <button type="button" class="show-pass-btn" onclick="togglePassword('accessCodeInput', 'accessCodeEyeIcon')" tabindex="-1">
-                  <svg id="accessCodeEyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/>
-                    <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/>
-                    <line x1="1" y1="1" x2="23" y2="23"/>
-                  </svg>
-                </button>
-              </div>
-            </div>
-            <div style="display:flex; gap:10px; margin-top:1.2rem;">
-              <button type="button" class="btn btn-cancel" onclick="closeAccessCode()">Cancel</button>
-              <button type="submit" id="accessCodeSubmitBtn" class="btn btn-solid-green" style="flex:1; justify-content:center; padding:11px 20px;" disabled>
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
-                  <polyline points="20 6 9 17 4 12"/>
-                </svg>
-                Verify
-              </button>
-            </div>
-          </form>
-        </div>
 
       </div>
     </div>
