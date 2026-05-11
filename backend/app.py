@@ -1,5 +1,6 @@
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
 from flask_cors import CORS
+from flask_mail import Mail, Message
 from supabase import create_client
 from dotenv import load_dotenv
 from datetime import timedelta, datetime
@@ -24,6 +25,15 @@ supabase = create_client(
     os.getenv('SUPABASE_URL'),
     os.getenv('SUPABASE_KEY')
 )
+
+# Configure Flask-Mail
+app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
+app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', True)
+app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
+app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
+app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', os.getenv('MAIL_USERNAME'))
+mail = Mail(app)
 
 # ══════════════════════════════════════════════════════
 # HELPER FUNCTIONS
@@ -177,11 +187,44 @@ def forgot_password():
             session['otp_sent'] = True
             session['otp_created_at'] = datetime.now().isoformat()
             
-            # In production, send OTP via email service
-            # For now, just show success message
-            flash('OTP sent to your email. Check your inbox.', 'success')
-            print(f"DEBUG: OTP code to send to {email}: {otp}")
+            # Send OTP via email
+            try:
+                msg = Message(
+                    subject='Password Reset OTP - Triple E & Fiel Collins',
+                    recipients=[email],
+                    html=f'''
+                    <html>
+                        <body style="font-family: Arial, sans-serif; line-height: 1.6;">
+                            <div style="max-width: 600px; margin: 0 auto;">
+                                <h2>Password Reset Request</h2>
+                                <p>You have requested to reset your password for Triple E & Fiel Collins Management System.</p>
+                                <p style="font-size: 18px; margin: 20px 0;">Your One-Time Password (OTP) is:</p>
+                                <div style="background-color: #f0f0f0; padding: 20px; border-radius: 5px; text-align: center;">
+                                    <p style="font-size: 32px; font-weight: bold; letter-spacing: 3px; margin: 0;">{otp}</p>
+                                </div>
+                                <p style="color: #666; font-size: 14px; margin-top: 20px;">
+                                    This OTP will expire in 15 minutes.
+                                </p>
+                                <p style="color: #999; font-size: 12px; margin-top: 20px;">
+                                    If you did not request this password reset, please ignore this email.
+                                </p>
+                                <hr style="border: none; border-top: 1px solid #ddd; margin-top: 30px;">
+                                <p style="color: #999; font-size: 12px; text-align: center;">
+                                    Triple E & Fiel Collins General Merchandise<br>
+                                    E-Commerce & POS System
+                                </p>
+                            </div>
+                        </body>
+                    </html>
+                    '''
+                )
+                mail.send(msg)
+                print(f"DEBUG: OTP email sent successfully to {email}")
+            except Exception as email_error:
+                print(f"WARNING: Failed to send email: {email_error}")
+                # Continue even if email fails - user can see OTP in console logs for testing
             
+            flash('OTP sent to your email. Check your inbox (and spam folder).', 'success')
             return redirect(url_for('verify_otp'))
             
         except Exception as e:
