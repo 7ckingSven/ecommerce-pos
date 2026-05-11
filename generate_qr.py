@@ -2,7 +2,7 @@ import qrcode
 from PIL import Image
 
 # APK download link from Google Drive
-url = "https://drive.google.com/uc?export=download&id=1HFlELra4fHJ9O1HC3occ1F76vtm6B3w5"
+url = "https://drive.google.com/uc?export=download&confirm=t&id=1X_LIKE0AqL3wY6GKdnKIhzMTf9gzSjRq"
 
 # Create QR code with green branding
 qr = qrcode.QRCode(
