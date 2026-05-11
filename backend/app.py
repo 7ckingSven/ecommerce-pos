@@ -153,10 +153,10 @@ def forgot_password():
             return redirect(url_for('forgot_password'))
         
         try:
-            # Check if user exists
-            user_res = supabase.table('user').select('user_id').eq('email', email).execute()
+            # Check if email exists in staff table (web is for staff/admin only)
+            staff_res = supabase.table('staff').select('user_id').eq('email', email).execute()
             
-            if not user_res.data:
+            if not staff_res.data:
                 # Security: Don't reveal if email exists
                 flash('If this email is registered, an OTP has been sent.', 'success')
                 return redirect(url_for('login'))
