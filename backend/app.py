@@ -1,4 +1,4 @@
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_cors import CORS
 from flask_mail import Mail, Message
 from supabase import create_client
@@ -84,6 +84,27 @@ def staff_required(f):
 @app.route('/')
 def landing():
     return render_template('landing.html')
+
+# ─── APK DOWNLOAD ─────────────────────────────────────
+
+@app.route('/download-apk')
+def download_apk():
+    """
+    Serve APK file for download.
+    APK should be located at: backend/static/apk/app-release.apk
+    """
+    apk_path = os.path.join(os.path.dirname(__file__), 'static', 'apk', 'app-release.apk')
+    
+    if not os.path.exists(apk_path):
+        flash('APK file not found. Please contact administrator.', 'error')
+        return redirect(url_for('landing'))
+    
+    return send_file(
+        apk_path,
+        mimetype='application/vnd.android.package-archive',
+        as_attachment=True,
+        download_name='TripleE-FielCollins-App.apk'
+    )
 
 # ─── UNIFIED LOGIN ────────────────────────────────────
 

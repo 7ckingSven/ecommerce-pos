@@ -1,8 +1,9 @@
 import qrcode
 from PIL import Image
 
-# APK download link from Google Drive
-url = "https://drive.google.com/uc?export=download&confirm=t&id=1X_LIKE0AqL3wY6GKdnKIhzMTf9gzSjRq"
+# APK download URL — now hosted on Flask backend for faster, more reliable downloads
+# Change this to your deployed domain in production (e.g., https://yourdomain.com/download-apk)
+url = "http://localhost:5000/download-apk"
 
 # Create QR code with green branding
 qr = qrcode.QRCode(
@@ -20,3 +21,5 @@ img = qr.make_image(fill_color="#16a34a", back_color="white")
 # Save to static folder so Flask can serve it
 img.save("backend/static/img/app-qr-code.png")
 print("✓ QR code generated: backend/static/img/app-qr-code.png")
+print(f"✓ QR code points to: {url}")
+print("✓ NOTE: Update URL for production deployment")
