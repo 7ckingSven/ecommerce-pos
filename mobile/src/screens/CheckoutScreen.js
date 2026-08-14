@@ -14,30 +14,34 @@ const PAYMENT_METHODS = [
 ];
 
 export default function CheckoutScreen({ route, navigation }) {
-  const [cartItems, setCartItems] = useState([]);
-  const [total, setTotal]         = useState(0);
+  const passedCartItems = route?.params?.cartItems || [];
+  const passedTotal = route?.params?.total || 0;
+  const [cartItems, setCartItems] = useState(passedCartItems);
+  const [total, setTotal]         = useState(passedTotal);
   const [payment, setPayment]     = useState('cash_on_delivery');
   const [refNo, setRefNo]         = useState('');
   const [loading, setLoading]     = useState(false);
-  const [fetchLoading, setFetchLoading] = useState(true);
+  const [fetchLoading, setFetchLoading] = useState(!passedCartItems.length);
 
   useEffect(() => {
+    if (passedCartItems.length > 0) {
+      setFetchLoading(false);
+      return;
+    }
     fetchCartData();
   }, []);
 
   async function fetchCartData() {
     try {
       setFetchLoading(true);
-      const response = await getCart();
-      if (response && response.data) {
-        const items = response.data;
-        setCartItems(items);
-        const cartTotal = items.reduce((sum, item) => {
-          const itemPrice = Number(item.product?.price || 0);
-          return sum + (itemPrice * item.quantity);
-        }, 0);
-        setTotal(cartTotal);
-      }
+      const items = await getCart();
+      const cartList = Array.isArray(items) ? items : (items?.items || []);
+      setCartItems(cartList);
+      const cartTotal = cartList.reduce((sum, item) => {
+        const itemPrice = Number(item.product?.price || 0);
+        return sum + (itemPrice * item.quantity);
+      }, 0);
+      setTotal(cartTotal);
     } catch (e) {
       console.error('Failed to fetch cart:', e);
       Alert.alert('Error', 'Failed to load cart items. Please try again.');
