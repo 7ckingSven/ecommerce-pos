@@ -156,12 +156,12 @@ export default function HomeScreen({ navigation }) {
     }
   }
 
-  // ─── Buy Now (requires login → Checkout directly) ────
+  // ─── Buy Now (requires login → ProductDetail) ────────
   async function handleBuyNow(product) {
     const ok = await requireLogin('buyNow', { product });
     if (!ok) return;
-    // Go to Product Detail with buy now flag
-    navigation.navigate('ProductDetail', { product, buyNow: true });
+    // Go to Product Detail (user can choose Add to Cart or Buy Now there)
+    navigation.navigate('ProductDetail', { product });
   }
 
   function onRefresh() {

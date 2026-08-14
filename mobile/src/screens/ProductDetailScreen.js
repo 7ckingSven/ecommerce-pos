@@ -16,7 +16,7 @@ function getDiscountedPrice(product) {
 }
 
 export default function ProductDetailScreen({ route, navigation }) {
-  const { product, buyNow }  = route.params;
+  const { product }      = route.params;
   const [quantity, setQty]   = useState(1);
   const [loading, setLoading] = useState(false);
 
@@ -41,20 +41,35 @@ export default function ProductDetailScreen({ route, navigation }) {
     setLoading(true);
     try {
       await addToCart(product.product_id, quantity);
-      
-      if (buyNow) {
-        // If coming from "Buy Now", go straight to checkout
-        navigation.navigate('Checkout');
-      } else {
-        // Otherwise show options to continue shopping or view cart
-        Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
-          { text: 'Continue Shopping', onPress: () => navigation.goBack() },
-          { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
-        ]);
-      }
+      Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
+        { text: 'Continue Shopping', onPress: () => navigation.goBack() },
+        { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
+      ]);
     } catch (e) {
       console.error('Add to cart error:', e);
       Alert.alert('Error', 'Failed to add to cart. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleBuyNow() {
+    const loggedIn = await isLoggedIn();
+    if (!loggedIn) {
+      Alert.alert('Login Required', 'Please log in to complete your purchase.', [
+        { text: 'Cancel' },
+        { text: 'Log In', onPress: () => navigation.navigate('Login') }
+      ]);
+      return;
+    }
+    setLoading(true);
+    try {
+      await addToCart(product.product_id, quantity);
+      // Navigate to Checkout within the Cart stack
+      navigation.navigate('Cart', { screen: 'Checkout' });
+    } catch (e) {
+      console.error('Buy now error:', e);
+      Alert.alert('Error', 'Failed to proceed to checkout. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -167,25 +182,43 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       </ScrollView>
 
-      {/* Action Button */}
+      {/* Action Buttons */}
       <View style={styles.footer}>
-        <TouchableOpacity
-          style={[styles.cartBtn, !inStock && styles.cartBtnDisabled]}
-          onPress={handleAddToCart}
-          disabled={!inStock || loading}
-          activeOpacity={0.85}
-        >
-          {loading ? (
-            <ActivityIndicator color={COLORS.white}/>
-          ) : (
-            <View style={styles.cartBtnInner}>
-              <Feather name={buyNow ? 'credit-card' : 'shopping-cart'} size={18} color={COLORS.white}/>
-              <Text style={styles.cartBtnText}>
-                {!inStock ? 'Out of Stock' : buyNow ? 'Buy Now' : 'Add to Cart'}
-              </Text>
-            </View>
-          )}
-        </TouchableOpacity>
+        <View style={styles.buttonRow}>
+          {/* Add to Cart Button */}
+          <TouchableOpacity
+            style={[styles.btn, styles.btnCart, !inStock && styles.btnDisabled]}
+            onPress={handleAddToCart}
+            disabled={!inStock || loading}
+            activeOpacity={0.85}
+          >
+            {loading ? (
+              <ActivityIndicator color={COLORS.white} size="small"/>
+            ) : (
+              <>
+                <Feather name="shopping-cart" size={16} color={COLORS.white}/>
+                <Text style={styles.btnText}>Add to Cart</Text>
+              </>
+            )}
+          </TouchableOpacity>
+
+          {/* Buy Now Button */}
+          <TouchableOpacity
+            style={[styles.btn, styles.btnBuy, !inStock && styles.btnDisabled]}
+            onPress={handleBuyNow}
+            disabled={!inStock || loading}
+            activeOpacity={0.85}
+          >
+            {loading ? (
+              <ActivityIndicator color={COLORS.white} size="small"/>
+            ) : (
+              <>
+                <Feather name="credit-card" size={16} color={COLORS.white}/>
+                <Text style={styles.btnText}>Buy Now</Text>
+              </>
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -247,6 +280,14 @@ const styles = StyleSheet.create({
 
   // Footer
   footer:                { padding: SPACING.md, backgroundColor: COLORS.white, borderTopWidth:1, borderTopColor: COLORS.grayBorder },
+  buttonRow:             { flexDirection:'row', gap: SPACING.md },
+  btn:                   { flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', borderRadius: RADIUS.sm, padding:14, gap:6 },
+  btnCart:               { backgroundColor: COLORS.primary },
+  btnBuy:                { backgroundColor: COLORS.primary },
+  btnDisabled:           { backgroundColor: COLORS.grayLight },
+  btnText:               { color: COLORS.white, fontWeight:'700', fontSize:14 },
+  
+  // Old styles (keeping for backward compatibility if needed)
   cartBtn:               { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding:14, alignItems:'center' },
   cartBtnDisabled:       { backgroundColor: COLORS.grayLight },
   cartBtnInner:          { flexDirection:'row', alignItems:'center', gap:8 },
