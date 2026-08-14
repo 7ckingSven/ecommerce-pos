@@ -16,7 +16,7 @@ function getDiscountedPrice(product) {
 }
 
 export default function ProductDetailScreen({ route, navigation }) {
-  const { product }          = route.params;
+  const { product, buyNow }  = route.params;
   const [quantity, setQty]   = useState(1);
   const [loading, setLoading] = useState(false);
 
@@ -40,13 +40,20 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
     setLoading(true);
     try {
-      // Pass discounted price so cart and order reflect correct amount
-      await addToCart(product.product_id, quantity, effectivePrice);
-      Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
-        { text: 'Continue Shopping' },
-        { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
-      ]);
+      await addToCart(product.product_id, quantity);
+      
+      if (buyNow) {
+        // If coming from "Buy Now", go straight to checkout
+        navigation.navigate('Checkout');
+      } else {
+        // Otherwise show options to continue shopping or view cart
+        Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
+          { text: 'Continue Shopping', onPress: () => navigation.goBack() },
+          { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
+        ]);
+      }
     } catch (e) {
+      console.error('Add to cart error:', e);
       Alert.alert('Error', 'Failed to add to cart. Please try again.');
     } finally {
       setLoading(false);
@@ -160,7 +167,7 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       </ScrollView>
 
-      {/* Add to Cart Button */}
+      {/* Action Button */}
       <View style={styles.footer}>
         <TouchableOpacity
           style={[styles.cartBtn, !inStock && styles.cartBtnDisabled]}
@@ -172,8 +179,10 @@ export default function ProductDetailScreen({ route, navigation }) {
             <ActivityIndicator color={COLORS.white}/>
           ) : (
             <View style={styles.cartBtnInner}>
-              <Feather name="shopping-cart" size={18} color={COLORS.white}/>
-              <Text style={styles.cartBtnText}>{inStock ? 'Add to Cart' : 'Out of Stock'}</Text>
+              <Feather name={buyNow ? 'credit-card' : 'shopping-cart'} size={18} color={COLORS.white}/>
+              <Text style={styles.cartBtnText}>
+                {!inStock ? 'Out of Stock' : buyNow ? 'Buy Now' : 'Add to Cart'}
+              </Text>
             </View>
           )}
         </TouchableOpacity>

@@ -3,6 +3,7 @@ import {
   View, Text, TouchableOpacity, StyleSheet,
   FlatList, Image, Alert, ActivityIndicator,
 } from 'react-native';
+import { useFocusEffect } from '@react-navigation/native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getCart, updateCartItem, removeFromCart } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
@@ -20,6 +21,13 @@ export default function CartScreen({ navigation }) {
       else setLoading(false);
     });
   }, []);
+
+  // Refresh cart every time screen is focused (e.g., after adding items)
+  useFocusEffect(
+    useCallback(() => {
+      if (loggedIn) loadCart();
+    }, [loggedIn])
+  );
 
   async function loadCart() {
     try {
