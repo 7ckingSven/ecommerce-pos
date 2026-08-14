@@ -18,7 +18,8 @@ function getDiscountedPrice(product) {
 export default function ProductDetailScreen({ route, navigation }) {
   const { product }      = route.params;
   const [quantity, setQty]   = useState(1);
-  const [loading, setLoading] = useState(false);
+  const [loadingCart, setLoadingCart] = useState(false);
+  const [loadingBuy, setLoadingBuy] = useState(false);
 
   const discountedPrice = getDiscountedPrice(product);
   const hasDiscount     = discountedPrice !== null;
@@ -38,7 +39,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       ]);
       return;
     }
-    setLoading(true);
+    setLoadingCart(true);
     try {
       await addToCart(product.product_id, quantity);
       Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
@@ -49,7 +50,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       console.error('Add to cart error:', e);
       Alert.alert('Error', 'Failed to add to cart. Please try again.');
     } finally {
-      setLoading(false);
+      setLoadingCart(false);
     }
   }
 
@@ -62,7 +63,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       ]);
       return;
     }
-    setLoading(true);
+    setLoadingBuy(true);
     try {
       await addToCart(product.product_id, quantity);
       // Navigate to Checkout within the Cart stack
@@ -70,8 +71,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     } catch (e) {
       console.error('Buy now error:', e);
       Alert.alert('Error', 'Failed to proceed to checkout. Please try again.');
-    } finally {
-      setLoading(false);
+      setLoadingBuy(false);
     }
   }
 
@@ -189,10 +189,10 @@ export default function ProductDetailScreen({ route, navigation }) {
           <TouchableOpacity
             style={[styles.btn, styles.btnCart, !inStock && styles.btnDisabled]}
             onPress={handleAddToCart}
-            disabled={!inStock || loading}
+            disabled={!inStock || loadingCart || loadingBuy}
             activeOpacity={0.85}
           >
-            {loading ? (
+            {loadingCart ? (
               <ActivityIndicator color={COLORS.white} size="small"/>
             ) : (
               <>
@@ -206,10 +206,10 @@ export default function ProductDetailScreen({ route, navigation }) {
           <TouchableOpacity
             style={[styles.btn, styles.btnBuy, !inStock && styles.btnDisabled]}
             onPress={handleBuyNow}
-            disabled={!inStock || loading}
+            disabled={!inStock || loadingCart || loadingBuy}
             activeOpacity={0.85}
           >
-            {loading ? (
+            {loadingBuy ? (
               <ActivityIndicator color={COLORS.white} size="small"/>
             ) : (
               <>
