@@ -3,7 +3,7 @@ import api from './api';
 
 // ─── Login ────────────────────────────────────────────
 export async function login(loginInput, password) {
-  const response = await api.post('/api/login', {
+  const response = await api.post('/login', {
     login_input: loginInput,
     password,
   });
@@ -15,7 +15,7 @@ export async function login(loginInput, password) {
 
 // ─── Register ─────────────────────────────────────────
 export async function register(data) {
-  const response = await api.post('/api/register', data);
+  const response = await api.post('/register', data);
   return response.data;
 }
 
