@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, ActivityIndicator,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { placeOrder } from '../services/orderService';
+import { getCart } from '../services/cartService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
 const PAYMENT_METHODS = [
@@ -13,10 +14,38 @@ const PAYMENT_METHODS = [
 ];
 
 export default function CheckoutScreen({ route, navigation }) {
-  const { cartItems, total } = route.params;
-  const [payment,   setPayment]   = useState('cash_on_delivery');
-  const [refNo,     setRefNo]     = useState('');
-  const [loading,   setLoading]   = useState(false);
+  const [cartItems, setCartItems] = useState([]);
+  const [total, setTotal]         = useState(0);
+  const [payment, setPayment]     = useState('cash_on_delivery');
+  const [refNo, setRefNo]         = useState('');
+  const [loading, setLoading]     = useState(false);
+  const [fetchLoading, setFetchLoading] = useState(true);
+
+  useEffect(() => {
+    fetchCartData();
+  }, []);
+
+  async function fetchCartData() {
+    try {
+      setFetchLoading(true);
+      const response = await getCart();
+      if (response && response.data) {
+        const items = response.data;
+        setCartItems(items);
+        const cartTotal = items.reduce((sum, item) => {
+          const itemPrice = Number(item.product?.price || 0);
+          return sum + (itemPrice * item.quantity);
+        }, 0);
+        setTotal(cartTotal);
+      }
+    } catch (e) {
+      console.error('Failed to fetch cart:', e);
+      Alert.alert('Error', 'Failed to load cart items. Please try again.');
+      navigation.goBack();
+    } finally {
+      setFetchLoading(false);
+    }
+  }
 
   async function handlePlaceOrder() {
     if (payment === 'gcash' && !refNo.trim()) {
@@ -68,7 +97,24 @@ export default function CheckoutScreen({ route, navigation }) {
         <View style={{ width:22 }}/>
       </View>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      {fetchLoading ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color={COLORS.primary}/>
+          <Text style={styles.loadingText}>Loading cart...</Text>
+        </View>
+      ) : cartItems.length === 0 ? (
+        <View style={styles.emptyContainer}>
+          <Feather name="shopping-cart" size={48} color={COLORS.textMuted}/>
+          <Text style={styles.emptyText}>Your cart is empty</Text>
+          <TouchableOpacity
+            style={styles.emptyBtn}
+            onPress={() => navigation.navigate('Home')}
+          >
+            <Text style={styles.emptyBtnText}>Continue Shopping</Text>
+          </TouchableOpacity>
+        </View>
+      ) : (
+        <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
         {/* Order Summary */}
         <View style={styles.card}>
@@ -133,8 +179,9 @@ export default function CheckoutScreen({ route, navigation }) {
 
         <View style={{ height: SPACING.xl }}/>
       </ScrollView>
+      )}
 
-      {/* Place Order Button */}
+      {!fetchLoading && cartItems.length > 0 && (
       <View style={styles.footer}>
         <View style={styles.footerTotal}>
           <Text style={styles.footerTotalLabel}>Total</Text>
@@ -156,12 +203,19 @@ export default function CheckoutScreen({ route, navigation }) {
           )}
         </TouchableOpacity>
       </View>
+      )}
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container:        { flex:1, backgroundColor: COLORS.grayBg },
+  loadingContainer: { flex:1, alignItems:'center', justifyContent:'center', gap: SPACING.md },
+  loadingText:      { fontSize:14, color: COLORS.textSecondary },
+  emptyContainer:   { flex:1, alignItems:'center', justifyContent:'center', gap: SPACING.md, paddingHorizontal: SPACING.md },
+  emptyText:        { fontSize:16, fontWeight:'600', color: COLORS.textSecondary },
+  emptyBtn:         { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.xl, paddingVertical: SPACING.md, borderRadius: RADIUS.md },
+  emptyBtnText:     { color: COLORS.white, fontWeight:'600', fontSize:14 },
   header:           { backgroundColor: COLORS.dark, flexDirection:'row', alignItems:'center', justifyContent:'space-between', paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md },
   headerTitle:      { fontSize:18, fontWeight:'700', color: COLORS.white },
   content:          { padding: SPACING.md, gap: SPACING.md },
