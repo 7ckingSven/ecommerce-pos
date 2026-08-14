@@ -485,7 +485,7 @@ function renderInvProducts(products) {
           }</td>
           <td>
             <button class="btn-icon" onclick="quickAddStock('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', ${p.quantity})" title="Add Stock">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x="12" y="5" x2="12" y2="19"/><line x="5" y="12" x2="19" y2="12"/></svg>
             </button>
           </td>
         </tr>`).join('')
@@ -557,7 +557,7 @@ async function submitStock(e) {
 // ══════════════════════════════════════════════════════
 async function loadOrders() {
   try {
-    const res   = await fetch('/api/staff/orders');
+    const res   = await fetch('/api/staff/orders?limit=50');
     staffOrders = await res.json();
     renderStaffOrders(staffOrders);
   } catch (e) { console.error('Orders error:', e); }
@@ -609,7 +609,7 @@ async function updateOrderStatus(id, status) {
 // ══════════════════════════════════════════════════════
 async function loadSummary() {
   try {
-    const res    = await fetch('/api/staff/orders');
+    const res    = await fetch('/api/staff/orders?limit=100');
     const orders = await res.json();
     const today  = new Date().toLocaleDateString('en-PH');
 

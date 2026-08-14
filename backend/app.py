@@ -1080,15 +1080,21 @@ def admin_add_inventory():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ─── Orders ───────────────────────────────────────────
+# ─── ORDERS ───────────────────────────────────────────
 
 @app.route('/api/admin/orders', methods=['GET'])
 @admin_required
 def admin_get_orders():
     try:
+        limit = request.args.get('limit', default=50, type=int)
+        if limit <= 0:
+            limit = 50
+        if limit > 200:
+            limit = 200
+
         res = supabase.table('order').select(
-            '*, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(*)'
-        ).order('date', desc=True).execute()
+            'order_id, total, status, order_type, date, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
+        ).order('date', desc=True).limit(limit).execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1242,9 +1248,15 @@ def staff_get_branches():
 @staff_required
 def staff_get_orders():
     try:
+        limit = request.args.get('limit', default=50, type=int)
+        if limit <= 0:
+            limit = 50
+        if limit > 200:
+            limit = 200
+
         res = supabase.table('order').select(
-            '*, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(*)'
-        ).order('date', desc=True).execute()
+            'order_id, total, status, order_type, date, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
+        ).order('date', desc=True).limit(limit).execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500

@@ -130,7 +130,7 @@ async function loadOverview() {
   try {
     const [products, orders, payments] = await Promise.all([
       fetch('/api/admin/products').then(r => r.json()),
-      fetch('/api/admin/orders').then(r => r.json()),
+      fetch('/api/admin/orders?limit=20').then(r => r.json()),
       fetch('/api/admin/payments').then(r => r.json()),
     ]);
 
@@ -406,7 +406,7 @@ async function submitInventory(e) {
 // ─── ORDERS ───────────────────────────────────────────
 async function loadOrders() {
   try {
-    const res = await fetch('/api/admin/orders');
+    const res = await fetch('/api/admin/orders?limit=80');
     allOrders = await res.json();
     renderOrders(allOrders);
   } catch (e) { console.error('Orders error:', e); }
@@ -461,7 +461,7 @@ function filterOrderStatus(status) {
 async function loadSales() {
   try {
     const [orders, payments, customers] = await Promise.all([
-      fetch('/api/admin/orders').then(r => r.json()),
+      fetch('/api/admin/orders?limit=80').then(r => r.json()),
       fetch('/api/admin/payments').then(r => r.json()),
       fetch('/api/admin/customers').then(r => r.json()),
     ]);
