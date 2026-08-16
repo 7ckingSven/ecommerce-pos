@@ -42,11 +42,19 @@ const pageTitles = {
 
 function showSection(name, el) {
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-  if (el) el.classList.add('active');
+  if (el) {
+    el.classList.add('active');
+  } else {
+    document.querySelectorAll('.nav-item').forEach(item => {
+      if (item.getAttribute('onclick')?.includes("'" + name + "'")) item.classList.add('active');
+    });
+  }
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById(`section-${name}`).classList.add('active');
   document.getElementById('pageTitle').textContent = pageTitles[name][0];
   document.getElementById('pageSub').textContent   = pageTitles[name][1];
+  window.location.hash = name;
+  localStorage.setItem('admin-section', name);
   loaders[name] && loaders[name]();
 }
 
@@ -891,7 +899,36 @@ async function submitUser(e) {
 
 // ─── Init ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async function () {
-  await loadBranches();   // load branches first — needed by modals
-  loadOverview();
-  loadProducts();         // preload for inventory modal + discount dropdown
+  await loadBranches();
+  loadProducts();
+
+  // Restore last section from URL hash or localStorage
+  const hash    = window.location.hash.replace('#', '');
+  const saved   = localStorage.getItem('admin-section');
+  const section = hash || saved || 'overview';
+  const valid   = Object.keys(pageTitles);
+  showSection(valid.includes(section) ? section : 'overview', null);
+
+  // Restore open modal if any
+  const openModal = localStorage.getItem('admin-open-modal');
+  if (openModal) {
+    localStorage.removeItem('admin-open-modal');
+    if (openModal === 'product')   openProductModal();
+    if (openModal === 'inventory') openInventoryModal();
+    if (openModal === 'discount')  openDiscountModal();
+    if (openModal === 'user')      openUserModal();
+  }
+});
+
+window.addEventListener('beforeunload', function () {
+  if (document.getElementById('productModal')?.classList.contains('open'))
+    localStorage.setItem('admin-open-modal', 'product');
+  else if (document.getElementById('inventoryModal')?.classList.contains('open'))
+    localStorage.setItem('admin-open-modal', 'inventory');
+  else if (document.getElementById('discountModal')?.classList.contains('open'))
+    localStorage.setItem('admin-open-modal', 'discount');
+  else if (document.getElementById('userModal')?.classList.contains('open'))
+    localStorage.setItem('admin-open-modal', 'user');
+  else
+    localStorage.removeItem('admin-open-modal');
 });

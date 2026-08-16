@@ -36,11 +36,19 @@ const pageTitles = {
 
 function showSection(name, el) {
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
-  if (el) el.classList.add('active');
+  if (el) {
+    el.classList.add('active');
+  } else {
+    document.querySelectorAll('.nav-item').forEach(item => {
+      if (item.getAttribute('onclick')?.includes("'" + name + "'")) item.classList.add('active');
+    });
+  }
   document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
   document.getElementById(`section-${name}`).classList.add('active');
   document.getElementById('pageTitle').textContent = pageTitles[name][0];
   document.getElementById('pageSub').textContent   = pageTitles[name][1];
+  window.location.hash = name;
+  localStorage.setItem('staff-section', name);
   loaders[name] && loaders[name]();
 }
 
@@ -644,6 +652,27 @@ async function loadSummary() {
 
 // ─── Init ─────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', async () => {
-  await loadBranches();   // load branches first — needed by POS + stock modal
+  await loadBranches();
   loadPosProducts();
+
+  // Restore last section from URL hash or localStorage
+  const hash    = window.location.hash.replace('#', '');
+  const saved   = localStorage.getItem('staff-section');
+  const section = hash || saved || 'pos';
+  const valid   = Object.keys(pageTitles);
+  showSection(valid.includes(section) ? section : 'pos', null);
+
+  // Restore open modal if any
+  const openModal = localStorage.getItem('staff-open-modal');
+  if (openModal) {
+    localStorage.removeItem('staff-open-modal');
+    if (openModal === 'stock') openStockModal();
+  }
+});
+
+window.addEventListener('beforeunload', function () {
+  if (document.getElementById('stockModal')?.classList.contains('open'))
+    localStorage.setItem('staff-open-modal', 'stock');
+  else
+    localStorage.removeItem('staff-open-modal');
 });
