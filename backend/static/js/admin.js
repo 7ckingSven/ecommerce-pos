@@ -421,7 +421,7 @@ function renderOrders(orders) {
           <td>${o.staff ? `${o.staff.fname} ${o.staff.lname}` : '—'}</td>
           <td>${badge(o.order_type)}</td>
           <td>${peso(o.total)}</td>
-          <td>${o.payment ? badge(o.payment.payment_method) : '—'}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
           <td>${badge(o.status)}</td>
           <td>
@@ -498,8 +498,8 @@ async function loadSales() {
       (o.order_item || []).forEach(item => {
         const name = item.product?.product_name || item.product_id;
         if (!productSales[name]) productSales[name] = { units: 0, revenue: 0 };
-        productSales[name].units   += Number(item.quantity || 0);
-        productSales[name].revenue += Number(item.price || 0) * Number(item.quantity || 0);
+        productSales[name].units   += Number(item.qty || item.quantity || 0);
+        productSales[name].revenue += Number(item.price || 0) * Number(item.qty || item.quantity || 0);
       });
     });
     const top = Object.entries(productSales).sort((a, b) => b[1].units - a[1].units).slice(0, 5);

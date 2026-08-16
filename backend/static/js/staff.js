@@ -572,7 +572,7 @@ function renderStaffOrders(orders) {
           <td>${badge(o.order_type)}</td>
           <td>${o.order_item?.length || 0} item(s)</td>
           <td>${peso(o.total)}</td>
-          <td>${o.payment ? badge(o.payment.payment_method) : '—'}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
           <td>${badge(o.status)}</td>
           <td>
@@ -632,7 +632,7 @@ async function loadSummary() {
             <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
             <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
             <td>${badge(o.order_type)}</td>
-            <td>${o.payment ? badge(o.payment.payment_method) : '—'}</td>
+            <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
             <td>${peso(o.total)}</td>
             <td>${new Date(o.date).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}</td>
             <td>${badge(o.status)}</td>
