@@ -2,9 +2,10 @@
 // Production: Render deployed URL
 
 // switch to this for development 
-// export const API_BASE_URL = 'http://10.0.2.2:5000/api';
+export const API_BASE_URL = 'http://10.0.2.2:5000/api';
 
-export const API_BASE_URL = 'https://ecommerce-pos-8rsf.onrender.com/api';
+// switch to this for production
+// export const API_BASE_URL = 'https://ecommerce-pos-8rsf.onrender.com/api';
 
 // ─── App Info ─────────────────────────────────────────
 export const APP_NAME     = 'Triple E & Fiel Collince';

@@ -16,6 +16,7 @@ import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 
 import { COLORS } from '../utils/constants';
+import { CartProvider } from '../utils/CartContext';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -80,6 +81,7 @@ function MainTabs() {
 // ─── Root Navigator ───────────────────────────────────
 export default function AppNavigator() {
   return (
+    <CartProvider>
     <NavigationContainer>
       <Stack.Navigator
         initialRouteName="Splash"
@@ -96,5 +98,6 @@ export default function AppNavigator() {
         <Stack.Screen name="Main"     component={MainTabs}/>
       </Stack.Navigator>
     </NavigationContainer>
+    </CartProvider>
   );
 }

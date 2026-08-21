@@ -608,9 +608,25 @@ def api_get_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
+        # Avoid nested joins — fetch product without discount nested
         res = supabase.table('cart').select(
-            '*, product(product_id, product_name, price, image_url, brand, category, discount(discount_name, percentage))'
+            '*, product(product_id, product_name, price, image_url, brand, category, discount_id)'
         ).eq('customer_id', customer_id).eq('status', 'active').execute()
+
+        # Flatten product array → single object (Supabase returns array for joins)
+        for item in res.data:
+            if isinstance(item.get('product'), list):
+                item['product'] = item['product'][0] if item['product'] else None
+
+        # Fetch discount separately for products that have one
+        for item in res.data:
+            product = item.get('product')
+            if product and product.get('discount_id'):
+                disc_res = supabase.table('discount').select('discount_name, percentage').eq('discount_id', product['discount_id']).execute()
+                product['discount'] = disc_res.data[0] if disc_res.data else None
+            elif product:
+                product['discount'] = None
+
         return jsonify(res.data), 200
     except Exception as e:
         print(f"API cart error: {e}")

@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  FlatList, ActivityIndicator, RefreshControl, Image,
+  FlatList, ActivityIndicator, RefreshControl, Image, Alert,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getProducts, searchProducts } from '../services/productService';
 import { addToCart } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useCart } from '../utils/CartContext';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const inStock = product.quantity > 0;
@@ -92,7 +93,7 @@ export default function HomeScreen({ navigation }) {
   const [search,     setSearch]     = useState('');
   const [loading,    setLoading]    = useState(true);
   const [refreshing, setRefreshing] = useState(false);
-  const [cartCount,  setCartCount]  = useState(0);
+  const { cartCount, refreshCartCount } = useCart();
   const [loggedIn,   setLoggedIn]   = useState(false);
 
   useEffect(() => {
@@ -150,9 +151,12 @@ export default function HomeScreen({ navigation }) {
     if (!ok) return;
     try {
       await addToCart(product.product_id);
-      setCartCount(prev => prev + 1);
+      await refreshCartCount(); // update global badge on header + bottom tab
+      // Show popup toast
+      Alert.alert('Added to Cart', `${product.product_name} has been added to your cart.`);
     } catch (e) {
       console.error('Add to cart error:', e);
+      Alert.alert('Error', 'Failed to add item to cart.');
     }
   }
 
