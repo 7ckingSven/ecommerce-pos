@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
-  View, Text, TouchableOpacity, StyleSheet,
+  View, Text, TouchableOpacity, TextInput, StyleSheet,
   FlatList, Image, Alert, ActivityIndicator,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
@@ -85,13 +85,27 @@ export default function CartScreen({ navigation }) {
   );
 
   // ─── Quantity Update ──────────────────────────────────
-  async function handleUpdateQty(cartId, qty) {
+  async function handleUpdateQty(cartId, qty, maxStock) {
     if (qty < 1) { handleRemove(cartId); return; }
+    if (maxStock && qty > maxStock) {
+      Alert.alert('Maximum Stock', `Only ${maxStock} unit(s) available.`);
+      return;
+    }
     try {
       await updateCartItem(cartId, qty);
       setCart(prev => prev.map(i => i.cart_id === cartId ? { ...i, quantity: qty } : i));
     } catch (e) {
       Alert.alert('Error', 'Failed to update quantity.');
+    }
+  }
+
+  function handleQtyInputCart(cartId, val, maxStock) {
+    const num = parseInt(val.replace(/[^0-9]/g, '')) || 1;
+    if (num > maxStock) {
+      Alert.alert('Maximum Stock', `Only ${maxStock} unit(s) available.`);
+      handleUpdateQty(cartId, maxStock, maxStock);
+    } else {
+      handleUpdateQty(cartId, num, maxStock);
     }
   }
 
@@ -253,16 +267,24 @@ export default function CartScreen({ navigation }) {
                     <View style={styles.qtyRow}>
                       <TouchableOpacity
                         style={styles.qtyBtn}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1)}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, item.product?.quantity)}
                       >
                         <Feather name="minus" size={13} color={COLORS.dark}/>
                       </TouchableOpacity>
-                      <Text style={styles.qtyVal}>{item.quantity}</Text>
+                      <TextInput
+                        style={styles.qtyInput}
+                        value={String(item.quantity)}
+                        onChangeText={v => handleQtyInputCart(item.cart_id, v, item.product?.quantity)}
+                        keyboardType="number-pad"
+                        maxLength={4}
+                        selectTextOnFocus
+                      />
                       <TouchableOpacity
-                        style={styles.qtyBtn}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1)}
+                        style={[styles.qtyBtn, item.quantity >= item.product?.quantity && styles.qtyBtnDisabled]}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, item.product?.quantity)}
+                        disabled={item.quantity >= item.product?.quantity}
                       >
-                        <Feather name="plus" size={13} color={COLORS.dark}/>
+                        <Feather name="plus" size={13} color={item.quantity >= item.product?.quantity ? COLORS.grayLight : COLORS.dark}/>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.removeBtn}

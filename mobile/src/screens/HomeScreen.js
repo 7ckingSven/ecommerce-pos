@@ -25,8 +25,8 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
       activeOpacity={0.85}
     >
       {/* Product Image */}
-      {product.image_url
-        ? <Image source={{ uri: product.image_url }} style={styles.productImg} resizeMode="cover"/>
+      {(product.image_urls?.length ? product.image_urls[0] : product.image_url)
+        ? <Image source={{ uri: product.image_urls?.length ? product.image_urls[0] : product.image_url }} style={styles.productImg} resizeMode="cover"/>
         : <View style={styles.productImgPlaceholder}>
             <Feather name="shopping-bag" size={32} color={COLORS.primary}/>
           </View>
@@ -87,14 +87,17 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
 }
 
 export default function HomeScreen({ navigation }) {
-  const [products,   setProducts]   = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [selectedCat,setSelectedCat]= useState('');
-  const [search,     setSearch]     = useState('');
-  const [loading,    setLoading]    = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
+  const [products,    setProducts]    = useState([]);
+  const [allProducts, setAllProducts] = useState([]); // store all for filtering
+  const [categories,  setCategories]  = useState([]);
+  const [brands,      setBrands]      = useState([]);
+  const [selectedCat,   setSelectedCat]   = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
+  const [search,      setSearch]      = useState('');
+  const [loading,     setLoading]     = useState(true);
+  const [refreshing,  setRefreshing]  = useState(false);
   const { cartCount, refreshCartCount } = useCart();
-  const [loggedIn,   setLoggedIn]   = useState(false);
+  const [loggedIn,    setLoggedIn]    = useState(false);
 
   useEffect(() => {
     isLoggedIn().then(setLoggedIn);
@@ -115,12 +118,18 @@ export default function HomeScreen({ navigation }) {
     return true;
   }
 
-  async function loadProducts(cat = selectedCat) {
+  async function loadProducts() {
     try {
-      const data = await getProducts(cat);
+      // Always fetch ALL products — filter client-side to preserve chip list
+      const data = await getProducts('');
+      setAllProducts(data);
       setProducts(data);
-      const cats = [...new Set(data.map(p => p.category))];
+
+      // Build category and brand lists from full dataset
+      const cats   = [...new Set(data.map(p => p.category?.trim()).filter(Boolean))].sort();
+      const brnds  = [...new Set(data.map(p => p.brand?.trim()).filter(Boolean))].sort();
       setCategories(cats);
+      setBrands(brnds);
     } catch (e) {
       console.error('Load products error:', e);
     } finally {
@@ -129,20 +138,34 @@ export default function HomeScreen({ navigation }) {
     }
   }
 
-  async function handleSearch(q) {
+  // Apply filters client-side — never loses chip list
+  function applyFilters(cat, brand, q) {
+    let filtered = allProducts;
+    if (cat)   filtered = filtered.filter(p => p.category?.trim() === cat);
+    if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand);
+    if (q)     filtered = filtered.filter(p =>
+      p.product_name?.toLowerCase().includes(q.toLowerCase()) ||
+      p.brand?.toLowerCase().includes(q.toLowerCase()) ||
+      p.category?.toLowerCase().includes(q.toLowerCase())
+    );
+    setProducts(filtered);
+  }
+
+  function handleSearch(q) {
     setSearch(q);
-    if (q.trim() === '') { loadProducts(selectedCat); return; }
-    try {
-      const data = await searchProducts(q, selectedCat);
-      setProducts(data);
-    } catch (e) { console.error('Search error:', e); }
+    applyFilters(selectedCat, selectedBrand, q);
   }
 
   function selectCategory(cat) {
     setSelectedCat(cat);
     setSearch('');
-    setLoading(true);
-    loadProducts(cat);
+    applyFilters(cat, selectedBrand, '');
+  }
+
+  function selectBrand(brand) {
+    setSelectedBrand(brand);
+    setSearch('');
+    applyFilters(selectedCat, brand, '');
   }
 
   // ─── Add to Cart (requires login) ────────────────────
@@ -170,6 +193,9 @@ export default function HomeScreen({ navigation }) {
 
   function onRefresh() {
     setRefreshing(true);
+    setSelectedCat('');
+    setSelectedBrand('');
+    setSearch('');
     loadProducts();
   }
 
@@ -212,25 +238,51 @@ export default function HomeScreen({ navigation }) {
         )}
       </View>
 
-      {/* Categories */}
-      <FlatList
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        data={[{ id: '', name: 'All' }, ...categories.map(c => ({ id: c, name: c }))]}
-        keyExtractor={item => item.id}
-        contentContainerStyle={styles.catContent}
-        style={styles.catScroll}
-        renderItem={({ item }) => (
-          <TouchableOpacity
-            style={[styles.catChip, selectedCat === item.id && styles.catChipActive]}
-            onPress={() => selectCategory(item.id)}
-          >
-            <Text style={[styles.catText, selectedCat === item.id && styles.catTextActive]}>
-              {item.name}
-            </Text>
-          </TouchableOpacity>
-        )}
-      />
+      {/* Category Filter */}
+      <View style={styles.filterSection}>
+        <Text style={styles.filterLabel}>Category</Text>
+        <FlatList
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          data={[{ id: '', name: 'All' }, ...categories.map(c => ({ id: c, name: c }))]}
+          keyExtractor={item => item.id}
+          contentContainerStyle={styles.catContent}
+          renderItem={({ item }) => (
+            <TouchableOpacity
+              style={[styles.catChip, selectedCat === item.id && styles.catChipActive]}
+              onPress={() => selectCategory(item.id)}
+            >
+              <Text style={[styles.catText, selectedCat === item.id && styles.catTextActive]}>
+                {item.name}
+              </Text>
+            </TouchableOpacity>
+          )}
+        />
+      </View>
+
+      {/* Brand Filter */}
+      {brands.length > 0 && (
+        <View style={styles.filterSection}>
+          <Text style={styles.filterLabel}>Brand</Text>
+          <FlatList
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            data={[{ id: '', name: 'All' }, ...brands.map(b => ({ id: b, name: b }))]}
+            keyExtractor={item => item.id}
+            contentContainerStyle={styles.catContent}
+            renderItem={({ item }) => (
+              <TouchableOpacity
+                style={[styles.catChip, selectedBrand === item.id && styles.catChipActive]}
+                onPress={() => selectBrand(item.id)}
+              >
+                <Text style={[styles.catText, selectedBrand === item.id && styles.catTextActive]}>
+                  {item.name}
+                </Text>
+              </TouchableOpacity>
+            )}
+          />
+        </View>
+      )}
 
       {/* Products */}
       {loading ? (
@@ -282,8 +334,10 @@ const styles = StyleSheet.create({
   searchInput:            { flex: 1, padding: 10, fontSize: 14, color: COLORS.dark },
 
   // Categories
-  catScroll:              { maxHeight: 44 },
+  catScroll:              { maxHeight: 44 }, // kept for compatibility
   catContent:             { paddingHorizontal: SPACING.md, gap: 8, alignItems: 'center' },
+  filterSection:          { marginBottom: 6 },
+  filterLabel:            { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, paddingHorizontal: SPACING.md, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   catChip:                { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: COLORS.grayBorder },
   catChipActive:          { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   catText:                { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },

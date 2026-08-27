@@ -1,18 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import {
-  View, Text, Image, TouchableOpacity, StyleSheet,
+  View, Text, Image, TouchableOpacity, TextInput, StyleSheet,
   ScrollView, Alert, ActivityIndicator,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { addToCart } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
+import { addToCart } from '../services/cartService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
 // ─── Discount Helper ──────────────────────────────────
 function getDiscountedPrice(product) {
-  const disc = product.discount;
+  const disc = Array.isArray(product.discount) ? product.discount[0] : product.discount;
   if (!disc || !disc.percentage) return null;
-  return product.price * (1 - disc.percentage / 100);
+  const pct = Number(disc.percentage);
+  if (!pct || pct <= 0 || pct > 100) return null;
+  return Number(product.price) * (1 - pct / 100);
 }
 
 export default function ProductDetailScreen({ route, navigation }) {
@@ -23,12 +25,33 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   const discountedPrice = getDiscountedPrice(product);
   const hasDiscount     = discountedPrice !== null;
+  // Debug — remove after fixing
+  console.log('Product discount data:', JSON.stringify(product.discount));
+  console.log('Discounted price:', discountedPrice, 'Original:', product.price);
   const effectivePrice  = hasDiscount ? discountedPrice : product.price;
   const disc            = product.discount;
   const inStock         = product.quantity > 0;
 
-  function increment() { if (quantity < product.quantity) setQty(q => q + 1); }
+  function increment() {
+    if (quantity >= product.quantity) {
+      Alert.alert('Maximum Stock', `Only ${product.quantity} unit(s) available.`);
+      return;
+    }
+    setQty(q => q + 1);
+  }
   function decrement() { if (quantity > 1) setQty(q => q - 1); }
+
+  function handleQtyInput(val) {
+    const num = parseInt(val.replace(/[^0-9]/g, '')) || 1;
+    if (num > product.quantity) {
+      Alert.alert('Maximum Stock', `Only ${product.quantity} unit(s) available.`);
+      setQty(product.quantity);
+    } else if (num < 1) {
+      setQty(1);
+    } else {
+      setQty(num);
+    }
+  }
 
   async function handleAddToCart() {
     const loggedIn = await isLoggedIn();
@@ -63,16 +86,34 @@ export default function ProductDetailScreen({ route, navigation }) {
       ]);
       return;
     }
-    setLoadingBuy(true);
-    try {
-      await addToCart(product.product_id, quantity);
-      // Navigate to Checkout within the Cart stack
-      navigation.navigate('Cart', { screen: 'Checkout' });
-    } catch (e) {
-      console.error('Buy now error:', e);
-      Alert.alert('Error', 'Failed to proceed to checkout. Please try again.');
-      setLoadingBuy(false);
-    }
+    // Buy Now — go directly to Checkout with only this product
+    // Does NOT add to cart — cart stays untouched
+    const effectivePrice = hasDiscount ? discountedPrice : product.price;
+    // Normalize discount — ensure it's a plain object not array
+    const normalizedDiscount = Array.isArray(product.discount)
+      ? product.discount[0] || null
+      : product.discount || null;
+
+    const buyNowItem = [{
+      cart_id:    'buy_now',
+      product_id: product.product_id,
+      quantity,
+      product: {
+        product_name: product.product_name,
+        price:        Number(product.price),
+        image_url:    product.image_url,
+        image_urls:   product.image_urls || [],
+        brand:        product.brand,
+        discount:     normalizedDiscount,
+      },
+    }];
+    const buyNowTotal = effectivePrice * quantity;
+    // Navigate directly to Checkout without going through Cart tab
+    navigation.navigate('Checkout', {
+      cartItems: buyNowItem,
+      total:     buyNowTotal,
+      isBuyNow:  true,
+    });
   }
 
   return (
@@ -85,13 +126,56 @@ export default function ProductDetailScreen({ route, navigation }) {
 
       <ScrollView showsVerticalScrollIndicator={false}>
 
-        {/* Product Image */}
-        {product.image_url
-          ? <Image source={{ uri: product.image_url }} style={styles.productImg} resizeMode="cover"/>
-          : <View style={styles.productImgPlaceholder}>
-              <Feather name="shopping-bag" size={60} color={COLORS.primary}/>
+        {/* Product Image Carousel */}
+        {(() => {
+          const images = product.image_urls?.length
+            ? product.image_urls
+            : product.image_url ? [product.image_url] : [];
+          const [activeIdx, setActiveIdx] = useState(0);
+          const { width } = Dimensions.get('window');
+
+          if (images.length === 0) {
+            return (
+              <View style={styles.productImgPlaceholder}>
+                <Feather name="shopping-bag" size={60} color={COLORS.primary}/>
+              </View>
+            );
+          }
+
+          return (
+            <View style={{ width:'100%', height:280 }}>
+              <FlatList
+                data={images}
+                keyExtractor={(_, i) => String(i)}
+                horizontal
+                pagingEnabled
+                showsHorizontalScrollIndicator={false}
+                onMomentumScrollEnd={e => {
+                  const idx = Math.round(e.nativeEvent.contentOffset.x / width);
+                  setActiveIdx(idx);
+                }}
+                renderItem={({ item }) => (
+                  <Image
+                    source={{ uri: item }}
+                    style={{ width, height:280 }}
+                    resizeMode="cover"
+                  />
+                )}
+              />
+              {/* Dots indicator */}
+              {images.length > 1 && (
+                <View style={styles.dotsWrap}>
+                  {images.map((_, i) => (
+                    <View
+                      key={i}
+                      style={[styles.dot, i === activeIdx && styles.dotActive]}
+                    />
+                  ))}
+                </View>
+              )}
             </View>
-        }
+          );
+        })()}
 
         <View style={styles.content}>
 
@@ -156,9 +240,20 @@ export default function ProductDetailScreen({ route, navigation }) {
                 <TouchableOpacity style={styles.qtyBtn} onPress={decrement}>
                   <Feather name="minus" size={16} color={COLORS.dark}/>
                 </TouchableOpacity>
-                <Text style={styles.qtyVal}>{quantity}</Text>
-                <TouchableOpacity style={styles.qtyBtn} onPress={increment}>
-                  <Feather name="plus" size={16} color={COLORS.dark}/>
+                <TextInput
+                  style={styles.qtyInput}
+                  value={String(quantity)}
+                  onChangeText={handleQtyInput}
+                  keyboardType="number-pad"
+                  maxLength={4}
+                  selectTextOnFocus
+                />
+                <TouchableOpacity
+                  style={[styles.qtyBtn, quantity >= product.quantity && styles.qtyBtnDisabled]}
+                  onPress={increment}
+                  disabled={quantity >= product.quantity}
+                >
+                  <Feather name="plus" size={16} color={quantity >= product.quantity ? COLORS.grayLight : COLORS.dark}/>
                 </TouchableOpacity>
               </View>
             </View>

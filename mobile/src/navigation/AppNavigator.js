@@ -27,6 +27,7 @@ function HomeStack() {
     <Stack.Navigator screenOptions={{ headerShown: false }}>
       <Stack.Screen name="HomeMain"       component={HomeScreen}/>
       <Stack.Screen name="ProductDetail"  component={ProductDetailScreen}/>
+      <Stack.Screen name="Checkout"       component={CheckoutScreen}/>
     </Stack.Navigator>
   );
 }

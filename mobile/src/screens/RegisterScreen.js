@@ -15,7 +15,8 @@ export default function RegisterScreen({ navigation }) {
   const [form, setForm] = useState({
     fname: '', mi: '', lname: '',
     email: '', username: '', phone_number: '',
-    address: '', dob: '', gender: '',
+    street: '', barangay: '', city: '', province: '', zip_code: '',
+    dob: '', gender: '',
     password: '', confirmPassword: '',
   });
 
@@ -45,6 +46,16 @@ export default function RegisterScreen({ navigation }) {
 
     setLoading(true);
     try {
+      // Combine address fields into one formatted string
+      const addressParts = [
+        form.street.trim(),
+        form.barangay.trim(),
+        form.city.trim(),
+        form.province.trim(),
+        form.zip_code.trim(),
+      ].filter(Boolean);
+      const combinedAddress = addressParts.join(', ');
+
       await register({
         fname:        form.fname,
         mi:           form.mi,
@@ -52,7 +63,7 @@ export default function RegisterScreen({ navigation }) {
         email:        form.email,
         username:     form.username,
         phone_number: form.phone_number,
-        address:      form.address,
+        address:      combinedAddress,
         dob:          form.dob,
         gender:       form.gender,
         password:     form.password,
@@ -182,20 +193,29 @@ export default function RegisterScreen({ navigation }) {
                 </View>
               ))}
 
-              <View style={styles.fieldWrap}>
-                <Text style={styles.label}>Address (optional)</Text>
-                <View style={[styles.inputRow, { alignItems: 'flex-start' }]}>
-                  <View style={[styles.inputIcon, { paddingTop: 14 }]}><Feather name="map-pin" size={16} color={COLORS.textMuted}/></View>
-                  <TextInput
-                    style={[styles.input, styles.inputFlex, { minHeight: 70, textAlignVertical: 'top' }]}
-                    placeholder="House/Unit, Street, Barangay, City"
-                    placeholderTextColor={COLORS.textMuted}
-                    value={form.address}
-                    onChangeText={v => update('address', v)}
-                    multiline
-                  />
+              <Text style={[styles.label, { marginBottom: 8 }]}>Address (optional)</Text>
+              {[
+                { key:'street',   label:'Street / House No.',  placeholder:'e.g. Block 2, Osmeña St.' },
+                { key:'barangay', label:'Barangay',            placeholder:'e.g. Brgy. Zone 2' },
+                { key:'city',     label:'City / Municipality', placeholder:'e.g. Koronadal City' },
+                { key:'province', label:'Province',            placeholder:'e.g. South Cotabato' },
+                { key:'zip_code', label:'Zip Code',            placeholder:'e.g. 9506', keyboard:'number-pad' },
+              ].map(f => (
+                <View key={f.key} style={styles.fieldWrap}>
+                  <Text style={styles.label}>{f.label}</Text>
+                  <View style={styles.inputRow}>
+                    <View style={styles.inputIcon}><Feather name="map-pin" size={16} color={COLORS.textMuted}/></View>
+                    <TextInput
+                      style={[styles.input, styles.inputFlex]}
+                      placeholder={f.placeholder}
+                      placeholderTextColor={COLORS.textMuted}
+                      value={form[f.key]}
+                      onChangeText={v => update(f.key, v)}
+                      keyboardType={f.keyboard || 'default'}
+                    />
+                  </View>
                 </View>
-              </View>
+              ))}
             </>
           )}
 

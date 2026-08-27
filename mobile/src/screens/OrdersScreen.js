@@ -9,7 +9,7 @@ import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
 function statusColor(s) {
-  const map = { pending:'#eab308', processing:'#3b82f6', completed: COLORS.primary, cancelled:'#ef4444' };
+  const map = { pending:'#eab308', processing:'#3b82f6', out_for_delivery:'#8b5cf6', completed: COLORS.primary, cancelled:'#ef4444' };
   return map[s] || COLORS.textMuted;
 }
 
@@ -93,7 +93,7 @@ export default function OrdersScreen({ navigation }) {
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '20' }]}>
                   <Text style={[styles.statusText, { color: statusColor(item.status) }]}>
-                    {item.status?.replace(/_/g,' ').toUpperCase()}
+                    {item.status === 'out_for_delivery' ? 'Out for Delivery' : item.status?.replace(/_/g,' ').toUpperCase()}
                   </Text>
                 </View>
               </View>
