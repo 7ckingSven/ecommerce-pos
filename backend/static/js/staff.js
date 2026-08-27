@@ -28,10 +28,11 @@ updateDate();
 
 // ─── Section Navigation ───────────────────────────────
 const pageTitles = {
-  pos:       ['Point of Sale',  'Process walk-in transactions'],
-  inventory: ['Inventory',      'Track and manage stock levels'],
-  orders:    ['Orders',         'View and manage all orders'],
-  summary:   ['Sales Summary',  "Today's sales overview"],
+  pos:       ['Point of Sale',    'Process walk-in transactions'],
+  inventory: ['Inventory',        'Track and manage stock levels'],
+  orders:    ['Orders',           'View and manage all orders'],
+  summary:   ['Sales Summary',    "Today's sales overview"],
+  requests:  ['Stock Requests',   'Request stock from admin'],
 };
 
 function showSection(name, el) {
@@ -57,6 +58,7 @@ const loaders = {
   inventory: loadInventory,
   orders:    loadOrders,
   summary:   loadSummary,
+  requests:  loadRequests,
 };
 
 // ─── Toast ────────────────────────────────────────────
@@ -99,22 +101,58 @@ let allBranches     = [];
 // ══════════════════════════════════════════════════════
 // BRANCHES
 // ══════════════════════════════════════════════════════
+// Staff's own branch — loaded once on init
+let staffBranchId   = null;
+let staffBranchName = null;
+
 async function loadBranches() {
   try {
+    // Load all branches for stock modals
     const res   = await fetch('/api/staff/branches');
     allBranches = await res.json();
+
+    // Auto-detect this staff's branch
+    await loadStaffBranch();
+
     populateBranchSelects();
   } catch (e) { console.error('Branches error:', e); }
+}
+
+async function loadStaffBranch() {
+  try {
+    const res  = await fetch('/api/staff/my-branch');
+    const data = await res.json();
+    if (data.branch_id) {
+      staffBranchId   = data.branch_id;
+      staffBranchName = data.branch_name;
+
+      // Set hidden input for POS
+      const input = document.getElementById('posBranch');
+      if (input) input.value = staffBranchId;
+
+      // Show branch name in POS display
+      const display = document.getElementById('posBranchDisplay');
+      if (display) display.textContent = `Branch: ${staffBranchName}`;
+
+      // Show branch name in sidebar
+      const sidebarBranch = document.getElementById('sidebarBranchName');
+      if (sidebarBranch) sidebarBranch.textContent = staffBranchName;
+    } else {
+      const display = document.getElementById('posBranchDisplay');
+      if (display) display.textContent = 'No branch assigned — contact admin';
+    }
+  } catch (e) {
+    console.error('Staff branch error:', e);
+  }
 }
 
 function populateBranchSelects() {
   const options = `<option value="">Select branch</option>` +
     allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
 
-  // POS branch selector
+  // POS branch — hidden, already set by loadStaffBranch
   const posBranch = document.getElementById('posBranch');
-  if (posBranch) posBranch.innerHTML = `<option value="">Select branch for this transaction *</option>` +
-    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+  if (posBranch && !posBranch.value) posBranch.value = staffBranchId || '';
 
   // Stock modal branch selects
   ['stockFromBranch', 'stockToBranch'].forEach(id => {
@@ -292,10 +330,10 @@ function computeChange() {
 async function processOrder() {
   if (!orderItems.length) return;
 
-  // Branch is required for Sales_Transaction
-  const branchId = document.getElementById('posBranch').value;
+  // Branch is auto-detected from staff profile
+  const branchId = staffBranchId || document.getElementById('posBranch').value;
   if (!branchId) {
-    showToast('Please select the branch for this transaction.', 'error');
+    showToast('Branch not assigned. Please contact admin.', 'error');
     return;
   }
 
@@ -359,8 +397,8 @@ function showReceipt(data) {
   const now      = new Date();
 
   // Get branch name for receipt
-  const branchId   = document.getElementById('posBranch').value;
-  const branchName = allBranches.find(b => b.branch_id === branchId)?.branch_name || '';
+  const branchId   = staffBranchId || document.getElementById('posBranch').value;
+  const branchName = staffBranchName || allBranches.find(b => b.branch_id === branchId)?.branch_name || '';
 
   document.getElementById('receiptContent').innerHTML = `
     <div class="receipt-header">
@@ -448,6 +486,17 @@ async function loadInventory() {
     document.getElementById('invLowStock').textContent      = invProducts.filter(p => p.quantity > 0 && p.quantity <= 10).length;
     document.getElementById('invOutOfStock').textContent    = invProducts.filter(p => p.quantity <= 0).length;
 
+    // Low stock banner
+    const lowCount  = invProducts.filter(p => p.status === 'active' && p.quantity <= 10).length;
+    const banner    = document.getElementById('staffLowStockBanner');
+    const bannerTxt = document.getElementById('staffLowStockText');
+    if (banner && lowCount > 0) {
+      banner.style.display = 'flex';
+      bannerTxt.textContent = `⚠️ ${lowCount} product${lowCount > 1 ? 's are' : ' is'} running low on stock!`;
+    } else if (banner) {
+      banner.style.display = 'none';
+    }
+
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     document.getElementById('invRecentRestocks').textContent = invData.filter(i => new Date(i.date) >= oneWeekAgo).length;
@@ -509,6 +558,15 @@ function filterInventorySearch(q) {
   renderInvProducts(filtered);
 }
 
+function filterStaffInventoryType(type) {
+  if (type === 'low_stock') {
+    const lowStock = invProducts.filter(p => p.quantity <= 10);
+    renderInvProducts(lowStock);
+  } else {
+    renderInvProducts(invProducts);
+  }
+}
+
 function openStockModal(productId = '') {
   const sel = document.getElementById('stockProduct');
   sel.innerHTML = '<option value="">Select product</option>' +
@@ -565,8 +623,14 @@ async function submitStock(e) {
 // ══════════════════════════════════════════════════════
 async function loadOrders() {
   try {
-    const res   = await fetch('/api/staff/orders?limit=50');
-    staffOrders = await res.json();
+    const res  = await fetch('/api/staff/orders?limit=50');
+    const data = await res.json();
+    // Sort newest first using created_at timestamp
+    staffOrders = data.sort((a, b) => {
+      const da = new Date(a.created_at || a.date || 0);
+      const db = new Date(b.created_at || b.date || 0);
+      return db - da;
+    });
     renderStaffOrders(staffOrders);
   } catch (e) { console.error('Orders error:', e); }
 }
@@ -651,6 +715,102 @@ async function loadSummary() {
 }
 
 // ─── Init ─────────────────────────────────────────────
+// ─── STOCK REQUESTS ───────────────────────────────────
+
+async function loadRequests() {
+  try {
+    const res  = await fetch('/api/staff/stock-requests');
+    const data = await res.json();
+
+    // Handle error response
+    if (!Array.isArray(data)) {
+      console.error('Stock requests error:', data);
+      document.getElementById('requestsBody').innerHTML =
+        '<tr><td colspan="7" class="table-empty">Failed to load requests. Try again.</td></tr>';
+      return;
+    }
+
+    // Update badge
+    const pending = data.filter(r => r.status === 'pending').length;
+    const badge   = document.getElementById('reqBadge');
+    if (badge) {
+      badge.textContent   = pending;
+      badge.style.display = pending > 0 ? 'inline' : 'none';
+    }
+
+    document.getElementById('requestsBody').innerHTML = data.length
+      ? data.map(r => {
+          const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
+          const statusColor  = statusColors[r.status] || 'gray';
+          return `
+          <tr>
+            <td><strong>${r.product?.product_name || '—'}</strong></td>
+            <td>${r.product?.quantity ?? '—'} units</td>
+            <td>${r.quantity_needed} units</td>
+            <td><span class="badge badge--${statusColor}">${r.status}</span></td>
+            <td style="font-size:12px;">${r.note || '—'}</td>
+            <td style="font-size:12px;color:${r.status === 'rejected' ? '#ef4444' : 'inherit'};">${r.admin_note || '—'}</td>
+            <td>${new Date(r.created_at).toLocaleDateString('en-PH')}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="7" class="table-empty">No stock requests yet</td></tr>';
+
+  } catch (e) { console.error('Requests error:', e); }
+}
+
+async function openRequestModal() {
+  if (!invProducts.length) await loadInventory();
+  const sel = document.getElementById('reqProduct');
+  if (sel) {
+    sel.innerHTML = '<option value="">Select product</option>' +
+      invProducts.map(p => `<option value="${p.product_id}" data-stock="${p.quantity}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+  }
+  document.getElementById('requestModalOverlay')?.classList.add('open');
+  document.getElementById('requestModal')?.classList.add('open');
+}
+
+function closeRequestModal() {
+  document.getElementById('requestModalOverlay')?.classList.remove('open');
+  document.getElementById('requestModal')?.classList.remove('open');
+  document.getElementById('requestForm')?.reset();
+  document.getElementById('reqCurrentStock').value = '';
+}
+
+function updateCurrentStock(sel) {
+  const opt   = sel.options[sel.selectedIndex];
+  const stock = opt?.dataset?.stock || '';
+  document.getElementById('reqCurrentStock').value = stock ? `${stock} units` : '';
+}
+
+async function submitRequest(e) {
+  e.preventDefault();
+  const productId = document.getElementById('reqProduct').value;
+  const qty       = parseInt(document.getElementById('reqQty').value);
+  const note      = document.getElementById('reqNote').value;
+
+  try {
+    const res = await fetch('/api/staff/stock-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id:     productId,
+        quantity_needed: qty,
+        note:           note,
+        branch_id:      staffBranchId,
+      }),
+    });
+    if (res.ok) {
+      showToast('Stock request submitted!');
+      closeRequestModal();
+      loadRequests();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to submit request.', 'error');
+    }
+  } catch (e) { showToast('Error submitting request.', 'error'); }
+}
+
+
 document.addEventListener('DOMContentLoaded', async () => {
   await loadBranches();
   loadPosProducts();

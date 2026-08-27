@@ -31,6 +31,7 @@ updateDate();
 
 // ─── Section Navigation ───────────────────────────────
 const pageTitles = {
+  purchase_orders: ['Purchase Orders', 'Manage stock requests and purchase orders'],
   overview:  ['Overview',          'Welcome back'],
   products:  ['Products',          'Manage your product catalog'],
   inventory: ['Inventory',         'Track and manage stock levels'],
@@ -77,7 +78,8 @@ function badge(text, type) {
     admin: 'blue', staff: 'green', customer: 'gray',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
   };
-  return `<span class="badge badge--${map[text] || 'gray'}">${text.replace(/_/g, ' ')}</span>`;
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text.replace(/_/g, ' ');
+  return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 
 function peso(val) {
@@ -107,7 +109,8 @@ const loaders = {
   orders:    loadOrders,
   sales:     loadSales,
   discounts: loadDiscounts,
-  users:     loadUsers,
+  users:          loadUsers,
+  purchase_orders: loadPurchaseOrders,
 };
 
 // ─── BRANCHES (shared utility) ────────────────────────
@@ -193,6 +196,22 @@ async function loadProducts() {
     const sel        = document.getElementById('categoryFilter');
     sel.innerHTML    = '<option value="">All Categories</option>' +
       categories.map(c => `<option value="${c}">${c}</option>`).join('');
+    const datalist = document.getElementById('categoryList');
+    if (datalist) datalist.innerHTML = categories.map(c => `<option value="${c}">`).join('');
+
+    // Populate brand datalist
+    const brands = [...new Set(
+      allProducts.map(p => p.brand?.trim()).filter(Boolean)
+    )].sort();
+    const brandList = document.getElementById('brandList');
+    if (brandList) brandList.innerHTML = brands.map(b => `<option value="${b}">`).join('');
+
+    // Populate brand filter dropdown in toolbar
+    const brandFilter = document.getElementById('brandFilter');
+    if (brandFilter) {
+      brandFilter.innerHTML = '<option value="">All Brands</option>' +
+        brands.map(b => `<option value="${b}">${b}</option>`).join('');
+    }
 
   } catch (e) { console.error('Products error:', e); }
 }
@@ -208,7 +227,7 @@ function renderProducts(products) {
           <tr>
             <td>
               ${p.image_url
-                ? `<img src="${p.image_url}" class="product-img-cell" alt="${p.product_name}"/>`
+                ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" class="product-img-cell" alt="${p.product_name}"/>`
                 : `<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`
               }
             </td>
@@ -217,7 +236,6 @@ function renderProducts(products) {
             <td>${p.category}</td>
             <td>${peso(p.price)}</td>
             <td>${discountCell}</td>
-            <td><span style="color:${p.quantity <= 10 ? '#ef4444' : 'inherit'};font-weight:${p.quantity <= 10 ? '600' : '400'};">${p.quantity}</span></td>
             <td>${badge(p.status)}</td>
             <td>
               <div style="display:flex;gap:6px;">
@@ -231,7 +249,7 @@ function renderProducts(products) {
             </td>
           </tr>`;
       }).join('')
-    : '<tr><td colspan="9" class="table-empty">No products found</td></tr>';
+    : '<tr><td colspan="8" class="table-empty">No products found</td></tr>';
 }
 
 function filterProducts(q) {
@@ -243,7 +261,21 @@ function filterProducts(q) {
 }
 
 function filterByCategory(cat) {
-  renderProducts(cat ? allProducts.filter(p => p.category === cat) : allProducts);
+  const brand = document.getElementById('brandFilter')?.value || '';
+  let filtered = cat
+    ? allProducts.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase())
+    : allProducts;
+  if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand.trim());
+  renderProducts(filtered);
+}
+
+function filterByBrand(brand) {
+  const cat = document.getElementById('categoryFilter')?.value || '';
+  let filtered = brand
+    ? allProducts.filter(p => p.brand?.trim() === brand.trim())
+    : allProducts;
+  if (cat) filtered = filtered.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase());
+  renderProducts(filtered);
 }
 
 // Product Modal
@@ -254,7 +286,7 @@ function openProductModal(product = null) {
   document.getElementById('pBrand').value       = product?.brand || '';
   document.getElementById('pCategory').value    = product?.category || '';
   document.getElementById('pPrice').value       = product?.price || '';
-  document.getElementById('pQuantity').value    = product?.quantity || '';
+  // Stock managed via Inventory — not set in product modal
   document.getElementById('pStatus').value      = product?.status || 'active';
   document.getElementById('pDescription').value = product?.description || '';
 
@@ -265,13 +297,33 @@ function openProductModal(product = null) {
       `<option value="${d.discount_id}" ${product?.discount_id === d.discount_id ? 'selected' : ''}>${d.discount_name} (${d.percentage}%)</option>`
     ).join('');
 
-  const preview = document.getElementById('pImagePreview');
-  if (product?.image_url) {
-    preview.src          = product.image_url;
-    preview.style.display = 'block';
-  } else {
-    preview.style.display = 'none';
+  // Clear new image previews
+  const previewWrap = document.getElementById('imagePreviewsWrap');
+  if (previewWrap) previewWrap.innerHTML = '';
+  const pImagesEl = document.getElementById('pImages');
+  if (pImagesEl) pImagesEl.value = '';
+
+  // Show existing images when editing
+  const existingWrap = document.getElementById('existingImagesWrap');
+  const existingInput = document.getElementById('pExistingImages');
+  if (existingWrap && existingInput) {
+    // Collect existing image URLs — image_urls array or fallback to single image_url
+    const existingUrls = product?.image_urls?.length
+      ? product.image_urls
+      : product?.image_url ? [product.image_url] : [];
+    existingInput.value = JSON.stringify(existingUrls);
+    renderExistingImages(existingUrls);
   }
+
+  // Available At
+  const availEl = document.getElementById('pAvailableAt');
+  if (availEl) availEl.value = product?.available_at || 'both';
+
+  // Variants
+  const existingVariants = product?.variants || [];
+  const varEl = document.getElementById('pVariants');
+  if (varEl) varEl.value = JSON.stringify(existingVariants);
+  renderVariantChips(existingVariants);
 
   document.getElementById('productModalOverlay').classList.add('open');
   document.getElementById('productModal').classList.add('open');
@@ -281,8 +333,102 @@ function closeProductModal() {
   document.getElementById('productModalOverlay').classList.remove('open');
   document.getElementById('productModal').classList.remove('open');
   document.getElementById('productForm').reset();
-  document.getElementById('pImagePreview').style.display = 'none';
+  const previewWrap = document.getElementById('imagePreviewsWrap');
+  if (previewWrap) previewWrap.innerHTML = '';
+  const existingWrap = document.getElementById('existingImagesWrap');
+  if (existingWrap) existingWrap.innerHTML = '';
+  const pImagesEl = document.getElementById('pImages');
+  if (pImagesEl) pImagesEl.value = '';
+  const existingInput = document.getElementById('pExistingImages');
+  if (existingInput) existingInput.value = '[]';
+  const chipsEl = document.getElementById('variantChips');
+  if (chipsEl) chipsEl.innerHTML = '';
+  const varEl = document.getElementById('pVariants');
+  if (varEl) varEl.value = '[]';
+  const varInput = document.getElementById('variantInput');
+  if (varInput) varInput.value = '';
 }
+
+// ─── Variant Chip Functions ───────────────────────────
+
+function renderVariantChips(variants) {
+  const container = document.getElementById('variantChips');
+  if (!container) return;
+  container.innerHTML = variants.map((v, i) => `
+    <span onclick="removeVariantChip(${i})" style="
+      display:inline-flex;align-items:center;gap:4px;
+      background:rgba(22,163,74,0.12);color:#16a34a;
+      border:1px solid rgba(22,163,74,0.3);
+      border-radius:999px;padding:4px 10px;font-size:12px;
+      font-weight:600;cursor:pointer;user-select:none;
+    " title="Click to remove">
+      ${v} <span style="font-size:14px;line-height:1;">&times;</span>
+    </span>
+  `).join('');
+}
+
+function addVariantChip() {
+  const input   = document.getElementById('variantInput');
+  const val     = input.value.trim();
+  if (!val) return;
+  const current = JSON.parse(document.getElementById('pVariants').value || '[]');
+  if (current.includes(val)) { input.value = ''; return; }
+  current.push(val);
+  document.getElementById('pVariants').value = JSON.stringify(current);
+  renderVariantChips(current);
+  input.value = '';
+  input.focus();
+}
+
+function removeVariantChip(index) {
+  const current = JSON.parse(document.getElementById('pVariants').value || '[]');
+  current.splice(index, 1);
+  document.getElementById('pVariants').value = JSON.stringify(current);
+  renderVariantChips(current);
+}
+
+
+// ─── Variant Chip Functions ───────────────────────────
+
+function renderVariantChips(variants) {
+  const container = document.getElementById('variantChips');
+  if (!container) return;
+  container.innerHTML = (variants || []).map((v, i) => `
+    <span onclick="removeVariantChip(${i})" style="
+      display:inline-flex;align-items:center;gap:4px;
+      background:rgba(22,163,74,0.12);color:#16a34a;
+      border:1px solid rgba(22,163,74,0.3);
+      border-radius:999px;padding:4px 10px;font-size:12px;
+      font-weight:600;cursor:pointer;user-select:none;"
+      title="Click to remove">
+      ${v} <span style="font-size:14px;">&times;</span>
+    </span>
+  `).join('');
+}
+
+function addVariantChip() {
+  const input = document.getElementById('variantInput');
+  if (!input) return;
+  const val = input.value.trim();
+  if (!val) return;
+  const varEl = document.getElementById('pVariants');
+  const current = JSON.parse(varEl?.value || '[]');
+  if (current.includes(val)) { input.value = ''; return; }
+  current.push(val);
+  if (varEl) varEl.value = JSON.stringify(current);
+  renderVariantChips(current);
+  input.value = '';
+  input.focus();
+}
+
+function removeVariantChip(index) {
+  const varEl = document.getElementById('pVariants');
+  const current = JSON.parse(varEl?.value || '[]');
+  current.splice(index, 1);
+  if (varEl) varEl.value = JSON.stringify(current);
+  renderVariantChips(current);
+}
+
 
 async function editProduct(id) {
   const product = allProducts.find(p => p.product_id === id);
@@ -302,14 +448,27 @@ async function submitProduct(e) {
   e.preventDefault();
   const id       = document.getElementById('productId').value;
   const formData = new FormData();
-  formData.append('product_name', document.getElementById('pName').value);
-  formData.append('brand',        document.getElementById('pBrand').value);
-  formData.append('category',     document.getElementById('pCategory').value);
-  formData.append('price',        document.getElementById('pPrice').value);
-  formData.append('quantity',     document.getElementById('pQuantity').value);
-  formData.append('status',       document.getElementById('pStatus').value);
-  formData.append('description',  document.getElementById('pDescription').value);
-  formData.append('discount_id',  document.getElementById('pDiscount').value);
+  formData.append('product_name',  document.getElementById('pName').value);
+  formData.append('brand',         document.getElementById('pBrand').value);
+  formData.append('category',      document.getElementById('pCategory').value);
+  formData.append('price',         document.getElementById('pPrice').value);
+  formData.append('quantity',      '0'); // Stock managed via Inventory
+
+  // Multiple images
+  const pImagesEl = document.getElementById('pImages');
+  if (pImagesEl?.files?.length) {
+    Array.from(pImagesEl.files).slice(0, 20).forEach(file => {
+      formData.append('images', file);
+    });
+  }
+  // Keep existing images not removed
+  const existingInput = document.getElementById('pExistingImages');
+  if (existingInput) formData.append('existing_images', existingInput.value);
+  formData.append('status',        document.getElementById('pStatus').value);
+  formData.append('description',   document.getElementById('pDescription').value);
+  formData.append('discount_id',   document.getElementById('pDiscount').value);
+  formData.append('available_at',  document.getElementById('pAvailableAt').value);
+  formData.append('variants',      document.getElementById('pVariants').value);
   const img = document.getElementById('pImage').files[0];
   if (img) formData.append('image', img);
 
@@ -329,93 +488,376 @@ async function submitProduct(e) {
 }
 
 // Image preview
-document.getElementById('pImage').addEventListener('change', function () {
-  const file    = this.files[0];
-  const preview = document.getElementById('pImagePreview');
-  if (file) {
-    const reader  = new FileReader();
-    reader.onload = e => { preview.src = e.target.result; preview.style.display = 'block'; };
+// ─── Multiple Image Functions ─────────────────────────
+
+function previewImages(input) {
+  const wrap = document.getElementById('imagePreviewsWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+
+  const existingCount = JSON.parse(document.getElementById('pExistingImages')?.value || '[]').length;
+  const maxNew = 20 - existingCount;
+  const files  = Array.from(input.files).slice(0, maxNew);
+
+  files.forEach((file, idx) => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const div = document.createElement('div');
+      div.style.cssText = 'position:relative;width:80px;height:80px;';
+      div.innerHTML = `
+        <img src="${e.target.result}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:2px solid var(--border);" />
+        ${idx === 0 && existingCount === 0 ? '<span style="position:absolute;bottom:2px;left:2px;background:rgba(22,163,74,0.9);color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;">Main</span>' : ''}
+      `;
+      wrap.appendChild(div);
+    };
     reader.readAsDataURL(file);
-  }
-});
+  });
+}
+
+function renderExistingImages(urls) {
+  const wrap = document.getElementById('existingImagesWrap');
+  if (!wrap) return;
+  wrap.innerHTML = '';
+  urls.forEach((url, idx) => {
+    const div = document.createElement('div');
+    div.style.cssText = 'position:relative;width:80px;height:80px;';
+    div.innerHTML = `
+      <img src="${url}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:2px solid var(--border);" onerror="this.src=''" />
+      ${idx === 0 ? '<span style="position:absolute;bottom:2px;left:2px;background:rgba(22,163,74,0.9);color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;">Main</span>' : ''}
+      <button onclick="removeExistingImage(${idx})" type="button" style="position:absolute;top:2px;right:2px;background:rgba(239,68,68,0.9);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;">&times;</button>
+    `;
+    wrap.appendChild(div);
+  });
+}
+
+function removeExistingImage(idx) {
+  const input   = document.getElementById('pExistingImages');
+  const current = JSON.parse(input?.value || '[]');
+  current.splice(idx, 1);
+  input.value = JSON.stringify(current);
+  renderExistingImages(current);
+}
+
+
 
 // ─── INVENTORY ────────────────────────────────────────
+// Store all inventory records globally for filtering
+let allInventory = [];
+
 async function loadInventory() {
   try {
-    const res  = await fetch('/api/admin/inventory');
-    const data = await res.json();
+    const [invRes, prodRes] = await Promise.all([
+      fetch('/api/admin/inventory'),
+      fetch('/api/admin/products'),
+    ]);
+    allInventory    = await invRes.json();
+    const products  = await prodRes.json();
 
-    document.getElementById('inventoryBody').innerHTML = data.length
-      ? data.map(i => `
-          <tr>
-            <td>${i.product?.product_name || '—'}</td>
-            <td>${i.staff ? `${i.staff.fname} ${i.staff.lname}` : '—'}</td>
-            <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
-            <td>${i.quantity_before}</td>
-            <td>${i.quantity_after}</td>
-            <td>${i.from_branch?.branch_name || '—'}</td>
-            <td>${i.to_branch?.branch_name   || '—'}</td>
-            <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
-            <td>${i.note || '—'}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="9" class="table-empty">No inventory records yet</td></tr>';
+    // Check low stock products
+    const lowStock = products.filter(p => p.status === 'active' && Number(p.quantity) <= 10);
+    const banner   = document.getElementById('lowStockBanner');
+    const bannerText = document.getElementById('lowStockBannerText');
 
+    if (lowStock.length > 0 && banner) {
+      banner.style.display = 'flex';
+      bannerText.textContent = `⚠️ ${lowStock.length} product${lowStock.length > 1 ? 's are' : ' is'} running low on stock!`;
+
+      // Also update nav badge
+      const navInv = document.getElementById('navInventory');
+      if (navInv && !navInv.querySelector('.nav-badge')) {
+        const badge = document.createElement('span');
+        badge.className   = 'nav-badge';
+        badge.textContent = lowStock.length;
+        badge.style.cssText = 'background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;';
+        navInv.appendChild(badge);
+      } else if (navInv) {
+        const b = navInv.querySelector('.nav-badge');
+        if (b) b.textContent = lowStock.length;
+      }
+    } else if (banner) {
+      banner.style.display = 'none';
+    }
+
+    renderInventory(allInventory);
   } catch (e) { console.error('Inventory error:', e); }
 }
 
-async function openInventoryModal() {
-  // Ensure products and branches are loaded
+function getMovementType(i) {
+  const note = (i.note || '').toLowerCase();
+  const qty  = Number(i.quantity_added);
+  if (note.includes('[loss]') || note.includes('[stolen]') || note.includes('[damaged]') || note.includes('[expired]') || note.includes('[other]') || note.includes('adjustment'))
+    return { label: 'Adjustment', color: '#ef4444', icon: '↓', bg: 'rgba(239,68,68,0.1)' };
+  if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id))
+    return { label: 'Transfer', color: '#3b82f6', icon: '⇄', bg: 'rgba(59,130,246,0.1)' };
+  if (qty > 0)
+    return { label: 'Restock', color: 'var(--g-400)', icon: '↑', bg: 'rgba(22,163,74,0.1)' };
+  return { label: 'Other', color: '#9ca3af', icon: '•', bg: 'rgba(107,114,128,0.1)' };
+}
+
+function renderInventory(data) {
+  // Update stats
+  const restocks    = data.filter(i => getMovementType(i).label === 'Restock');
+  const transfers   = data.filter(i => getMovementType(i).label === 'Transfer');
+  const adjustments = data.filter(i => getMovementType(i).label === 'Adjustment');
+  const totalRestock  = restocks.reduce((s,i)    => s + Math.abs(Number(i.quantity_added)), 0);
+  const totalTransfer = transfers.reduce((s,i)   => s + Math.abs(Number(i.quantity_added)), 0);
+  const totalAdjust   = adjustments.reduce((s,i) => s + Math.abs(Number(i.quantity_added)), 0);
+  const netChange     = data.reduce((s,i)        => s + Number(i.quantity_added), 0);
+
+  const el = id => document.getElementById(id);
+  if (el('invStatRestock'))  el('invStatRestock').textContent  = `+${totalRestock} units`;
+  if (el('invStatTransfer')) el('invStatTransfer').textContent = `${totalTransfer} units`;
+  if (el('invStatAdjust'))   el('invStatAdjust').textContent   = `-${totalAdjust} units`;
+  if (el('invStatNet'))      el('invStatNet').textContent      = `${netChange >= 0 ? '+' : ''}${netChange} units`;
+  if (el('invRecordCount'))  el('invRecordCount').textContent  = `${data.length} record${data.length !== 1 ? 's' : ''}`;
+
+  // Render table
+  document.getElementById('inventoryBody').innerHTML = data.length
+    ? data.map(i => {
+        const type = getMovementType(i);
+        const qty  = Number(i.quantity_added);
+        const qtyDisplay = qty >= 0
+          ? `<strong style="color:var(--g-400);">+${qty}</strong>`
+          : `<strong style="color:#ef4444;">${qty}</strong>`;
+        return `
+        <tr>
+          <td><span style="background:${type.bg};color:${type.color};border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;white-space:nowrap;">${type.icon} ${type.label}</span></td>
+          <td><strong>${i.product?.product_name || '—'}</strong></td>
+          <td>${i.staff ? `${i.staff.fname} ${i.staff.lname}` : '—'}</td>
+          <td>${qtyDisplay}</td>
+          <td>${i.quantity_before}</td>
+          <td>${i.quantity_after}</td>
+          <td>${i.from_branch?.branch_name || '—'}</td>
+          <td>${i.to_branch?.branch_name   || '—'}</td>
+          <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
+          <td style="max-width:200px;font-size:12px;">${i.note || '—'}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="10" class="table-empty">No inventory records found</td></tr>';
+}
+
+function filterInventorySearch(q) {
+  const filtered = allInventory.filter(i =>
+    (i.product?.product_name || '').toLowerCase().includes(q.toLowerCase()) ||
+    (i.note || '').toLowerCase().includes(q.toLowerCase())
+  );
+  renderInventory(filtered);
+}
+
+async function filterInventoryType(type, el) {
+  if (type === 'low_stock') {
+    // Show products with low stock from products API
+    try {
+      const res      = await fetch('/api/admin/products');
+      const products = await res.json();
+      const lowStock = products.filter(p => p.status === 'active' && Number(p.quantity) <= 10);
+      document.getElementById('inventoryBody').innerHTML = lowStock.length
+        ? `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#ef4444;">⚠️ Low Stock Products (≤ 10 units)</strong></td></tr>` +
+          lowStock.map(p => `
+            <tr style="background:rgba(239,68,68,0.05);">
+              <td><strong>${p.product_name}</strong></td>
+              <td>—</td>
+              <td colspan="2"><span style="color:#ef4444;font-weight:700;">${p.quantity} units remaining</span></td>
+              <td>${p.category}</td>
+              <td colspan="4">—</td>
+            </tr>`).join('')
+        : '<tr><td colspan="9" class="table-empty">✅ All products have sufficient stock</td></tr>';
+    } catch (e) { console.error('Low stock filter error:', e); }
+    return;
+  }
+  // Filter inventory records by type (from note field)
+  const filtered = type
+    ? allInventory.filter(i => (i.note || '').toLowerCase().includes(type))
+    : allInventory;
+  renderInventory(filtered);
+}
+
+
+// ─── ADD STOCK Modal ─────────────────────────────────
+
+async function openAddStockModal() {
   if (!allProducts.length) await loadProducts();
   if (!allBranches.length) await loadBranches();
 
-  const sel = document.getElementById('invProduct');
-  sel.innerHTML = '<option value="">Select product</option>' +
+  const sel = document.getElementById('addStockProduct');
+  if (sel) sel.innerHTML = '<option value="">Select product</option>' +
     allProducts.map(p => `<option value="${p.product_id}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
 
-  populateBranchSelects('invFromBranch', 'invToBranch');
+  const branchSel = document.getElementById('addStockBranch');
+  if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
 
-  document.getElementById('inventoryModalOverlay').classList.add('open');
-  document.getElementById('inventoryModal').classList.add('open');
+  document.getElementById('addStockModalOverlay')?.classList.add('open');
+  document.getElementById('addStockModal')?.classList.add('open');
 }
 
-function closeInventoryModal() {
-  document.getElementById('inventoryModalOverlay').classList.remove('open');
-  document.getElementById('inventoryModal').classList.remove('open');
-  document.getElementById('inventoryForm').reset();
+function closeAddStockModal() {
+  document.getElementById('addStockModalOverlay')?.classList.remove('open');
+  document.getElementById('addStockModal')?.classList.remove('open');
+  document.getElementById('addStockForm')?.reset();
 }
 
-async function submitInventory(e) {
+async function submitAddStock(e) {
   e.preventDefault();
   const data = {
-    product_id:     document.getElementById('invProduct').value,
-    quantity:       parseInt(document.getElementById('invQty').value),
-    from_branch_id: document.getElementById('invFromBranch').value,
-    to_branch_id:   document.getElementById('invToBranch').value,
-    note:           document.getElementById('invNote').value,
+    product_id:   document.getElementById('addStockProduct').value,
+    quantity:     parseInt(document.getElementById('addStockQty').value),
+    to_branch_id: document.getElementById('addStockBranch').value,
+    note:         document.getElementById('addStockNote').value || 'Stock added',
+    type:         'restock',
   };
   try {
     const res = await fetch('/api/admin/inventory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
     if (res.ok) {
-      showToast('Stock updated successfully!');
-      closeInventoryModal();
-      loadInventory();
-      loadProducts();
+      showToast('Stock added successfully!');
+      closeAddStockModal();
+      loadInventory(); loadProducts();
     } else {
       const err = await res.json();
-      showToast(err.error || 'Failed to update stock.', 'error');
+      showToast(err.error || 'Failed to add stock.', 'error');
     }
-  } catch (e) { showToast('Error updating stock.', 'error'); }
+  } catch (e) { showToast('Error adding stock.', 'error'); }
 }
+
+// ─── STOCK TRANSFER Modal ─────────────────────────────
+
+async function openTransferModal() {
+  if (!allProducts.length) await loadProducts();
+  if (!allBranches.length) await loadBranches();
+
+  const prodSel = document.getElementById('transferProduct');
+  if (prodSel) prodSel.innerHTML = '<option value="">Select product</option>' +
+    allProducts.map(p => `<option value="${p.product_id}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+
+  const opts = '<option value="">Select branch</option>' +
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+  const fromEl = document.getElementById('transferFrom');
+  const toEl   = document.getElementById('transferTo');
+  if (fromEl) fromEl.innerHTML = opts;
+  if (toEl)   toEl.innerHTML   = opts;
+
+  document.getElementById('transferModalOverlay')?.classList.add('open');
+  document.getElementById('transferModal')?.classList.add('open');
+}
+
+function closeTransferModal() {
+  document.getElementById('transferModalOverlay')?.classList.remove('open');
+  document.getElementById('transferModal')?.classList.remove('open');
+  document.getElementById('transferForm')?.reset();
+}
+
+async function submitTransfer(e) {
+  e.preventDefault();
+  const fromId = document.getElementById('transferFrom').value;
+  const toId   = document.getElementById('transferTo').value;
+  if (fromId === toId) { showToast('From and To branch must be different.', 'error'); return; }
+  const data = {
+    product_id:     document.getElementById('transferProduct').value,
+    quantity:       parseInt(document.getElementById('transferQty').value),
+    from_branch_id: fromId,
+    to_branch_id:   toId,
+    note:           document.getElementById('transferNote').value || 'Stock transfer',
+    type:           'transfer',
+  };
+  try {
+    const res = await fetch('/api/admin/inventory', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      showToast('Stock transferred successfully!');
+      closeTransferModal();
+      loadInventory(); loadProducts();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to transfer stock.', 'error');
+    }
+  } catch (e) { showToast('Error transferring stock.', 'error'); }
+}
+
+// ─── ADJUST STOCK Modal ───────────────────────────────
+
+async function openAdjustModal() {
+  if (!allProducts.length) await loadProducts();
+  if (!allBranches.length) await loadBranches();
+
+  const sel = document.getElementById('adjustProduct');
+  if (sel) sel.innerHTML = '<option value="">Select product</option>' +
+    allProducts.map(p => `<option value="${p.product_id}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+
+  const branchSel = document.getElementById('adjustBranch');
+  if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+
+  document.getElementById('adjustModalOverlay')?.classList.add('open');
+  document.getElementById('adjustModal')?.classList.add('open');
+}
+
+function closeAdjustModal() {
+  document.getElementById('adjustModalOverlay')?.classList.remove('open');
+  document.getElementById('adjustModal')?.classList.remove('open');
+  document.getElementById('adjustForm')?.reset();
+}
+
+async function submitAdjust(e) {
+  e.preventDefault();
+  const productId = document.getElementById('adjustProduct').value;
+  const qty       = parseInt(document.getElementById('adjustQty').value);
+  const reason    = document.getElementById('adjustReason').value;
+  const branchId  = document.getElementById('adjustBranch').value;
+  const note      = document.getElementById('adjustNote').value;
+
+  // Find current stock
+  const product   = allProducts.find(p => p.product_id === productId);
+  if (!product) { showToast('Product not found.', 'error'); return; }
+  if (qty > product.quantity) {
+    showToast(`Cannot deduct ${qty} — only ${product.quantity} units in stock.`, 'error');
+    return;
+  }
+
+  const data = {
+    product_id:     productId,
+    quantity:       -qty, // negative = deduction
+    to_branch_id:   branchId,
+    note:           `[${reason.toUpperCase()}] ${note || reason}`,
+    type:           'adjustment',
+  };
+
+  try {
+    const res = await fetch('/api/admin/inventory', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data),
+    });
+    if (res.ok) {
+      showToast(`Stock adjusted — ${qty} unit(s) deducted (${reason}).`);
+      closeAdjustModal();
+      loadInventory(); loadProducts();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to adjust stock.', 'error');
+    }
+  } catch (e) { showToast('Error adjusting stock.', 'error'); }
+}
+
+// Legacy aliases
+function openInventoryModal() { openAddStockModal(); }
+function closeInventoryModal() { closeAddStockModal(); }
 
 // ─── ORDERS ───────────────────────────────────────────
 async function loadOrders() {
   try {
-    const res = await fetch('/api/admin/orders?limit=80');
-    allOrders = await res.json();
+    const res  = await fetch('/api/admin/orders?limit=80');
+    const data = await res.json();
+    // Sort newest first using created_at timestamp
+    allOrders = data.sort((a, b) => {
+      // Use created_at (precise timestamp) for sorting — requires created_at column in order table
+      const da = a.created_at ? new Date(a.created_at) : new Date(a.date || 0);
+      const db = b.created_at ? new Date(b.created_at) : new Date(b.date || 0);
+      return db - da;
+    });
     renderOrders(allOrders);
   } catch (e) { console.error('Orders error:', e); }
 }
@@ -466,59 +908,266 @@ function filterOrderStatus(status) {
 }
 
 // ─── SALES REPORTS ────────────────────────────────────
+// ─── Chart instances ─────────────────────────────────
+let revenueChartInst = null;
+let paymentChartInst = null;
+let branchChartInst  = null;
+
+
+// ─── Sales Filter Functions ───────────────────────────
+let allSalesOrders = []; // Store all orders for filtering
+
+function filterSalesOrders(orders) {
+  const completed = orders.filter(o => o.status === 'completed');
+  renderSalesData(completed, orders);
+}
+
+function applySalesQuickFilter(val) {
+  // Reset other filters
+  document.getElementById('salesMonthFilter').value = '';
+  document.getElementById('salesDateFrom').value    = '';
+  document.getElementById('salesDateTo').value      = '';
+
+  const now   = new Date();
+  let from    = null;
+  let to      = new Date();
+  let label   = '';
+
+  if (val === 'today') {
+    from  = new Date(now.toDateString());
+    label = 'Today';
+  } else if (val === 'this_week') {
+    from  = new Date(now); from.setDate(now.getDate() - now.getDay());
+    label = 'This Week';
+  } else if (val === 'last_week') {
+    from  = new Date(now); from.setDate(now.getDate() - now.getDay() - 7);
+    to    = new Date(now); to.setDate(now.getDate() - now.getDay() - 1);
+    label = 'Last Week';
+  } else if (val === 'this_month') {
+    from  = new Date(now.getFullYear(), now.getMonth(), 1);
+    label = now.toLocaleString('en-PH', { month: 'long', year: 'numeric' });
+  } else if (val === 'last_month') {
+    from  = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    to    = new Date(now.getFullYear(), now.getMonth(), 0);
+    label = new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('en-PH', { month: 'long', year: 'numeric' });
+  } else {
+    document.getElementById('salesFilterLabel').textContent = '';
+    filterSalesOrders(allSalesOrders);
+    return;
+  }
+
+  document.getElementById('salesFilterLabel').textContent = `Showing: ${label}`;
+  const filtered = allSalesOrders.filter(o => {
+    const d = new Date(o.date || o.created_at || 0);
+    return d >= from && d <= to;
+  });
+  filterSalesOrders(filtered);
+}
+
+function applySalesMonthFilter(month) {
+  // Reset other filters
+  document.getElementById('salesQuickFilter').value = 'all';
+  document.getElementById('salesDateFrom').value    = '';
+  document.getElementById('salesDateTo').value      = '';
+
+  if (!month) { filterSalesOrders(allSalesOrders); return; }
+
+  const now      = new Date();
+  const filtered = allSalesOrders.filter(o => {
+    const d = new Date(o.date || o.created_at || 0);
+    return d.getMonth() + 1 === parseInt(month);
+  });
+  const monthName = new Date(now.getFullYear(), parseInt(month) - 1, 1)
+    .toLocaleString('en-PH', { month: 'long' });
+  document.getElementById('salesFilterLabel').textContent = `Showing: ${monthName}`;
+  filterSalesOrders(filtered);
+}
+
+function applySalesDateRange() {
+  const from = document.getElementById('salesDateFrom').value;
+  const to   = document.getElementById('salesDateTo').value;
+  if (!from && !to) return;
+
+  // Reset other filters
+  document.getElementById('salesQuickFilter').value  = 'all';
+  document.getElementById('salesMonthFilter').value  = '';
+
+  const fromDate = from ? new Date(from) : new Date(0);
+  const toDate   = to   ? new Date(to + 'T23:59:59') : new Date();
+
+  const filtered = allSalesOrders.filter(o => {
+    const d = new Date(o.date || o.created_at || 0);
+    return d >= fromDate && d <= toDate;
+  });
+  document.getElementById('salesFilterLabel').textContent =
+    `Showing: ${from || '—'} to ${to || '—'}`;
+  filterSalesOrders(filtered);
+}
+
+function resetSalesFilter() {
+  document.getElementById('salesQuickFilter').value  = 'all';
+  document.getElementById('salesMonthFilter').value  = '';
+  document.getElementById('salesDateFrom').value      = '';
+  document.getElementById('salesDateTo').value        = '';
+  document.getElementById('salesFilterLabel').textContent = '';
+  filterSalesOrders(allSalesOrders);
+}
+
+
+function renderSalesData(completed, allOrders) {
+  const total  = completed.reduce((s, o) => s + Number(o.total || 0), 0);
+  const online = completed.filter(o => o.order_type === 'online').reduce((s, o) => s + Number(o.total || 0), 0);
+  const walkin = completed.filter(o => o.order_type === 'walk_in').reduce((s, o) => s + Number(o.total || 0), 0);
+
+  document.getElementById('salesTotal').textContent  = peso(total);
+  document.getElementById('salesOnline').textContent = peso(online);
+  document.getElementById('salesWalkin').textContent = peso(walkin);
+
+  // Branch stats
+  const teId = allBranches.find(b => b.branch_name?.toLowerCase().includes('triple'))?.branch_id;
+  const fcId = allBranches.find(b => b.branch_name?.toLowerCase().includes('fiel') || b.branch_name?.toLowerCase().includes('collins'))?.branch_id;
+
+  function branchStats(id) {
+    const b = completed.filter(o => o.branch_id === id);
+    return { revenue: b.reduce((s,o)=>s+Number(o.total||0),0), orders:b.length,
+             walkin:b.filter(o=>o.order_type==='walk_in').length, online:b.filter(o=>o.order_type==='online').length };
+  }
+
+  // Check if any orders have branch_id assigned
+  const hasBranchData = completed.some(o => o.branch_id);
+  const allWalkin     = completed.filter(o => o.order_type === 'walk_in');
+
+  let te, fc;
+  if (hasBranchData) {
+    te = branchStats(teId);
+    fc = branchStats(fcId);
+  } else {
+    // No branch assigned yet — show walk-in under Triple E (default POS branch)
+    te = { revenue: allWalkin.reduce((s,o)=>s+Number(o.total||0),0), orders: allWalkin.length,
+           walkin: allWalkin.length, online: 0 };
+    fc = { revenue: 0, orders: 0, walkin: 0, online: 0 };
+  }
+
+  document.getElementById('branchTE_revenue').textContent = peso(te.revenue);
+  document.getElementById('branchTE_orders').textContent  = te.orders;
+  document.getElementById('branchTE_walkin').textContent  = te.walkin;
+  document.getElementById('branchTE_online').textContent  = te.online;
+  document.getElementById('branchFC_revenue').textContent = peso(fc.revenue);
+  document.getElementById('branchFC_orders').textContent  = fc.orders;
+  document.getElementById('branchFC_walkin').textContent  = fc.walkin;
+  document.getElementById('branchFC_online').textContent  = fc.online;
+
+  // Branch chart
+  const branchCtx = document.getElementById('branchChart')?.getContext('2d');
+  if (branchCtx) {
+    if (branchChartInst) branchChartInst.destroy();
+    branchChartInst = new Chart(branchCtx, {
+      type: 'bar',
+      data: {
+        labels: ['Triple E', 'Fiel Collins'],
+        datasets: [{ label: 'Revenue (₱)', data: [te.revenue, fc.revenue],
+          backgroundColor: ['rgba(22,163,74,0.7)','rgba(59,130,246,0.7)'],
+          borderColor: ['rgba(22,163,74,1)','rgba(59,130,246,1)'],
+          borderWidth: 2, borderRadius: 6 }]
+      },
+      options: { responsive:true, maintainAspectRatio:true,
+        plugins:{legend:{display:false}},
+        scales:{ y:{ beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString()} } } }
+    });
+  }
+
+  // Revenue by day (last 7 days from filtered data)
+  const last7 = [];
+  for (let i = 6; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    last7.push(d.toISOString().split('T')[0]);
+  }
+  const dailyRevenue = last7.map(day =>
+    completed.filter(o => (o.date||o.created_at||'').startsWith(day))
+             .reduce((s,o)=>s+Number(o.total||0),0)
+  );
+  const revCtx = document.getElementById('revenueChart')?.getContext('2d');
+  if (revCtx) {
+    if (revenueChartInst) revenueChartInst.destroy();
+    revenueChartInst = new Chart(revCtx, {
+      type: 'line',
+      data: {
+        labels: last7.map(d=>new Date(d).toLocaleDateString('en-PH',{month:'short',day:'numeric'})),
+        datasets: [{ label:'Revenue', data:dailyRevenue,
+          borderColor:'rgba(22,163,74,1)', backgroundColor:'rgba(22,163,74,0.1)',
+          borderWidth:2, tension:0.4, fill:true, pointRadius:4 }]
+      },
+      options: { responsive:true, plugins:{legend:{display:false}},
+        scales:{ y:{beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString()}} } }
+    });
+  }
+
+  // Payment method donut chart
+  const methods = {};
+  completed.forEach(o => {
+    // payment can be object or array — handle both cases
+    let pay = o.payment;
+    if (Array.isArray(pay)) pay = pay[0];
+    // Try multiple sources for payment method
+    const pm = pay?.payment_method
+            || o.payment_method
+            || (o.order_type === 'walk_in' ? 'walk_in_cash' : null);
+    if (!pm) return; // skip if no payment method found
+    if (!methods[pm]) methods[pm] = { count:0, total:0 };
+    methods[pm].count++;
+    methods[pm].total += Number(o.total || 0);
+  });
+  const payCtx = document.getElementById('paymentChart')?.getContext('2d');
+  if (payCtx && Object.keys(methods).length > 0) {
+    if (paymentChartInst) paymentChartInst.destroy();
+    paymentChartInst = new Chart(payCtx, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(methods).map(m=>m.replace(/_/g,' ').toUpperCase()),
+        datasets: [{ data: Object.values(methods).map(v=>v.total),
+          backgroundColor:['rgba(22,163,74,0.7)','rgba(59,130,246,0.7)','rgba(234,179,8,0.7)'],
+          borderWidth:2 }]
+      },
+      options: { responsive:true, maintainAspectRatio:true,
+        cutout: '70%',
+        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } } } }
+    });
+  }
+
+  // Payment breakdown table
+  document.getElementById('paymentBreakdownBody').innerHTML = Object.entries(methods).length
+    ? Object.entries(methods).map(([m,v])=>
+        `<tr><td>${badge(m)}</td><td>${v.count}</td><td>${peso(v.total)}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="table-empty">No payment data yet</td></tr>';
+
+  // Top products
+  const productSales = {};
+  completed.forEach(o => {
+    (o.order_item||[]).forEach(item => {
+      const name = item.product?.product_name || item.product_id;
+      if (!productSales[name]) productSales[name] = {units:0, revenue:0};
+      productSales[name].units   += Number(item.qty||item.quantity||0);
+      productSales[name].revenue += Number(item.price||0)*Number(item.qty||item.quantity||0);
+    });
+  });
+  const top = Object.entries(productSales).sort((a,b)=>b[1].units-a[1].units).slice(0,5);
+  document.getElementById('topProductsBody').innerHTML = top.length
+    ? top.map(([name,v])=>`<tr><td>${name}</td><td>${v.units}</td><td>${peso(v.revenue)}</td></tr>`).join('')
+    : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
+}
+
 async function loadSales() {
   try {
-    const [orders, payments, customers] = await Promise.all([
-      fetch('/api/admin/orders?limit=80').then(r => r.json()),
-      fetch('/api/admin/payments').then(r => r.json()),
+    const [orders, customers] = await Promise.all([
+      fetch('/api/admin/orders?limit=500').then(r => r.json()),
       fetch('/api/admin/customers').then(r => r.json()),
     ]);
 
-    const completed = orders.filter(o => o.status === 'completed');
-    const total     = completed.reduce((s, o) => s + Number(o.total || 0), 0);
-    const online    = completed.filter(o => o.order_type === 'online').reduce((s, o) => s + Number(o.total || 0), 0);
-    const walkin    = completed.filter(o => o.order_type === 'walk_in').reduce((s, o) => s + Number(o.total || 0), 0);
-
-    document.getElementById('salesTotal').textContent     = peso(total);
-    document.getElementById('salesOnline').textContent    = peso(online);
-    document.getElementById('salesWalkin').textContent    = peso(walkin);
+    allSalesOrders = orders;
     document.getElementById('salesCustomers').textContent = customers.length;
 
-    // Payment breakdown
-    const methods = {};
-    payments.forEach(p => {
-      if (!methods[p.payment_method]) methods[p.payment_method] = { count: 0, total: 0 };
-      methods[p.payment_method].count++;
-      methods[p.payment_method].total += Number(p.total || 0);
-    });
-    document.getElementById('paymentBreakdownBody').innerHTML = Object.entries(methods).length
-      ? Object.entries(methods).map(([m, v]) => `
-          <tr>
-            <td>${badge(m)}</td>
-            <td>${v.count}</td>
-            <td>${peso(v.total)}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="3" class="table-empty">No payment data yet</td></tr>';
-
-    // Top products
-    const productSales = {};
-    completed.forEach(o => {
-      (o.order_item || []).forEach(item => {
-        const name = item.product?.product_name || item.product_id;
-        if (!productSales[name]) productSales[name] = { units: 0, revenue: 0 };
-        productSales[name].units   += Number(item.qty || item.quantity || 0);
-        productSales[name].revenue += Number(item.price || 0) * Number(item.qty || item.quantity || 0);
-      });
-    });
-    const top = Object.entries(productSales).sort((a, b) => b[1].units - a[1].units).slice(0, 5);
-    document.getElementById('topProductsBody').innerHTML = top.length
-      ? top.map(([name, v]) => `
-          <tr>
-            <td>${name}</td>
-            <td>${v.units}</td>
-            <td>${peso(v.revenue)}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
+    // Default: show all completed orders
+    filterSalesOrders(allSalesOrders);
 
   } catch (e) { console.error('Sales error:', e); }
 }
@@ -898,6 +1547,278 @@ async function submitUser(e) {
 }
 
 // ─── Init ─────────────────────────────────────────────
+// ═══════════════════════════════════════════════════════
+// STOCK REQUESTS & PURCHASE ORDERS
+// ═══════════════════════════════════════════════════════
+
+let allStockRequests = [];
+let allPOs           = [];
+let poItems          = []; // items in create PO modal
+
+async function loadPurchaseOrders() {
+  try {
+    const [reqRes, poRes] = await Promise.all([
+      fetch('/api/admin/stock-requests'),
+      fetch('/api/admin/purchase-orders'),
+    ]);
+    allStockRequests = await reqRes.json();
+    allPOs           = await poRes.json();
+
+    // Badge — pending requests
+    const pending = allStockRequests.filter(r => r.status === 'pending').length;
+    const badge   = document.getElementById('poRequestBadge');
+    if (badge) {
+      badge.textContent   = pending;
+      badge.style.display = pending > 0 ? 'inline' : 'none';
+    }
+
+    renderStockRequests(allStockRequests);
+    renderPOs(allPOs);
+  } catch (e) { console.error('PO error:', e); }
+}
+
+function renderStockRequests(requests) {
+  const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
+  document.getElementById('stockRequestsBody').innerHTML = requests.length
+    ? requests.map(r => `
+        <tr>
+          <td><strong>${r.product?.product_name || '—'}</strong></td>
+          <td>${r.product?.quantity ?? '—'} units</td>
+          <td>${r.quantity_needed} units</td>
+          <td>${r.staff ? `${r.staff.fname} ${r.staff.lname}` : '—'}</td>
+          <td>${r.branch?.branch_name || '—'}</td>
+          <td>${badge(r.status)}</td>
+          <td style="font-size:12px;">${r.note || '—'}</td>
+          <td>${new Date(r.created_at).toLocaleDateString('en-PH')}</td>
+          <td>
+            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${r.product?.product_name}', ${r.quantity_needed})" title="Review / Change Decision">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </td>
+        </tr>`).join('')
+    : '<tr><td colspan="9" class="table-empty">No stock requests yet</td></tr>';
+}
+
+function renderPOs(pos) {
+  const statusColors = { draft:'gray', ordered:'blue', received:'green', cancelled:'red' };
+  document.getElementById('poBody').innerHTML = pos.length
+    ? pos.map(po => {
+        const items    = po.po_item || [];
+        const total    = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
+        const itemCount = items.length;
+        return `
+        <tr>
+          <td><strong>${po.po_number || '—'}</strong></td>
+          <td>${po.supplier || '—'}</td>
+          <td>${itemCount} item${itemCount !== 1 ? 's' : ''}</td>
+          <td>${peso(total)}</td>
+          <td>${badge(po.status)}</td>
+          <td>${new Date(po.created_at).toLocaleDateString('en-PH')}</td>
+          <td>
+            <button class="btn-icon" onclick="openPODetail('${po.po_id}')" title="View">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="table-empty">No purchase orders yet</td></tr>';
+}
+
+// ─── Review Stock Request ─────────────────────────────
+
+function openReviewRequest(requestId, productName, qty) {
+  document.getElementById('reviewRequestId').value    = requestId;
+  document.getElementById('reviewRequestTitle').textContent = `Review Request — ${productName}`;
+  document.getElementById('reviewRequestInfo').innerHTML = `
+    <div style="display:flex;flex-direction:column;gap:6px;">
+      <div><strong>Product:</strong> ${productName}</div>
+      <div><strong>Quantity Requested:</strong> ${qty} units</div>
+    </div>`;
+  document.getElementById('reviewAdminNote').value = '';
+  document.getElementById('reviewRequestModalOverlay')?.classList.add('open');
+  document.getElementById('reviewRequestModal')?.classList.add('open');
+}
+
+function closeReviewRequestModal() {
+  document.getElementById('reviewRequestModalOverlay')?.classList.remove('open');
+  document.getElementById('reviewRequestModal')?.classList.remove('open');
+}
+
+async function submitReview(status) {
+  const requestId = document.getElementById('reviewRequestId').value;
+  const adminNote = document.getElementById('reviewAdminNote').value;
+  try {
+    const res = await fetch(`/api/admin/stock-requests/${requestId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, admin_note: adminNote }),
+    });
+    if (res.ok) {
+      showToast(`Request ${status}!`);
+      closeReviewRequestModal();
+      loadPurchaseOrders();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed.', 'error');
+    }
+  } catch (e) { showToast('Error.', 'error'); }
+}
+
+// ─── Create Purchase Order ────────────────────────────
+
+function openCreatePOModal() {
+  poItems = [];
+  document.getElementById('poSupplier').value = '';
+  document.getElementById('poNote').value     = '';
+  document.getElementById('poItemsWrap').innerHTML = '';
+  document.getElementById('poTotal').textContent   = '₱0.00';
+  addPOItemRow(); // start with one row
+  document.getElementById('createPOModalOverlay')?.classList.add('open');
+  document.getElementById('createPOModal')?.classList.add('open');
+}
+
+function closeCreatePOModal() {
+  document.getElementById('createPOModalOverlay')?.classList.remove('open');
+  document.getElementById('createPOModal')?.classList.remove('open');
+}
+
+function addPOItemRow() {
+  const wrap = document.getElementById('poItemsWrap');
+  const idx  = wrap.children.length;
+  const row  = document.createElement('div');
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 80px 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
+  row.innerHTML = `
+    <select class="form-input form-select po-product" onchange="updatePOTotal()">
+      <option value="">Select product</option>
+      ${allProducts.map(p => `<option value="${p.product_id}">${p.product_name}</option>`).join('')}
+    </select>
+    <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="updatePOTotal()"/>
+    <input type="number" class="form-input po-cost" min="0" step="0.01" placeholder="Unit Cost" oninput="updatePOTotal()"/>
+    <button type="button" onclick="this.parentElement.remove();updatePOTotal();" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
+  `;
+  wrap.appendChild(row);
+}
+
+function updatePOTotal() {
+  const rows  = document.getElementById('poItemsWrap').children;
+  let total   = 0;
+  for (const row of rows) {
+    const qty  = parseFloat(row.querySelector('.po-qty')?.value || 0);
+    const cost = parseFloat(row.querySelector('.po-cost')?.value || 0);
+    total += qty * cost;
+  }
+  document.getElementById('poTotal').textContent = peso(total);
+}
+
+async function submitCreatePO() {
+  const supplier = document.getElementById('poSupplier').value.trim();
+  const note     = document.getElementById('poNote').value.trim();
+  if (!supplier) { showToast('Supplier name is required.', 'error'); return; }
+
+  const rows  = document.getElementById('poItemsWrap').children;
+  const items = [];
+  for (const row of rows) {
+    const productId = row.querySelector('.po-product')?.value;
+    const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
+    const unitCost  = parseFloat(row.querySelector('.po-cost')?.value || 0);
+    if (productId && qty > 0) items.push({ product_id: productId, quantity: qty, unit_cost: unitCost });
+  }
+  if (!items.length) { showToast('Add at least one item.', 'error'); return; }
+
+  try {
+    const res = await fetch('/api/admin/purchase-orders', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ supplier, note, items }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      showToast(`PO ${data.po_number} created!`);
+      closeCreatePOModal();
+      loadPurchaseOrders();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to create PO.', 'error');
+    }
+  } catch (e) { showToast('Error.', 'error'); }
+}
+
+// ─── PO Detail Modal ──────────────────────────────────
+
+function openPODetail(poId) {
+  const po = allPOs.find(p => p.po_id === poId);
+  if (!po) return;
+  document.getElementById('poDetailTitle').textContent = `${po.po_number} — ${po.supplier}`;
+
+  const items = po.po_item || [];
+  const total = items.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0);
+
+  document.getElementById('poDetailContent').innerHTML = `
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:13px;">
+      <div><strong>Supplier:</strong> ${po.supplier}</div>
+      <div><strong>Status:</strong> ${badge(po.status)}</div>
+      <div><strong>Created:</strong> ${new Date(po.created_at).toLocaleDateString('en-PH')}</div>
+      ${po.note ? `<div><strong>Note:</strong> ${po.note}</div>` : ''}
+    </div>
+    <table class="data-table" style="margin-bottom:1rem;">
+      <thead><tr><th>Product</th><th>Qty</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
+      <tbody>
+        ${items.map(i => `
+          <tr>
+            <td>${i.product?.product_name || '—'}</td>
+            <td>${i.quantity}</td>
+            <td>${peso(i.unit_cost)}</td>
+            <td>${peso(Number(i.unit_cost) * Number(i.quantity))}</td>
+          </tr>`).join('')}
+        <tr style="font-weight:700;">
+          <td colspan="3" style="text-align:right;">Total</td>
+          <td>${peso(total)}</td>
+        </tr>
+      </tbody>
+    </table>`;
+
+  // Action buttons based on status
+  const footer = document.getElementById('poDetailFooter');
+  footer.innerHTML = `<button type="button" class="btn btn-cancel" onclick="closePODetailModal()">Close</button>`;
+  if (po.status === 'draft') {
+    footer.innerHTML += `
+      <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
+      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
+  } else if (po.status === 'ordered') {
+    footer.innerHTML += `
+      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'received')">Mark as Received ✓</button>`;
+  }
+
+  document.getElementById('poDetailModalOverlay')?.classList.add('open');
+  document.getElementById('poDetailModal')?.classList.add('open');
+}
+
+function closePODetailModal() {
+  document.getElementById('poDetailModalOverlay')?.classList.remove('open');
+  document.getElementById('poDetailModal')?.classList.remove('open');
+}
+
+async function updatePOStatus(poId, status) {
+  const po = allPOs.find(p => p.po_id === poId);
+  try {
+    const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status, po_number: po?.po_number }),
+    });
+    if (res.ok) {
+      showToast(`PO marked as ${status}!`);
+      closePODetailModal();
+      loadPurchaseOrders();
+      if (status === 'received') loadInventory();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to update PO.', 'error');
+    }
+  } catch (e) { showToast('Error.', 'error'); }
+}
+
+
 document.addEventListener('DOMContentLoaded', async function () {
   await loadBranches();
   loadProducts();

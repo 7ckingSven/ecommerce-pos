@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 </head>
 <body>
 
@@ -33,7 +34,7 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
         <span>Products</span>
       </a>
-      <a href="#" class="nav-item" onclick="showSection('inventory', this)" data-tooltip="Inventory">
+      <a href="#" class="nav-item" onclick="showSection('inventory', this)" data-tooltip="Inventory" id="navInventory">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
         <span>Inventory</span>
       </a>
@@ -46,6 +47,11 @@
         <span>Sales Reports</span>
       </a>
 
+      <a href="#" class="nav-item" onclick="showSection('purchase_orders', this)" data-tooltip="Purchase Orders">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10 9 9 9 8 9"/></svg>
+        <span>Purchase Orders</span>
+        <span id="poRequestBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
+      </a>
       <div class="nav-section-label" style="margin-top:1.5rem;">Management</div>
       <a href="#" class="nav-item" onclick="showSection('discounts', this)" data-tooltip="Discounts">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
@@ -188,6 +194,9 @@
           <select class="filter-select" onchange="filterByCategory(this.value)" id="categoryFilter">
             <option value="">All Categories</option>
           </select>
+          <select class="filter-select" onchange="filterByBrand(this.value)" id="brandFilter">
+            <option value="">All Brands</option>
+          </select>
           <button class="btn btn-solid-green" onclick="openProductModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add Product
@@ -198,7 +207,7 @@
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Image</th><th>Product Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Discount</th><th>Stock</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Image</th><th>Product Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Discount</th><th>Status</th><th>Actions</th></tr>
             </thead>
             <tbody id="productsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
           </table>
@@ -208,23 +217,81 @@
 
     <!-- ─── INVENTORY SECTION ──────────────────────── -->
     <section class="section" id="section-inventory">
+      <!-- Low Stock Alert Banner -->
+      <div id="lowStockBanner" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 16px;margin-bottom:1rem;display:flex;align-items:center;gap:10px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span id="lowStockBannerText" style="font-size:13px;color:#ef4444;font-weight:500;"></span>
+        <button class="btn-text" style="margin-left:auto;color:#ef4444;" onclick="filterInventoryType('low_stock', document.getElementById('invTypeFilter'))">View Low Stock</button>
+      </div>
+
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" class="search-input" placeholder="Search inventory..."/>
+          <input type="text" class="search-input" placeholder="Search inventory..." oninput="filterInventorySearch(this.value)"/>
         </div>
-        <button class="btn btn-solid-green" onclick="openInventoryModal()">
+        <select class="filter-select" id="invTypeFilter" onchange="filterInventoryType(this.value, this)">
+          <option value="">All Records</option>
+          <option value="restock">Restock</option>
+          <option value="transfer">Transfer</option>
+          <option value="low_stock">Low Stock Items</option>
+          <option value="adjustment">Adjustments</option>
+        </select>
+        <button class="btn btn-solid-green" onclick="openAddStockModal()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add Stock
         </button>
+        <button class="btn btn-cancel" onclick="openTransferModal()" style="display:inline-flex;align-items:center;gap:6px;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+          Stock Transfer
+        </button>
+        <button class="btn btn-cancel" onclick="openAdjustModal()" style="display:inline-flex;align-items:center;gap:6px;color:#ef4444;border-color:#ef4444;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Adjust Stock
+        </button>
       </div>
+      <!-- Inventory Summary Stats -->
+      <div class="stat-grid" style="margin-bottom:1.5rem;">
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--green"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"/><polyline points="17 6 23 6 23 12"/></svg></div>
+          <div class="stat-info"><span class="stat-label">Total Restocked</span><span class="stat-value" id="invStatRestock">—</span><span class="stat-sub">Units added</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--blue"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg></div>
+          <div class="stat-info"><span class="stat-label">Transferred</span><span class="stat-value" id="invStatTransfer">—</span><span class="stat-sub">Units moved</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon" style="background:rgba(239,68,68,0.1);"><svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></div>
+          <div class="stat-info"><span class="stat-label">Adjustments</span><span class="stat-value" id="invStatAdjust" style="color:#ef4444;">—</span><span class="stat-sub">Units deducted</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
+          <div class="stat-info"><span class="stat-label">Net Movement</span><span class="stat-value" id="invStatNet">—</span><span class="stat-sub">Total units change</span></div>
+        </div>
+      </div>
+
+      <!-- Movement History Table -->
       <div class="card">
+        <div class="card-header">
+          <h3 class="card-title">Stock Movement History</h3>
+          <span style="font-size:12px;color:var(--text-muted);" id="invRecordCount"></span>
+        </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Product</th><th>Staff</th><th>Qty Added</th><th>Before</th><th>After</th><th>From Branch</th><th>To Branch</th><th>Date</th><th>Note</th></tr>
+              <tr>
+                <th>Type</th>
+                <th>Product</th>
+                <th>Staff</th>
+                <th>Qty Change</th>
+                <th>Before</th>
+                <th>After</th>
+                <th>From Branch</th>
+                <th>To Branch</th>
+                <th>Date</th>
+                <th>Note / Reason</th>
+              </tr>
             </thead>
-            <tbody id="inventoryBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
+            <tbody id="inventoryBody"><tr><td colspan="10" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
@@ -246,6 +313,7 @@
           <option value="">All Status</option>
           <option value="pending">Pending</option>
           <option value="processing">Processing</option>
+          <option value="out_for_delivery">Out for Delivery</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
         </select>
@@ -264,6 +332,51 @@
 
     <!-- ─── SALES REPORTS SECTION ─────────────────── -->
     <section class="section" id="section-sales">
+
+      <!-- Sales Filter Toolbar -->
+      <div class="section-toolbar" style="margin-bottom:1.5rem;flex-wrap:wrap;gap:8px;">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+          <span style="font-size:12px;font-weight:600;color:var(--text-muted);">Filter by:</span>
+
+          <!-- Quick Filters -->
+          <select class="filter-select" id="salesQuickFilter" onchange="applySalesQuickFilter(this.value)" style="min-width:140px;">
+            <option value="all">All Time</option>
+            <option value="today">Today</option>
+            <option value="this_week">This Week</option>
+            <option value="last_week">Last Week</option>
+            <option value="this_month">This Month</option>
+            <option value="last_month">Last Month</option>
+          </select>
+
+          <!-- Month Filter -->
+          <select class="filter-select" id="salesMonthFilter" onchange="applySalesMonthFilter(this.value)" style="min-width:130px;">
+            <option value="">All Months</option>
+            <option value="1">January</option>
+            <option value="2">February</option>
+            <option value="3">March</option>
+            <option value="4">April</option>
+            <option value="5">May</option>
+            <option value="6">June</option>
+            <option value="7">July</option>
+            <option value="8">August</option>
+            <option value="9">September</option>
+            <option value="10">October</option>
+            <option value="11">November</option>
+            <option value="12">December</option>
+          </select>
+
+          <!-- Date Range -->
+          <input type="date" id="salesDateFrom" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applySalesDateRange()"/>
+          <span style="font-size:12px;color:var(--text-muted);">to</span>
+          <input type="date" id="salesDateTo" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applySalesDateRange()"/>
+
+          <!-- Reset -->
+          <button class="btn btn-cancel" onclick="resetSalesFilter()" style="font-size:12px;padding:6px 12px;">Reset</button>
+        </div>
+        <div id="salesFilterLabel" style="font-size:12px;color:var(--text-muted);font-style:italic;"></div>
+      </div>
+
+      <!-- Summary Stats -->
       <div class="stat-grid">
         <div class="stat-card">
           <div class="stat-icon stat-icon--green">
@@ -290,6 +403,56 @@
           <div class="stat-info"><span class="stat-label">Total Customers</span><span class="stat-value" id="salesCustomers">—</span><span class="stat-sub">Registered</span></div>
         </div>
       </div>
+
+      <!-- Branch Performance -->
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h3 class="card-title">Branch Performance</h3>
+          <span style="font-size:12px;color:var(--text-muted);">Completed orders only</span>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding:1rem;">
+          <!-- Triple E Card -->
+          <div style="background:rgba(22,163,74,0.06);border:1px solid rgba(22,163,74,0.2);border-radius:12px;padding:1rem;">
+            <div style="font-size:13px;font-weight:700;color:var(--g-400);margin-bottom:0.75rem;">🏪 Triple E</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Revenue</span><span style="font-size:13px;font-weight:700;color:var(--g-400);" id="branchTE_revenue">—</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Orders</span><span style="font-size:13px;font-weight:600;" id="branchTE_orders">—</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Walk-in</span><span style="font-size:13px;font-weight:600;" id="branchTE_walkin">—</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Online</span><span style="font-size:13px;font-weight:600;" id="branchTE_online">—</span></div>
+            </div>
+          </div>
+          <!-- Fiel Collins Card -->
+          <div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.2);border-radius:12px;padding:1rem;">
+            <div style="font-size:13px;font-weight:700;color:#3b82f6;margin-bottom:0.75rem;">🏪 Fiel Collins</div>
+            <div style="display:flex;flex-direction:column;gap:6px;">
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Revenue</span><span style="font-size:13px;font-weight:700;color:#3b82f6;" id="branchFC_revenue">—</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Orders</span><span style="font-size:13px;font-weight:600;" id="branchFC_orders">—</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Walk-in</span><span style="font-size:13px;font-weight:600;" id="branchFC_walkin">—</span></div>
+              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Online</span><span style="font-size:13px;font-weight:600;" id="branchFC_online">—</span></div>
+            </div>
+          </div>
+        </div>
+        <!-- Branch Revenue Chart -->
+        <div style="padding:0 1rem 1rem;">
+          <canvas id="branchChart" height="80"></canvas>
+        </div>
+      </div>
+
+      <!-- Charts Row -->
+      <div class="dashboard-grid" style="margin-bottom:1.5rem;">
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Revenue by Day (Last 7 Days)</h3></div>
+          <div style="padding:1rem;"><canvas id="revenueChart" height="275"></canvas></div>
+        </div>
+        <div class="card">
+          <div class="card-header"><h3 class="card-title">Payment Method Breakdown</h3></div>
+          <div style="padding:1rem;display:flex;justify-content:center;align-items:center;">
+            <canvas id="paymentChart" height="200" style="max-width:380px;"></canvas>
+          </div>
+        </div>
+      </div>
+
+      <!-- Tables Row -->
       <div class="dashboard-grid">
         <div class="card">
           <div class="card-header"><h3 class="card-title">Sales by Payment Method</h3></div>
@@ -308,6 +471,45 @@
               <tbody id="topProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── PURCHASE ORDERS SECTION ─────────────── -->
+    <section class="section" id="section-purchase_orders">
+
+      <!-- Stock Requests from Staff -->
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h3 class="card-title">Staff Stock Requests</h3>
+          <span style="font-size:12px;color:var(--text-muted);">Review and approve/reject requests from staff</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Product</th><th>Current Stock</th><th>Qty Needed</th><th>Staff</th><th>Branch</th><th>Status</th><th>Note</th><th>Date</th><th>Action</th></tr>
+            </thead>
+            <tbody id="stockRequestsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Purchase Orders -->
+      <div class="section-toolbar" style="margin-bottom:1rem;">
+        <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);">Purchase Orders</h3>
+        <button class="btn btn-solid-green" onclick="openCreatePOModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create PO
+        </button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total Cost</th><th>Status</th><th>Created</th><th>Action</th></tr>
+            </thead>
+            <tbody id="poBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
+          </table>
         </div>
       </div>
     </section>
@@ -429,31 +631,28 @@
           </div>
           <div class="form-group">
             <label class="form-label">Brand</label>
-            <input type="text" id="pBrand" class="form-input"/>
+            <input type="text" id="pBrand" class="form-input" placeholder="Select or type a new brand..." list="brandList" autocomplete="off"/>
+            <datalist id="brandList"></datalist>
           </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Category <span class="req">*</span></label>
-            <input type="text" id="pCategory" class="form-input" required placeholder="e.g. School Supplies"/>
+            <input type="text" id="pCategory" class="form-input" required placeholder="Select or type a new category..." list="categoryList" autocomplete="off"/>
+            <datalist id="categoryList"></datalist>
+            <span class="field-hint">Choose an existing category or type a new one.</span>
           </div>
           <div class="form-group">
             <label class="form-label">Price (₱) <span class="req">*</span></label>
             <input type="number" id="pPrice" class="form-input" step="0.01" min="0" required/>
           </div>
         </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Stock Quantity <span class="req">*</span></label>
-            <input type="number" id="pQuantity" class="form-input" min="0" required/>
-          </div>
-          <div class="form-group">
-            <label class="form-label">Status</label>
-            <select id="pStatus" class="form-input form-select">
-              <option value="active">Active</option>
-              <option value="inactive">Inactive</option>
-            </select>
-          </div>
+        <div class="form-group">
+          <label class="form-label">Status</label>
+          <select id="pStatus" class="form-input form-select">
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
         </div>
         <!-- Discount assignment -->
         <div class="form-group">
@@ -467,11 +666,39 @@
           <textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..."></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label">Product Image</label>
-          <input type="file" id="pImage" class="form-input" accept="image/jpg,image/jpeg,image/png"/>
-          <span class="field-hint">JPG, JPEG, PNG only. Max 5MB.</span>
-          <img id="pImagePreview" style="display:none;margin-top:8px;max-height:120px;border-radius:8px;"/>
+          <label class="form-label">Product Images <span style="font-weight:400;color:var(--text-muted);">(up to 20 — first image is main thumbnail)</span></label>
+          <input type="file" id="pImages" class="form-input" accept="image/jpg,image/jpeg,image/png" multiple onchange="previewImages(this)"/>
+          <span class="field-hint">Select multiple images at once. JPG, JPEG, PNG only. Max 5MB each. Up to 20 images.</span>
+          <!-- Image previews -->
+          <div id="imagePreviewsWrap" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
+          <!-- Existing images when editing -->
+          <div id="existingImagesWrap" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:4px;"></div>
+          <input type="hidden" id="pExistingImages" value="[]"/>
         </div>
+
+        <!-- Available At -->
+        <div class="form-group">
+          <label class="form-label">Available At <span class="req">*</span></label>
+          <select id="pAvailableAt" class="form-input form-select">
+            <option value="both">Both Branches</option>
+            <option value="triple_e">Triple E Only</option>
+            <option value="fiel_collins">Fiel Collins Only</option>
+          </select>
+          <span class="field-hint">Which branch sells this product?</span>
+        </div>
+
+        <!-- Product Variants -->
+        <div class="form-group">
+          <label class="form-label">Variants <span style="font-weight:400;color:var(--text-muted);">(optional — e.g. sizes, colors)</span></label>
+          <div style="display:flex;gap:8px;margin-bottom:8px;">
+            <input type="text" id="variantInput" class="form-input" placeholder="e.g. Small, Red, 42..." style="flex:1;" onkeydown="if(event.key==='Enter'){event.preventDefault();addVariantChip();}"/>
+            <button type="button" class="btn btn-cancel" onclick="addVariantChip()" style="white-space:nowrap;">+ Add</button>
+          </div>
+          <div id="variantChips" style="display:flex;flex-wrap:wrap;gap:6px;min-height:32px;padding:4px 0;"></div>
+          <input type="hidden" id="pVariants" value="[]"/>
+          <span class="field-hint">Type a variant and click Add or press Enter. Click chip to remove.</span>
+        </div>
+
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeProductModal()">Cancel</button>
           <button type="submit" class="btn btn-solid-green">Save Product</button>
@@ -536,47 +763,144 @@
   </div>
 
   <!-- Inventory Modal -->
-  <div class="modal-overlay" id="inventoryModalOverlay" onclick="closeInventoryModal()"></div>
-  <div class="modal" id="inventoryModal">
+  <!-- Add Stock Modal -->
+  <div class="modal-overlay" id="addStockModalOverlay" onclick="closeAddStockModal()"></div>
+  <div class="modal" id="addStockModal">
     <div class="modal-header">
       <h3 class="modal-title">Add Stock</h3>
-      <button class="modal-close" onclick="closeInventoryModal()">
+      <button class="modal-close" onclick="closeAddStockModal()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="modal-body">
-      <form id="inventoryForm" onsubmit="submitInventory(event)">
+      <form id="addStockForm" onsubmit="submitAddStock(event)">
         <div class="form-group">
           <label class="form-label">Product <span class="req">*</span></label>
-          <select id="invProduct" class="form-input form-select" required>
+          <select id="addStockProduct" class="form-input form-select" required>
             <option value="">Select product</option>
           </select>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Quantity to Add <span class="req">*</span></label>
-            <input type="number" id="invQty" class="form-input" min="1" required/>
+            <input type="number" id="addStockQty" class="form-input" min="1" required/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">To Branch <span class="req">*</span></label>
+            <select id="addStockBranch" class="form-input form-select" required>
+              <option value="">Select branch</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note / Supplier</label>
+          <textarea id="addStockNote" class="form-input form-textarea" rows="2" placeholder="e.g. Received from supplier ABC..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-cancel" onclick="closeAddStockModal()">Cancel</button>
+          <button type="submit" class="btn btn-solid-green">Add Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Stock Transfer Modal -->
+  <div class="modal-overlay" id="transferModalOverlay" onclick="closeTransferModal()"></div>
+  <div class="modal" id="transferModal">
+    <div class="modal-header">
+      <h3 class="modal-title">Stock Transfer</h3>
+      <button class="modal-close" onclick="closeTransferModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <form id="transferForm" onsubmit="submitTransfer(event)">
+        <div class="form-group">
+          <label class="form-label">Product <span class="req">*</span></label>
+          <select id="transferProduct" class="form-input form-select" required>
+            <option value="">Select product</option>
+          </select>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Quantity to Transfer <span class="req">*</span></label>
+            <input type="number" id="transferQty" class="form-input" min="1" required/>
           </div>
           <div class="form-group">
             <label class="form-label">From Branch <span class="req">*</span></label>
-            <select id="invFromBranch" class="form-input form-select" required>
+            <select id="transferFrom" class="form-input form-select" required>
               <option value="">Select branch</option>
             </select>
           </div>
         </div>
         <div class="form-group">
           <label class="form-label">To Branch <span class="req">*</span></label>
-          <select id="invToBranch" class="form-input form-select" required>
+          <select id="transferTo" class="form-input form-select" required>
             <option value="">Select branch</option>
           </select>
         </div>
         <div class="form-group">
           <label class="form-label">Note</label>
-          <textarea id="invNote" class="form-input form-textarea" rows="2" placeholder="Optional remarks..."></textarea>
+          <textarea id="transferNote" class="form-input form-textarea" rows="2" placeholder="e.g. Transfer for branch restock..."></textarea>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeInventoryModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Add Stock</button>
+          <button type="button" class="btn btn-cancel" onclick="closeTransferModal()">Cancel</button>
+          <button type="submit" class="btn btn-solid-green">Transfer Stock</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- Adjust Stock Modal -->
+  <div class="modal-overlay" id="adjustModalOverlay" onclick="closeAdjustModal()"></div>
+  <div class="modal" id="adjustModal">
+    <div class="modal-header">
+      <h3 class="modal-title" style="color:#ef4444;">Adjust Stock</h3>
+      <button class="modal-close" onclick="closeAdjustModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px 14px;margin-bottom:1rem;font-size:12px;color:#ef4444;">
+        ⚠️ This will <strong>deduct</strong> stock from the selected product. Use for loss, theft, or damage write-offs.
+      </div>
+      <form id="adjustForm" onsubmit="submitAdjust(event)">
+        <div class="form-group">
+          <label class="form-label">Product <span class="req">*</span></label>
+          <select id="adjustProduct" class="form-input form-select" required>
+            <option value="">Select product</option>
+          </select>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Quantity to Deduct <span class="req">*</span></label>
+            <input type="number" id="adjustQty" class="form-input" min="1" required placeholder="e.g. 5"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Reason <span class="req">*</span></label>
+            <select id="adjustReason" class="form-input form-select" required>
+              <option value="">Select reason</option>
+              <option value="loss">Loss</option>
+              <option value="stolen">Stolen</option>
+              <option value="damaged">Damaged</option>
+              <option value="expired">Expired</option>
+              <option value="other">Other</option>
+            </select>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Branch <span class="req">*</span></label>
+          <select id="adjustBranch" class="form-input form-select" required>
+            <option value="">Select branch</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Remarks / Notes</label>
+          <textarea id="adjustNote" class="form-input form-textarea" rows="2" placeholder="e.g. 5 units found damaged during inspection..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-cancel" onclick="closeAdjustModal()">Cancel</button>
+          <button type="submit" class="btn" style="background:#ef4444;color:#fff;">Deduct Stock</button>
         </div>
       </form>
     </div>
@@ -650,7 +974,90 @@
   </div>
 
   <!-- Toast Notification -->
-  <div class="toast" id="toast"></div>
+    <!-- Approve/Reject Request Modal -->
+  <div class="modal-overlay" id="reviewRequestModalOverlay" onclick="closeReviewRequestModal()"></div>
+  <div class="modal" id="reviewRequestModal" style="max-width:480px;">
+    <div class="modal-header">
+      <h3 class="modal-title" id="reviewRequestTitle">Review Request</h3>
+      <button class="modal-close" onclick="closeReviewRequestModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <input type="hidden" id="reviewRequestId"/>
+      <div id="reviewRequestInfo" style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;"></div>
+      <div class="form-group">
+        <label class="form-label">Admin Note (optional)</label>
+        <textarea id="reviewAdminNote" class="form-input form-textarea" rows="2" placeholder="e.g. Approved — will order next week..."></textarea>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-cancel" onclick="closeReviewRequestModal()">Cancel</button>
+        <button type="button" class="btn" style="background:#ef4444;color:#fff;" onclick="submitReview('rejected')">Reject</button>
+        <button type="button" class="btn btn-solid-green" onclick="submitReview('approved')">Approve</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Create PO Modal -->
+  <div class="modal-overlay" id="createPOModalOverlay" onclick="closeCreatePOModal()"></div>
+  <div class="modal" id="createPOModal" style="max-width:640px;">
+    <div class="modal-header">
+      <h3 class="modal-title">Create Purchase Order</h3>
+      <button class="modal-close" onclick="closeCreatePOModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="form-row-2">
+        <div class="form-group">
+          <label class="form-label">Supplier Name <span class="req">*</span></label>
+          <input type="text" id="poSupplier" class="form-input" required placeholder="e.g. Natasha Distributor"/>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note</label>
+          <input type="text" id="poNote" class="form-input" placeholder="Optional remarks..."/>
+        </div>
+      </div>
+
+      <!-- PO Items -->
+      <div style="margin-bottom:0.75rem;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+          <label class="form-label" style="margin:0;">Items <span class="req">*</span></label>
+          <button type="button" class="btn-text" onclick="addPOItemRow()">+ Add Item</button>
+        </div>
+        <div id="poItemsWrap">
+          <!-- rows added dynamically -->
+        </div>
+      </div>
+
+      <!-- Total -->
+      <div style="text-align:right;font-size:14px;font-weight:700;color:var(--text-primary);padding:8px 0;border-top:1px solid var(--border);">
+        Total: <span id="poTotal">₱0.00</span>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-cancel" onclick="closeCreatePOModal()">Cancel</button>
+        <button type="button" class="btn btn-solid-green" onclick="submitCreatePO()">Create PO</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- PO Detail Modal -->
+  <div class="modal-overlay" id="poDetailModalOverlay" onclick="closePODetailModal()"></div>
+  <div class="modal" id="poDetailModal" style="max-width:640px;">
+    <div class="modal-header">
+      <h3 class="modal-title" id="poDetailTitle">Purchase Order</h3>
+      <button class="modal-close" onclick="closePODetailModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div id="poDetailContent"></div>
+      <div class="modal-footer" id="poDetailFooter"></div>
+    </div>
+  </div>
+
+<div class="toast" id="toast"></div>
 
   <script src="{{ url_for('static', filename='js/admin.js') }}"></script>
 </body>

@@ -17,7 +17,7 @@
       <img src="{{ url_for('static', filename='img/favicon.png') }}" alt="Logo" class="sidebar-logo"/>
       <div class="sidebar-brand-text">
         <span class="sidebar-brand-name">Triple E & FC</span>
-        <span class="sidebar-brand-sub">Staff Panel</span>
+        <span class="sidebar-brand-sub" id="sidebarBranchName">Staff Panel</span>
       </div>
     </div>
 
@@ -34,6 +34,11 @@
       <a href="#" class="nav-item" onclick="showSection('orders', this)" data-tooltip="Orders">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         <span>Orders</span>
+      </a>
+      <a href="#" class="nav-item" onclick="showSection('requests', this)" data-tooltip="Stock Requests">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
+        <span>Stock Requests</span>
+        <span id="reqBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
       </a>
       <a href="#" class="nav-item" onclick="showSection('summary', this)" data-tooltip="Sales Summary">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="20" x2="12" y2="10"/><line x1="18" y1="20" x2="18" y2="4"/><line x1="6" y1="20" x2="6" y2="16"/></svg>
@@ -114,12 +119,11 @@
             <button class="btn-text" onclick="clearOrder()">Clear</button>
           </div>
 
-          <!-- Branch selector for this transaction -->
+          <!-- Branch auto-detected from staff profile -->
           <div class="pos-customer-wrap" style="margin-bottom:8px;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-            <select id="posBranch" class="search-input" style="font-size:12px;border:none;background:transparent;cursor:pointer;">
-              <option value="">Select branch for this transaction *</option>
-            </select>
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--g-400);"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+            <span id="posBranchDisplay" style="font-size:12px;color:var(--g-400);font-weight:600;">Loading branch...</span>
+            <input type="hidden" id="posBranch" value=""/>
           </div>
 
           <!-- Customer name (optional) -->
@@ -161,10 +165,7 @@
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
                 GCash
               </button>
-              <button class="pos-pay-btn" onclick="selectPayment('cash_on_delivery', this)">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M5 12h13M12 5l7 7-7 7"/></svg>
-                COD
-              </button>
+
             </div>
 
             <!-- GCash Reference -->
@@ -198,11 +199,23 @@
 
     <!-- ─── INVENTORY SECTION ──────────────────────── -->
     <section class="section" id="section-inventory">
+      <!-- Low Stock Alert Banner -->
+      <div id="staffLowStockBanner" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 16px;margin-bottom:1rem;display:flex;align-items:center;gap:10px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+        <span id="staffLowStockText" style="font-size:13px;color:#ef4444;font-weight:500;"></span>
+      </div>
+
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
           <input type="text" class="search-input" placeholder="Search products..." oninput="filterInventorySearch(this.value)"/>
         </div>
+        <select class="filter-select" onchange="filterStaffInventoryType(this.value)">
+          <option value="">All Records</option>
+          <option value="low_stock">Low Stock</option>
+          <option value="restock">Restock</option>
+          <option value="transfer">Transfer</option>
+        </select>
         <button class="btn btn-solid-green" onclick="openStockModal()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Add Stock
@@ -261,6 +274,28 @@
       </div>
     </section>
 
+    <!-- ─── STOCK REQUESTS SECTION ───────────────────── -->
+    <section class="section" id="section-requests">
+      <div class="section-toolbar">
+        <div style="flex:1;"></div>
+        <button class="btn btn-solid-green" onclick="openRequestModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Request Stock
+        </button>
+      </div>
+      <div class="card">
+        <div class="card-header"><h3 class="card-title">My Stock Requests</h3></div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Product</th><th>Current Stock</th><th>Qty Needed</th><th>Status</th><th>Note</th><th>Admin Note</th><th>Date</th></tr>
+            </thead>
+            <tbody id="requestsBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
     <!-- ─── ORDERS SECTION ────────────────────────── -->
     <section class="section" id="section-orders">
       <div class="section-toolbar">
@@ -272,6 +307,7 @@
           <option value="">All Status</option>
           <option value="pending">Pending</option>
           <option value="processing">Processing</option>
+          <option value="out_for_delivery">Out for Delivery</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
         </select>
@@ -405,6 +441,45 @@
   </div>
 
   <!-- Toast -->
+  <!-- Request Stock Modal -->
+  <div class="modal-overlay" id="requestModalOverlay" onclick="closeRequestModal()"></div>
+  <div class="modal" id="requestModal">
+    <div class="modal-header">
+      <h3 class="modal-title">Request Stock</h3>
+      <button class="modal-close" onclick="closeRequestModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+      </button>
+    </div>
+    <div class="modal-body">
+      <form id="requestForm" onsubmit="submitRequest(event)">
+        <div class="form-group">
+          <label class="form-label">Product <span class="req">*</span></label>
+          <select id="reqProduct" class="form-input form-select" required onchange="updateCurrentStock(this)">
+            <option value="">Select product</option>
+          </select>
+        </div>
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Quantity Needed <span class="req">*</span></label>
+            <input type="number" id="reqQty" class="form-input" min="1" required placeholder="e.g. 20"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Current Stock</label>
+            <input type="text" id="reqCurrentStock" class="form-input" disabled placeholder="Select product first"/>
+          </div>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Note / Reason</label>
+          <textarea id="reqNote" class="form-input form-textarea" rows="2" placeholder="e.g. Running low, selling fast..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-cancel" onclick="closeRequestModal()">Cancel</button>
+          <button type="submit" class="btn btn-solid-green">Submit Request</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <div class="toast" id="toast"></div>
 
   <script src="{{ url_for('static', filename='js/staff.js') }}"></script>

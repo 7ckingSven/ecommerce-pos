@@ -670,6 +670,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .badge--blue   { background: rgba(59,130,246,0.12); color: #3b82f6; }
 .badge--red    { background: rgba(239,68,68,0.12);  color: #ef4444; }
 .badge--gray   { background: rgba(107,114,128,0.12);color: #9ca3af; }
+.badge--purple { background: rgba(139,92,246,0.12); color: #8b5cf6; }
 
 /* ─── Buttons ─── */
 .btn {

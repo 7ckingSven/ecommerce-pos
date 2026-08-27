@@ -1,3 +1,4 @@
+import json
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_cors import CORS
 from flask_mail import Mail, Message
@@ -43,6 +44,9 @@ def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('utf-8')
 
 def check_password(plain, hashed):
+    return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
+
+def verify_password(plain, hashed):
     return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
 
 def login_required(role=None):
@@ -332,12 +336,12 @@ def verify_otp():
 @app.route('/admin/dashboard')
 @login_required(role='admin')
 def admin_dashboard():
-    return render_template('admin/dashboard.html')
+    return render_template('admin/admin_dashboard.html')
 
 @app.route('/staff/dashboard')
 @login_required(role='staff')
 def staff_dashboard():
-    return render_template('staff/dashboard.html')
+    return render_template('staff/staff_dashboard.html')
 
 # ─── LOGOUT ───────────────────────────────────────────
 
@@ -397,9 +401,14 @@ def api_login():
             'customer': {
                 'customer_id':  customer['customer_id'],
                 'fname':        customer['fname'],
+                'mi':           customer.get('mi', ''),
                 'lname':        customer['lname'],
                 'email':        customer['email'],
                 'phone_number': customer['phone_number'],
+                'address':      customer.get('address', ''),
+                'dob':          customer.get('dob', ''),
+                'gender':       customer.get('gender', ''),
+                'username':     user.get('username', ''),
             }
         }), 200
 
@@ -608,25 +617,9 @@ def api_get_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        # Avoid nested joins — fetch product without discount nested
         res = supabase.table('cart').select(
-            '*, product(product_id, product_name, price, image_url, brand, category, discount_id)'
+            '*, product(product_id, product_name, price, image_url, brand, category, discount(discount_name, percentage))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute()
-
-        # Flatten product array → single object (Supabase returns array for joins)
-        for item in res.data:
-            if isinstance(item.get('product'), list):
-                item['product'] = item['product'][0] if item['product'] else None
-
-        # Fetch discount separately for products that have one
-        for item in res.data:
-            product = item.get('product')
-            if product and product.get('discount_id'):
-                disc_res = supabase.table('discount').select('discount_name, percentage').eq('discount_id', product['discount_id']).execute()
-                product['discount'] = disc_res.data[0] if disc_res.data else None
-            elif product:
-                product['discount'] = None
-
         return jsonify(res.data), 200
     except Exception as e:
         print(f"API cart error: {e}")
@@ -702,7 +695,7 @@ def api_get_orders():
     try:
         res = supabase.table('order').select(
             '*, order_item(order_item_id, product_id, qty, price, product(product_name, image_url, price)), payment(*)'
-        ).eq('customer_id', customer_id).order('date', desc=True).execute()
+        ).eq('customer_id', customer_id).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
         print(f"API get orders error: {e}")
@@ -757,8 +750,13 @@ def api_place_order():
         }).execute()
 
         for item in cart_items:
-            if item.get('cart_id'):
-                supabase.table('cart').update({'status': 'checked_out'}).eq('cart_id', item['cart_id']).execute()
+            cart_id = item.get('cart_id')
+            # Skip if cart_id is missing or 'buy_now' (Buy Now doesn't use cart)
+            if cart_id and cart_id != 'buy_now':
+                try:
+                    supabase.table('cart').update({'status': 'checked_out'}).eq('cart_id', cart_id).execute()
+                except Exception:
+                    pass  # Non-critical — cart status update failure won't block order
 
         for item in cart_items:
             product_res = supabase.table('product').select('quantity').eq('product_id', item['product_id']).execute()
@@ -790,10 +788,269 @@ def api_customer_profile():
         res = supabase.table('customer').select('*').eq('customer_id', customer_id).execute()
         if not res.data:
             return jsonify({'error': 'Customer not found.'}), 404
-        return jsonify(res.data[0]), 200
+
+        customer = res.data[0]
+
+        # Also fetch username from user table
+        user_res = supabase.table('user').select('username').eq('user_id', customer['user_id']).execute()
+        if user_res.data:
+            customer['username'] = user_res.data[0]['username']
+
+        return jsonify(customer), 200
     except Exception as e:
         print(f'Customer profile error: {e}')
         return jsonify({'error': 'Failed to fetch profile.'}), 500
+
+
+@app.route('/api/customer/profile', methods=['PUT'])
+def api_update_customer_profile():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data    = request.get_json()
+        updates = {}
+
+        if 'fname'        in data: updates['fname']        = data['fname'].strip()
+        if 'mi'           in data: updates['mi']           = data['mi'].strip()
+        if 'lname'        in data: updates['lname']        = data['lname'].strip()
+        if 'dob'          in data: updates['dob']          = data['dob'] or None
+        if 'gender'       in data: updates['gender']       = data['gender'] or None
+        if 'email'        in data: updates['email']        = data['email'].strip()
+        if 'phone_number' in data: updates['phone_number'] = data['phone_number'].strip()
+        if 'address'      in data: updates['address']      = data['address'].strip()
+
+        if not updates:
+            return jsonify({'error': 'No fields to update.'}), 400
+
+        # Update username in user table if provided
+        if 'username' in data and data['username'].strip():
+            username = data['username'].strip()
+            # Check if username is taken by another user
+            cust_res = supabase.table('customer').select('user_id').eq('customer_id', customer_id).execute()
+            if cust_res.data:
+                user_id       = cust_res.data[0]['user_id']
+                existing_user = supabase.table('user').select('user_id').eq('username', username).neq('user_id', user_id).execute()
+                if existing_user.data:
+                    return jsonify({'error': 'Username is already taken.'}), 409
+                supabase.table('user').update({'username': username}).eq('user_id', user_id).execute()
+
+        supabase.table('customer').update(updates).eq('customer_id', customer_id).execute()
+        return jsonify({'message': 'Profile updated successfully.'}), 200
+    except Exception as e:
+        print(f'Update profile error: {e}')
+        return jsonify({'error': 'Failed to update profile.'}), 500
+
+
+@app.route('/api/customer/change-password', methods=['PUT'])
+def api_change_password():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data         = request.get_json()
+        old_password = data.get('old_password', '')
+        new_password = data.get('new_password', '')
+
+        if not old_password or not new_password:
+            return jsonify({'error': 'Both old and new passwords are required.'}), 400
+
+        if len(new_password) < 8:
+            return jsonify({'error': 'New password must be at least 8 characters.'}), 400
+
+        # Get user_id from customer
+        cust_res = supabase.table('customer').select('user_id').eq('customer_id', customer_id).execute()
+        if not cust_res.data:
+            return jsonify({'error': 'Customer not found.'}), 404
+
+        user_id  = cust_res.data[0]['user_id']
+        user_res = supabase.table('user').select('password').eq('user_id', user_id).execute()
+        if not user_res.data:
+            return jsonify({'error': 'User not found.'}), 404
+
+        stored_hash = user_res.data[0]['password']
+
+        # Verify old password
+        if not verify_password(old_password, stored_hash):
+            return jsonify({'error': 'Current password is incorrect.'}), 401
+
+        # Hash and save new password
+        new_hash = hash_password(new_password)
+        supabase.table('user').update({'password': new_hash}).eq('user_id', user_id).execute()
+
+        return jsonify({'message': 'Password changed successfully.'}), 200
+    except Exception as e:
+        print(f'Change password error: {e}')
+        return jsonify({'error': 'Failed to change password.'}), 500
+
+
+
+
+
+# ══════════════════════════════════════════════════════
+# STOCK REQUEST ROUTES
+# ══════════════════════════════════════════════════════
+
+# ─── Staff: Submit stock request ─────────────────────
+@app.route('/api/staff/stock-requests', methods=['GET'])
+@staff_required
+def staff_get_stock_requests():
+    try:
+        staff_id = session.get('staff_id')
+        res = supabase.table('stock_request').select(
+            '*, product(product_name, quantity), branch(branch_name)'
+        ).eq('staff_id', staff_id).order('created_at', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/stock-requests', methods=['POST'])
+@staff_required
+def staff_create_stock_request():
+    try:
+        data           = request.get_json()
+        staff_id       = session.get('staff_id')
+        product_id     = data.get('product_id')
+        quantity_needed = int(data.get('quantity_needed', 0))
+        note           = data.get('note', '')
+        branch_id      = data.get('branch_id')
+
+        if not product_id or quantity_needed <= 0:
+            return jsonify({'error': 'Product and quantity are required.'}), 400
+
+        res = supabase.table('stock_request').insert({
+            'staff_id':       staff_id,
+            'branch_id':      branch_id,
+            'product_id':     product_id,
+            'quantity_needed': quantity_needed,
+            'note':           note,
+            'status':         'pending',
+        }).execute()
+        return jsonify(res.data[0]), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ─── Admin: View all stock requests ──────────────────
+@app.route('/api/admin/stock-requests', methods=['GET'])
+@admin_required
+def admin_get_stock_requests():
+    try:
+        res = supabase.table('stock_request').select(
+            '*, product(product_name, quantity), staff(fname, lname), branch(branch_name)'
+        ).order('created_at', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/stock-requests/<request_id>', methods=['PUT'])
+@admin_required
+def admin_update_stock_request(request_id):
+    try:
+        data       = request.get_json()
+        status     = data.get('status')  # approved | rejected
+        admin_note = data.get('admin_note', '')
+
+        supabase.table('stock_request').update({
+            'status':     status,
+            'admin_note': admin_note,
+            'updated_at': 'now()',
+        }).eq('request_id', request_id).execute()
+        return jsonify({'message': f'Request {status}.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ══════════════════════════════════════════════════════
+# PURCHASE ORDER ROUTES
+# ══════════════════════════════════════════════════════
+
+@app.route('/api/admin/purchase-orders', methods=['GET'])
+@admin_required
+def admin_get_purchase_orders():
+    try:
+        res = supabase.table('purchase_order').select(
+            '*, po_item(*, product(product_name, quantity)), created_by:staff!purchase_order_created_by_fkey(fname, lname)'
+        ).order('created_at', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/purchase-orders', methods=['POST'])
+@admin_required
+def admin_create_purchase_order():
+    try:
+        data     = request.get_json()
+        supplier = data.get('supplier', '').strip()
+        note     = data.get('note', '')
+        items    = data.get('items', [])  # [{product_id, quantity, unit_cost}]
+        staff_id = session.get('staff_id')
+
+        if not supplier or not items:
+            return jsonify({'error': 'Supplier and items are required.'}), 400
+
+        # Generate PO number
+        count   = supabase.table('purchase_order').select('po_id', count='exact').execute()
+        po_num  = f"PO-{datetime.now().strftime('%Y%m')}-{str((count.count or 0) + 1).zfill(3)}"
+
+        po_res  = supabase.table('purchase_order').insert({
+            'po_number':  po_num,
+            'supplier':   supplier,
+            'note':       note,
+            'status':     'draft',
+            'created_by': staff_id,
+        }).execute()
+
+        po_id = po_res.data[0]['po_id']
+
+        # Insert PO items
+        for item in items:
+            supabase.table('po_item').insert({
+                'po_id':      po_id,
+                'product_id': item['product_id'],
+                'quantity':   int(item['quantity']),
+                'unit_cost':  float(item.get('unit_cost', 0)),
+            }).execute()
+
+        return jsonify({'message': 'Purchase order created.', 'po_id': po_id, 'po_number': po_num}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/purchase-orders/<po_id>', methods=['PUT'])
+@admin_required
+def admin_update_purchase_order(po_id):
+    try:
+        data   = request.get_json()
+        status = data.get('status')
+        updates = {'status': status, 'updated_at': 'now()'}
+        if data.get('supplier'): updates['supplier'] = data['supplier']
+        if data.get('note'):     updates['note']     = data['note']
+        supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
+
+        # If received → add stock for each item
+        if status == 'received':
+            items_res = supabase.table('po_item').select(
+                '*, product(quantity)'
+            ).eq('po_id', po_id).execute()
+            for item in items_res.data:
+                product    = item.get('product') or {}
+                qty_before = product.get('quantity', 0)
+                qty_added  = item['quantity']
+                qty_after  = qty_before + qty_added
+                supabase.table('product').update({
+                    'quantity': qty_after, 'updated_at': 'now()'
+                }).eq('product_id', item['product_id']).execute()
+                supabase.table('inventory').insert({
+                    'product_id':      item['product_id'],
+                    'staff_id':        session.get('staff_id'),
+                    'quantity_added':  qty_added,
+                    'quantity_before': qty_before,
+                    'quantity_after':  qty_after,
+                    'note':            f'PO received — {data.get("po_number", po_id)}',
+                }).execute()
+
+        return jsonify({'message': f'PO status updated to {status}.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 
 # ADMIN API ROUTES — Dashboard Data
 # ══════════════════════════════════════════════════════
@@ -982,13 +1239,33 @@ def admin_add_product():
         if not product_name or not category:
             return jsonify({'error': 'Product name and category are required.'}), 400
 
-        image_url = None
-        image     = request.files.get('image')
-        if image:
-            file_bytes = image.read()
-            file_name  = f"products/{product_name.replace(' ', '_')}_{image.filename}"
-            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': image.content_type})
-            image_url = supabase.storage.from_('product-images').get_public_url(file_name)
+        # Handle multiple images
+        images    = request.files.getlist('images')
+        image_urls = []
+        for img in images[:20]:  # max 5
+            file_bytes = img.read()
+            file_name  = f"products/{product_name.replace(' ', '_')}_{img.filename}"
+            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': img.content_type})
+            url = supabase.storage.from_('product-images').get_public_url(file_name)
+            image_urls.append(url)
+
+        # Fallback: single image field
+        if not image_urls:
+            image = request.files.get('image')
+            if image:
+                file_bytes = image.read()
+                file_name  = f"products/{product_name.replace(' ', '_')}_{image.filename}"
+                supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': image.content_type})
+                image_urls = [supabase.storage.from_('product-images').get_public_url(file_name)]
+
+        image_url = image_urls[0] if image_urls else None
+
+        available_at = request.form.get('available_at', 'both')
+        variants_raw = request.form.get('variants', '[]')
+        try:
+            variants = json.loads(variants_raw) if variants_raw else []
+        except Exception:
+            variants = []
 
         res = supabase.table('product').insert({
             'staff_id':     session.get('staff_id'),
@@ -1001,6 +1278,9 @@ def admin_add_product():
             'status':       status,
             'description':  description,
             'image_url':    image_url,
+            'image_urls':   image_urls,
+            'available_at': available_at,
+            'variants':     variants,
         }).execute()
 
         return jsonify(res.data[0]), 201
@@ -1012,6 +1292,12 @@ def admin_add_product():
 def admin_update_product(product_id):
     try:
         discount_id = request.form.get('discount_id') or None
+        variants_raw = request.form.get('variants', '[]')
+        try:
+            variants = json.loads(variants_raw) if variants_raw else []
+        except Exception:
+            variants = []
+
         updates = {
             'product_name': request.form.get('product_name'),
             'brand':        request.form.get('brand'),
@@ -1021,15 +1307,40 @@ def admin_update_product(product_id):
             'status':       request.form.get('status'),
             'description':  request.form.get('description'),
             'discount_id':  discount_id,
+            'available_at': request.form.get('available_at', 'both'),
+            'variants':     variants,
             'updated_at':   'now()',
         }
 
-        image = request.files.get('image')
-        if image:
-            file_bytes = image.read()
-            file_name  = f"products/{product_id}_{image.filename}"
-            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': image.content_type, 'upsert': True})
-            updates['image_url'] = supabase.storage.from_('product-images').get_public_url(file_name)
+        # Handle multiple images
+        images = request.files.getlist('images')
+        existing_raw = request.form.get('existing_images', '[]')
+        try:
+            existing_urls = json.loads(existing_raw)
+        except Exception:
+            existing_urls = []
+
+        new_urls = []
+        for img in images[:20]:
+            file_bytes = img.read()
+            file_name  = f"products/{product_id}_{img.filename}"
+            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': img.content_type, 'upsert': True})
+            url = supabase.storage.from_('product-images').get_public_url(file_name)
+            new_urls.append(url)
+
+        # Fallback single image
+        if not images:
+            image = request.files.get('image')
+            if image:
+                file_bytes = image.read()
+                file_name  = f"products/{product_id}_{image.filename}"
+                supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': image.content_type, 'upsert': True})
+                new_urls = [supabase.storage.from_('product-images').get_public_url(file_name)]
+
+        all_urls = existing_urls + new_urls
+        if all_urls:
+            updates['image_url']  = all_urls[0]
+            updates['image_urls'] = all_urls
 
         res = supabase.table('product').update(updates).eq('product_id', product_id).execute()
         return jsonify(res.data[0]), 200
@@ -1062,24 +1373,29 @@ def admin_get_inventory():
 @admin_required
 def admin_add_inventory():
     try:
-        data            = request.get_json()
-        product_id      = data.get('product_id')
-        qty_added       = int(data.get('quantity', 0))
-        from_branch_id  = data.get('from_branch_id')
-        to_branch_id    = data.get('to_branch_id')
-        note            = data.get('note', '')
+        data           = request.get_json()
+        product_id     = data.get('product_id')
+        qty_change     = int(data.get('quantity', 0))
+        from_branch_id = data.get('from_branch_id')
+        to_branch_id   = data.get('to_branch_id')
+        note           = data.get('note', '')
+        inv_type       = data.get('type', 'restock')  # restock | transfer | adjustment
 
-        if not product_id or qty_added <= 0:
+        if not product_id or qty_change == 0:
             return jsonify({'error': 'Product and quantity are required.'}), 400
 
         prod_res   = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
         qty_before = prod_res.data[0]['quantity'] if prod_res.data else 0
-        qty_after  = qty_before + qty_added
+        qty_after  = qty_before + qty_change  # negative for adjustments
+
+        # Prevent stock going below 0
+        if qty_after < 0:
+            return jsonify({'error': f'Insufficient stock. Only {qty_before} unit(s) available.'}), 400
 
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
-            'quantity_added':  qty_added,
+            'quantity_added':  qty_change,
             'quantity_before': qty_before,
             'quantity_after':  qty_after,
             'from_branch_id':  from_branch_id,
@@ -1105,12 +1421,18 @@ def admin_get_orders():
         limit = request.args.get('limit', default=50, type=int)
         if limit <= 0:
             limit = 50
-        if limit > 200:
-            limit = 200
+        if limit > 500:
+            limit = 500
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
-        ).order('date', desc=True).limit(limit).execute()
+            'order_id, total, status, order_type, date, created_at, branch_id, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method, total, status, ref_no)'
+        ).order('created_at', desc=True).limit(limit).execute()
+
+        # Flatten payment array → single object
+        for o in res.data:
+            if isinstance(o.get('payment'), list):
+                o['payment'] = o['payment'][0] if o['payment'] else None
+
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1258,6 +1580,37 @@ def staff_get_branches():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+
+# ─── Staff My Branch ──────────────────────────────────
+
+@app.route('/api/staff/my-branch', methods=['GET'])
+@staff_required
+def staff_my_branch():
+    try:
+        staff_id = session.get('staff_id')
+        if not staff_id:
+            return jsonify({'error': 'Staff not found in session.'}), 401
+
+        res = supabase.table('staff').select(
+            'branch_id, branch(branch_id, branch_name, address)'
+        ).eq('staff_id', staff_id).execute()
+
+        if not res.data or not res.data[0].get('branch_id'):
+            return jsonify({'branch_id': None, 'branch_name': 'No Branch Assigned'}), 200
+
+        branch = res.data[0].get('branch')
+        if isinstance(branch, list):
+            branch = branch[0] if branch else {}
+
+        return jsonify({
+            'branch_id':   branch.get('branch_id'),
+            'branch_name': branch.get('branch_name'),
+            'address':     branch.get('address'),
+        }), 200
+    except Exception as e:
+        print(f"Staff my-branch error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 # ─── Staff Orders ─────────────────────────────────────
 
 @app.route('/api/staff/orders', methods=['GET'])
@@ -1271,8 +1624,8 @@ def staff_get_orders():
             limit = 200
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
-        ).order('date', desc=True).limit(limit).execute()
+            'order_id, total, status, order_type, date, created_at, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
+        ).order('created_at', desc=True).limit(limit).execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
