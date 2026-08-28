@@ -236,6 +236,11 @@ function renderProducts(products) {
             <td>${p.category}</td>
             <td>${peso(p.price)}</td>
             <td>${discountCell}</td>
+            <td>
+              ${p.branch_stock?.length
+                ? p.branch_stock.map(bs => `<span style="font-size:11px;background:rgba(22,163,74,0.1);color:var(--g-400);border-radius:4px;padding:2px 6px;margin-right:3px;">${bs.branch?.branch_name || '—'}: ${bs.quantity}</span>`).join('')
+                : `<span style="font-size:12px;">${p.quantity}</span>`}
+            </td>
             <td>${badge(p.status)}</td>
             <td>
               <div style="display:flex;gap:6px;">
@@ -249,7 +254,7 @@ function renderProducts(products) {
             </td>
           </tr>`;
       }).join('')
-    : '<tr><td colspan="8" class="table-empty">No products found</td></tr>';
+    : '<tr><td colspan="9" class="table-empty">No products found</td></tr>';
 }
 
 function filterProducts(q) {

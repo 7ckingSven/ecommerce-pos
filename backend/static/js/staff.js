@@ -167,7 +167,11 @@ function populateBranchSelects() {
 async function loadPosProducts() {
   try {
     const res   = await fetch('/api/products');
-    posProducts = await res.json();
+    const all   = await res.json();
+    // Filter to only show products for this branch
+    posProducts = all.filter(p =>
+      !p.branch_id || p.branch_id === staffBranchId
+    );
     renderPosProducts(posProducts);
     populateCategories(posProducts);
   } catch (e) { console.error('POS products error:', e); }
@@ -337,10 +341,16 @@ async function processOrder() {
     return;
   }
 
-  const refNo = document.getElementById('posGcashRef').value.trim();
-  if (selectedPayment === 'gcash' && !refNo) {
-    showToast('Please enter GCash reference number.', 'error');
-    return;
+  const refNo = document.getElementById('posGcashRef').value.trim().replace(/\s/g, '');
+  if (selectedPayment === 'gcash') {
+    if (!refNo) {
+      showToast('Please enter GCash reference number.', 'error');
+      return;
+    }
+    if (!/^\d{13}$/.test(refNo)) {
+      showToast('GCash reference number must be exactly 13 digits.', 'error');
+      return;
+    }
   }
 
   if (selectedPayment === 'walk_in_cash') {
@@ -478,7 +488,11 @@ async function loadInventory() {
       fetch('/api/products'),
       fetch('/api/staff/inventory'),
     ]);
-    invProducts   = await prodRes.json();
+    const allInvProds = await prodRes.json();
+    // Filter to this branch only
+    invProducts = allInvProds.filter(p =>
+      !p.branch_id || p.branch_id === staffBranchId
+    );
     const invData = await invRes.json();
 
     // Stats

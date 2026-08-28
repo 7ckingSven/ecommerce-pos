@@ -170,7 +170,7 @@
 
             <!-- GCash Reference -->
             <div class="pos-refno" id="posRefNo" style="display:none;">
-              <input type="text" id="posGcashRef" class="form-input" placeholder="Enter GCash reference number" style="font-size:13px;"/>
+              <input type="text" id="posGcashRef" class="form-input" placeholder="Enter 13-digit reference number" maxlength="13" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'')" style="font-size:13px;"/>
             </div>
 
             <!-- Cash Input -->

@@ -574,11 +574,30 @@ def api_verify_otp():
 def api_products():
     try:
         category = request.args.get('category', '')
-        res      = supabase.table('product').select('*, discount(discount_name, percentage)').eq('status', 'active')
+        res      = supabase.table('product').select(
+            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name))'
+        ).eq('status', 'active')
         if category:
             res = res.eq('category', category)
         res = res.order('created_at', desc=True).execute()
-        return jsonify(res.data), 200
+
+        # Expand products with branch stock — one entry per branch
+        expanded = []
+        for p in res.data:
+            branch_stocks = p.get('branch_stock', [])
+            if not branch_stocks:
+                # No branch stock — show as single product
+                expanded.append(p)
+            else:
+                # available_at: both → 2 cards; single branch → 1 card
+                for bs in branch_stocks:
+                    entry = dict(p)
+                    entry['branch_id']   = bs['branch_id']
+                    entry['branch_name'] = bs.get('branch', {}).get('branch_name', '')
+                    entry['quantity']    = bs['quantity']
+                    expanded.append(entry)
+
+        return jsonify(expanded), 200
     except Exception as e:
         print(f"API products error: {e}")
         return jsonify({'error': 'Failed to fetch products.'}), 500
@@ -723,12 +742,14 @@ def api_place_order():
         total    = sum(item['price'] * item['quantity'] for item in cart_items)
         quantity = sum(item['quantity'] for item in cart_items)
 
+        branch_id = data.get('branch_id')
         order_res = supabase.table('order').insert({
             'customer_id': customer_id,
             'order_type':  'online',
             'quantity':    quantity,
             'total':       total,
-            'status':      'pending'
+            'status':      'pending',
+            'branch_id':   branch_id,
         }).execute()
 
         order_id    = order_res.data[0]['order_id']
@@ -759,11 +780,24 @@ def api_place_order():
                 except Exception:
                     pass  # Non-critical — cart status update failure won't block order
 
+        branch_id = data.get('branch_id')
+
         for item in cart_items:
-            product_res = supabase.table('product').select('quantity').eq('product_id', item['product_id']).execute()
-            if product_res.data:
-                new_qty = product_res.data[0]['quantity'] - item['quantity']
-                supabase.table('product').update({'quantity': max(new_qty, 0)}).eq('product_id', item['product_id']).execute()
+            product_id = item['product_id']
+            qty        = item['quantity']
+
+            if branch_id:
+                # Deduct from branch_stock
+                bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+                if bs_res.data:
+                    new_qty = max(bs_res.data[0]['quantity'] - qty, 0)
+                    supabase.table('branch_stock').update({'quantity': new_qty}).eq('product_id', product_id).eq('branch_id', branch_id).execute()
+            else:
+                # Fallback — deduct from product quantity
+                product_res = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
+                if product_res.data:
+                    new_qty = max(product_res.data[0]['quantity'] - qty, 0)
+                    supabase.table('product').update({'quantity': max(new_qty, 0)}).eq('product_id', product_id).execute()
 
         return jsonify({
             'message':  'Order placed successfully.',
@@ -1171,6 +1205,68 @@ def api_auth_reset_password():
         return jsonify({'error': 'Something went wrong.'}), 500
 
 
+
+# ─── Branch Stock API ────────────────────────────────
+
+@app.route('/api/admin/branch-stock', methods=['POST'])
+@admin_required
+def admin_add_branch_stock():
+    try:
+        data       = request.get_json()
+        product_id = data.get('product_id')
+        branch_id  = data.get('branch_id')
+        quantity   = int(data.get('quantity', 0))
+
+        if not product_id or not branch_id or quantity <= 0:
+            return jsonify({'error': 'Product, branch and quantity are required.'}), 400
+
+        # Upsert branch stock
+        existing = supabase.table('branch_stock').select('*').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+
+        if existing.data:
+            new_qty = existing.data[0]['quantity'] + quantity
+            supabase.table('branch_stock').update({
+                'quantity':   new_qty,
+                'updated_at': 'now()'
+            }).eq('product_id', product_id).eq('branch_id', branch_id).execute()
+        else:
+            supabase.table('branch_stock').insert({
+                'product_id': product_id,
+                'branch_id':  branch_id,
+                'quantity':   quantity,
+            }).execute()
+
+        # Also record in inventory
+        prod_res   = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
+        qty_before = prod_res.data[0]['quantity'] if prod_res.data else 0
+        qty_after  = qty_before + quantity
+        supabase.table('product').update({'quantity': qty_after}).eq('product_id', product_id).execute()
+        supabase.table('inventory').insert({
+            'product_id':      product_id,
+            'staff_id':        session.get('staff_id'),
+            'quantity_added':  quantity,
+            'quantity_before': qty_before,
+            'quantity_after':  qty_after,
+            'to_branch_id':    branch_id,
+            'note':            f'Branch stock added',
+        }).execute()
+
+        return jsonify({'message': 'Branch stock updated.'}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/branch-stock', methods=['GET'])
+@admin_required
+def admin_get_branch_stock():
+    try:
+        res = supabase.table('branch_stock').select(
+            '*, product(product_name, category), branch(branch_name)'
+        ).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 # ADMIN API ROUTES — Dashboard Data
 # ══════════════════════════════════════════════════════
 
@@ -1337,7 +1433,7 @@ def admin_unassign_discount():
 @admin_required
 def admin_get_products():
     try:
-        res = supabase.table('product').select('*, discount(discount_id, discount_name, percentage)').order('created_at', desc=True).execute()
+        res = supabase.table('product').select('*, discount(discount_id, discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name))').order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1810,13 +1906,26 @@ def staff_place_order():
 
         # ── Deduct stock ──────────────────────────────
         for item in cart_items:
-            prod = supabase.table('product').select('quantity').eq('product_id', item['product_id']).execute()
+            product_id = item['product_id']
+            qty        = item['quantity']
+
+            # Deduct from branch_stock
+            if branch_id:
+                bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+                if bs_res.data:
+                    new_branch_qty = max(bs_res.data[0]['quantity'] - qty, 0)
+                    supabase.table('branch_stock').update({
+                        'quantity': new_branch_qty, 'updated_at': 'now()'
+                    }).eq('product_id', product_id).eq('branch_id', branch_id).execute()
+
+            # Also deduct from product total quantity
+            prod = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
             if prod.data:
-                new_qty = max(prod.data[0]['quantity'] - item['quantity'], 0)
+                new_qty = max(prod.data[0]['quantity'] - qty, 0)
                 supabase.table('product').update({
                     'quantity':   new_qty,
                     'updated_at': 'now()'
-                }).eq('product_id', item['product_id']).execute()
+                }).eq('product_id', product_id).execute()
 
         return jsonify({
             'message':  'Order processed successfully.',
