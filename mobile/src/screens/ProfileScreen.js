@@ -8,6 +8,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import { getCustomer, logout, isLoggedIn } from '../services/authService';
 import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import PSGCAddressPicker, { psgcToAddressString, addressStringToParts } from '../components/PSGCAddressPicker';
 
 function InfoRow({ icon, label, value }) {
   return (
@@ -47,6 +48,7 @@ export default function ProfileScreen({ navigation }) {
   // ─── Edit Modal State ─────────────────────────────────
   const [showEditModal,  setShowEditModal]  = useState(false);
   const [editType,       setEditType]       = useState(''); // 'personal' | 'contact' | 'password'
+  const [psgcAddress,    setPsgcAddress]    = useState({});
   const [editForm,       setEditForm]       = useState({});
   const [showOldPass,    setShowOldPass]    = useState(false);
   const [showNewPass,    setShowNewPass]    = useState(false);
@@ -108,7 +110,8 @@ export default function ProfileScreen({ navigation }) {
         barangay:     parts[1] || '',
         city:         parts[2] || '',
         province:     parts[3] || '',
-        zip_code:     parts[4] || '',
+        region:       parts[4] || '',
+        zip_code:     parts[5] || '',
       });
     } else if (type === 'password') {
       setEditForm({ old_password: '', new_password: '', confirm_password: '' });
@@ -167,6 +170,7 @@ export default function ProfileScreen({ navigation }) {
           editForm.barangay?.trim(),
           editForm.city?.trim(),
           editForm.province?.trim(),
+          editForm.region?.trim(),
           editForm.zip_code?.trim(),
         ].filter(Boolean);
         payload  = {
@@ -419,27 +423,27 @@ export default function ProfileScreen({ navigation }) {
                     </View>
                   ))}
 
-                  {/* Address — separate fields */}
+                  {/* Address — PSGC Dropdowns */}
                   <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Address</Text>
-                  {[
-                    { key:'street',   label:'Street / House No.',  placeholder:'e.g. Block 2, Osmeña St.' },
-                    { key:'barangay', label:'Barangay',            placeholder:'e.g. Brgy. Zone 2' },
-                    { key:'city',     label:'City / Municipality', placeholder:'e.g. Koronadal City' },
-                    { key:'province', label:'Province',            placeholder:'e.g. South Cotabato' },
-                    { key:'zip_code', label:'Zip Code',            placeholder:'e.g. 9506', keyboard:'number-pad' },
-                  ].map(f => (
-                    <View key={f.key} style={styles.fieldWrap}>
-                      <Text style={styles.fieldLabel}>{f.label}</Text>
-                      <TextInput
-                        style={styles.fieldInput}
-                        value={editForm[f.key] || ''}
-                        onChangeText={v => updateField(f.key, v)}
-                        placeholder={f.placeholder}
-                        placeholderTextColor={COLORS.textMuted}
-                        keyboardType={f.keyboard || 'default'}
-                      />
-                    </View>
-                  ))}
+                  <PSGCAddressPicker
+                    value={{
+                      street:       editForm.street    || '',
+                      barangayName: editForm.barangay  || '',
+                      cityName:     editForm.city      || '',
+                      provinceName: editForm.province  || '',
+                      regionName:   editForm.region    || '',
+                      zip_code:     editForm.zip_code  || '',
+                    }}
+                    onChange={addr => {
+                      setPsgcAddress(addr);
+                      updateField('street',   addr.street       || '');
+                      updateField('barangay', addr.barangayName || '');
+                      updateField('city',     addr.cityName     || '');
+                      updateField('province', addr.provinceName || '');
+                      updateField('region',   addr.regionName   || '');
+                      updateField('zip_code', addr.zip_code     || '');
+                    }}
+                  />
                 </View>
               )}
 

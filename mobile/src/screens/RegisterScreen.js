@@ -6,12 +6,14 @@ import {
 import Feather from 'react-native-vector-icons/Feather';
 import { register } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 
 export default function RegisterScreen({ navigation }) {
   const [step,        setStep]        = useState(1);
   const [loading,     setLoading]     = useState(false);
   const [showPass,    setShowPass]    = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [psgcAddress, setPsgcAddress] = useState({});
   const [form, setForm] = useState({
     fname: '', mi: '', lname: '',
     email: '', username: '', phone_number: '',
@@ -194,28 +196,17 @@ export default function RegisterScreen({ navigation }) {
               ))}
 
               <Text style={[styles.label, { marginBottom: 8 }]}>Address (optional)</Text>
-              {[
-                { key:'street',   label:'Street / House No.',  placeholder:'e.g. Block 2, Osmeña St.' },
-                { key:'barangay', label:'Barangay',            placeholder:'e.g. Brgy. Zone 2' },
-                { key:'city',     label:'City / Municipality', placeholder:'e.g. Koronadal City' },
-                { key:'province', label:'Province',            placeholder:'e.g. South Cotabato' },
-                { key:'zip_code', label:'Zip Code',            placeholder:'e.g. 9506', keyboard:'number-pad' },
-              ].map(f => (
-                <View key={f.key} style={styles.fieldWrap}>
-                  <Text style={styles.label}>{f.label}</Text>
-                  <View style={styles.inputRow}>
-                    <View style={styles.inputIcon}><Feather name="map-pin" size={16} color={COLORS.textMuted}/></View>
-                    <TextInput
-                      style={[styles.input, styles.inputFlex]}
-                      placeholder={f.placeholder}
-                      placeholderTextColor={COLORS.textMuted}
-                      value={form[f.key]}
-                      onChangeText={v => update(f.key, v)}
-                      keyboardType={f.keyboard || 'default'}
-                    />
-                  </View>
-                </View>
-              ))}
+              <PSGCAddressPicker
+                value={psgcAddress}
+                onChange={addr => {
+                  setPsgcAddress(addr);
+                  update('street',   addr.street || '');
+                  update('barangay', addr.barangayName || '');
+                  update('city',     addr.cityName || '');
+                  update('province', addr.provinceName || '');
+                  update('zip_code', addr.zip_code || '');
+                }}
+              />
             </>
           )}
 

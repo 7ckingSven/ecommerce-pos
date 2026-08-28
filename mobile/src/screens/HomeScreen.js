@@ -43,6 +43,11 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
         <Text style={styles.productName} numberOfLines={2}>{product.product_name}</Text>
         {product.brand ? <Text style={styles.productBrand}>{product.brand}</Text> : null}
         <Text style={styles.productCat}>{product.category}</Text>
+        {product.branch_name ? (
+          <View style={styles.branchTag}>
+            <Text style={styles.branchTagText}>🏪 {product.branch_name}</Text>
+          </View>
+        ) : null}
 
         {/* Price */}
         {discountedPrice ? (
@@ -188,7 +193,7 @@ export default function HomeScreen({ navigation }) {
     const ok = await requireLogin('buyNow', { product });
     if (!ok) return;
     // Go to Product Detail (user can choose Add to Cart or Buy Now there)
-    navigation.navigate('ProductDetail', { product });
+    navigation.navigate('ProductDetail', { product, branchId: product.branch_id || null });
   }
 
   function onRefresh() {
@@ -307,7 +312,7 @@ export default function HomeScreen({ navigation }) {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
-              onPress={p => navigation.navigate('ProductDetail', { product: p })}
+              onPress={p => navigation.navigate('ProductDetail', { product: p, branchId: p.branch_id || null })}
               onAddToCart={handleAddToCart}
               onBuyNow={handleBuyNow}
             />

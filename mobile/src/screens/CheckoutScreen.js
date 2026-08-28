@@ -1,10 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { placeOrder, getProfile, updateProfile } from '../services/orderService';
+import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 import { getCustomerId, getCustomer } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
@@ -14,7 +16,7 @@ const PAYMENT_METHODS = [
 ];
 
 export default function CheckoutScreen({ route, navigation }) {
-  const { cartItems, total } = route.params;
+  const { cartItems, total, branchId } = route.params;
 
   const [payment,       setPayment]       = useState('cash_on_delivery');
   const [refNo,         setRefNo]         = useState('');
@@ -23,7 +25,9 @@ export default function CheckoutScreen({ route, navigation }) {
   const [address,       setAddress]       = useState('');
   const [customerName,  setCustomerName]  = useState('');
   const [showAddrModal, setShowAddrModal] = useState(false);
+  const [psgcAddress,   setPsgcAddress]   = useState({});
   const [editAddress,   setEditAddress]   = useState('');
+  // Address handled via PSGCAddressPicker
   const [savingAddr,    setSavingAddr]    = useState(false);
 
   useEffect(() => {
@@ -40,6 +44,13 @@ export default function CheckoutScreen({ route, navigation }) {
     }
     init();
   }, []);
+
+  // Reload address when screen comes back into focus (e.g. after editing in ProfileScreen)
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [])
+  );
 
   async function loadProfile() {
     try {
@@ -76,19 +87,29 @@ export default function CheckoutScreen({ route, navigation }) {
   // ─── Open Address Edit Modal ──────────────────────────
   function openAddressModal() {
     setEditAddress(address);
+    const parts = address.split('|');
+    setPsgcAddress({
+      street:       parts[0]?.trim() || '',
+      barangayName: parts[1]?.trim() || '',
+      cityName:     parts[2]?.trim() || '',
+      provinceName: parts[3]?.trim() || '',
+      regionName:   parts[4]?.trim() || '',
+      zip_code:     parts[5]?.trim() || '',
+    });
     setShowAddrModal(true);
   }
 
   // ─── Save Address ─────────────────────────────────────
   async function saveAddress() {
-    if (!editAddress.trim()) {
+    const combined = psgcToAddressString(psgcAddress) || editAddress;
+    if (!combined) {
       Alert.alert('Required', 'Please enter your delivery address.');
       return;
     }
     setSavingAddr(true);
     try {
-      await updateProfile({ address: editAddress.trim() });
-      setAddress(editAddress.trim());
+      await updateProfile({ address: combined });
+      setAddress(combined);
       setShowAddrModal(false);
       Alert.alert('Success', 'Address updated successfully!');
     } catch (e) {
@@ -152,7 +173,7 @@ export default function CheckoutScreen({ route, navigation }) {
                   price:      finalPrice, // use discounted price if applicable
                 };
               });
-              const res = await placeOrder(items, payment, refNo.trim());
+              const res = await placeOrder(items, payment, refNo.trim(), branchId || cartItems[0]?.branch_id || null);
               Alert.alert(
                 '🎉 Order Placed!',
                 `Your order has been placed successfully!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
@@ -212,7 +233,7 @@ export default function CheckoutScreen({ route, navigation }) {
             <View style={styles.addressWrap}>
               <View style={styles.addressInfo}>
                 <Text style={styles.addressName}>{customerName}</Text>
-                <Text style={styles.addressText}>{address}</Text>
+                <Text style={styles.addressText}>{address.split('|').map(s => s.trim()).filter(Boolean).join(', ')}</Text>
               </View>
               <View style={styles.addressActions}>
                 <TouchableOpacity style={styles.addrActionBtn} onPress={openAddressModal}>
@@ -367,17 +388,12 @@ export default function CheckoutScreen({ route, navigation }) {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.modalLabel}>Delivery Address</Text>
-            <TextInput
-              style={styles.modalInput}
-              placeholder="House/Unit No., Street, Barangay, City, Province"
-              placeholderTextColor={COLORS.textMuted}
-              value={editAddress}
-              onChangeText={setEditAddress}
-              multiline
-              numberOfLines={4}
-              textAlignVertical="top"
-              autoFocus
+            <PSGCAddressPicker
+              value={psgcAddress}
+              onChange={addr => {
+                setPsgcAddress(addr);
+                setEditAddress(psgcToAddressString(addr));
+              }}
             />
 
             <View style={styles.modalBtns}>

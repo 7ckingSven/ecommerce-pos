@@ -18,10 +18,15 @@ function getDiscountedPrice(product) {
 }
 
 export default function ProductDetailScreen({ route, navigation }) {
-  const { product }      = route.params;
+  const { product, branchId } = route.params;
   const [quantity, setQty]   = useState(1);
   const [loadingCart, setLoadingCart] = useState(false);
-  const [loadingBuy, setLoadingBuy] = useState(false);
+  const [loadingBuy,  setLoadingBuy]  = useState(false);
+  const [activeIdx,   setActiveIdx]   = useState(0);
+  const { width } = Dimensions.get('window');
+  const images = product.image_urls?.length
+    ? product.image_urls
+    : product.image_url ? [product.image_url] : [];
 
   const discountedPrice = getDiscountedPrice(product);
   const hasDiscount     = discountedPrice !== null;
@@ -64,7 +69,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
     setLoadingCart(true);
     try {
-      await addToCart(product.product_id, quantity);
+      await addToCart(product.product_id, quantity, branchId || product.branch_id || null);
       Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
         { text: 'Continue Shopping', onPress: () => navigation.goBack() },
         { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
@@ -113,6 +118,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       cartItems: buyNowItem,
       total:     buyNowTotal,
       isBuyNow:  true,
+      branchId:  branchId || product.branch_id || null,
     });
   }
 
@@ -127,55 +133,43 @@ export default function ProductDetailScreen({ route, navigation }) {
       <ScrollView showsVerticalScrollIndicator={false}>
 
         {/* Product Image Carousel */}
-        {(() => {
-          const images = product.image_urls?.length
-            ? product.image_urls
-            : product.image_url ? [product.image_url] : [];
-          const [activeIdx, setActiveIdx] = useState(0);
-          const { width } = Dimensions.get('window');
-
-          if (images.length === 0) {
-            return (
-              <View style={styles.productImgPlaceholder}>
-                <Feather name="shopping-bag" size={60} color={COLORS.primary}/>
-              </View>
-            );
-          }
-
-          return (
-            <View style={{ width:'100%', height:280 }}>
-              <FlatList
-                data={images}
-                keyExtractor={(_, i) => String(i)}
-                horizontal
-                pagingEnabled
-                showsHorizontalScrollIndicator={false}
-                onMomentumScrollEnd={e => {
-                  const idx = Math.round(e.nativeEvent.contentOffset.x / width);
-                  setActiveIdx(idx);
-                }}
-                renderItem={({ item }) => (
-                  <Image
-                    source={{ uri: item }}
-                    style={{ width, height:280 }}
-                    resizeMode="cover"
-                  />
-                )}
-              />
-              {/* Dots indicator */}
-              {images.length > 1 && (
-                <View style={styles.dotsWrap}>
-                  {images.map((_, i) => (
-                    <View
-                      key={i}
-                      style={[styles.dot, i === activeIdx && styles.dotActive]}
-                    />
-                  ))}
-                </View>
+        {images.length === 0 ? (
+          <View style={styles.productImgPlaceholder}>
+            <Feather name="shopping-bag" size={60} color={COLORS.primary}/>
+          </View>
+        ) : (
+          <View style={{ width:'100%', height:280 }}>
+            <FlatList
+              data={images}
+              keyExtractor={(_, i) => String(i)}
+              horizontal
+              pagingEnabled
+              showsHorizontalScrollIndicator={false}
+              onMomentumScrollEnd={e => {
+                const idx = Math.round(e.nativeEvent.contentOffset.x / width);
+                setActiveIdx(idx);
+              }}
+              renderItem={({ item }) => (
+                <Image
+                  source={{ uri: item }}
+                  style={{ width, height:280 }}
+                  resizeMode="cover"
+                />
               )}
-            </View>
-          );
-        })()}
+            />
+            {/* Dots indicator */}
+            {images.length > 1 && (
+              <View style={styles.dotsWrap}>
+                {images.map((_, i) => (
+                  <View
+                    key={i}
+                    style={[styles.dot, i === activeIdx && styles.dotActive]}
+                  />
+                ))}
+              </View>
+            )}
+          </View>
+        )}
 
         <View style={styles.content}>
 
@@ -188,7 +182,12 @@ export default function ProductDetailScreen({ route, navigation }) {
               ? <View style={styles.tag}><Text style={styles.tagText}>{product.brand}</Text></View>
               : null
             }
-            {hasDiscount && (
+            {product.branch_name ? (
+              <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
+                <Text style={styles.tagText}>🏪 {product.branch_name}</Text>
+              </View>
+            ) : null}
+          {hasDiscount && (
               <View style={styles.discountTag}>
                 <Feather name="tag" size={10} color={COLORS.white} style={{ marginRight: 3 }}/>
                 <Text style={styles.discountTagText}>{disc.discount_name} — {disc.percentage}% OFF</Text>

@@ -11,10 +11,31 @@ export async function getOrders() {
   return res.data;
 }
 
-export async function placeOrder(cartItems, paymentMethod, refNo = '') {
+export async function placeOrder(cartItems, paymentMethod, refNo = '', branchId = null) {
   const customerId = await getCustomerId();
   const res = await api.post('/orders',
-    { cart_items: cartItems, payment_method: paymentMethod, ref_no: refNo },
+    { cart_items: cartItems, payment_method: paymentMethod, ref_no: refNo, branch_id: branchId },
+    { headers: headers(customerId) }
+  );
+  return res.data;
+}
+
+export async function getProfile() {
+  const customerId = await getCustomerId();
+  const res = await api.get('/customer/profile', { headers: headers(customerId) });
+  return res.data;
+}
+
+export async function updateProfile(data) {
+  const customerId = await getCustomerId();
+  const res = await api.put('/customer/profile', data, { headers: headers(customerId) });
+  return res.data;
+}
+
+export async function changePassword(oldPassword, newPassword) {
+  const customerId = await getCustomerId();
+  const res = await api.put('/customer/change-password',
+    { old_password: oldPassword, new_password: newPassword },
     { headers: headers(customerId) }
   );
   return res.data;
