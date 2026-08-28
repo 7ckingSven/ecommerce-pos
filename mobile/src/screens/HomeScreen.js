@@ -177,22 +177,15 @@ export default function HomeScreen({ navigation }) {
   async function handleAddToCart(product) {
     const ok = await requireLogin('addToCart', { product_id: product.product_id });
     if (!ok) return;
-    try {
-      await addToCart(product.product_id);
-      await refreshCartCount(); // update global badge on header + bottom tab
-      // Show popup toast
-      Alert.alert('Added to Cart', `${product.product_name} has been added to your cart.`);
-    } catch (e) {
-      console.error('Add to cart error:', e);
-      Alert.alert('Error', 'Failed to add item to cart.');
-    }
+    // Go to ProductDetail so customer can select option groups first
+    navigation.navigate('ProductDetail', { product, branchId: product.branch_id || null });
   }
 
   // ─── Buy Now (requires login → ProductDetail) ────────
   async function handleBuyNow(product) {
     const ok = await requireLogin('buyNow', { product });
     if (!ok) return;
-    // Go to Product Detail (user can choose Add to Cart or Buy Now there)
+    // Navigate to ProductDetail — customer selects options then buys
     navigation.navigate('ProductDetail', { product, branchId: product.branch_id || null });
   }
 
