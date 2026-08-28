@@ -126,7 +126,14 @@ export default function OrdersScreen({ navigation }) {
               <View style={styles.divider}/>
               {(item.order_item || []).map((oi, idx) => (
                 <View key={idx} style={styles.orderItem}>
-                  <Text style={styles.orderItemName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
+                  <View style={{ flex:1 }}>
+                    <Text style={styles.orderItemName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
+                    {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
+                      <Text style={styles.orderItemOptions} numberOfLines={1}>
+                        {Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                      </Text>
+                    )}
+                  </View>
                   <Text style={styles.orderItemQtyPrice}>x{oi.quantity} · ₱{(Number(oi.price) * oi.quantity).toFixed(2)}</Text>
                 </View>
               ))}
@@ -231,6 +238,15 @@ export default function OrdersScreen({ navigation }) {
                     <View style={{ flex:1 }}>
                       <Text style={styles.detailItemName}>{oi.product?.product_name || '—'}</Text>
                       <Text style={styles.detailItemQty}>x{oi.qty || oi.quantity}</Text>
+                      {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
+                        <View style={{ flexDirection:'row', flexWrap:'wrap', gap:4, marginTop:4 }}>
+                          {Object.entries(oi.selected_options).map(([k,v], i) => (
+                            <View key={i} style={styles.optionChip}>
+                              <Text style={styles.optionChipText}>{k}: {v}</Text>
+                            </View>
+                          ))}
+                        </View>
+                      )}
                     </View>
                     <Text style={styles.detailItemPrice}>₱{(Number(oi.price) * Number(oi.qty || oi.quantity)).toFixed(2)}</Text>
                   </View>
@@ -330,6 +346,9 @@ const styles = StyleSheet.create({
   detailRow:            { flexDirection:'row', justifyContent:'space-between', marginBottom:6 },
   detailLabel:          { fontSize:13, color: COLORS.textMuted },
   detailValue:          { fontSize:13, color: COLORS.dark, fontWeight:'500', flex:1, textAlign:'right', textTransform:'capitalize' },
+  optionChip:           { backgroundColor:'rgba(22,163,74,0.1)', borderRadius:4, paddingHorizontal:6, paddingVertical:2 },
+  optionChipText:       { fontSize:10, color: COLORS.primary, fontWeight:'600' },
+  orderItemOptions:     { fontSize:11, color: COLORS.primary, marginTop:2 },
   detailItemRow:        { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical:6, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
   detailItemName:       { fontSize:13, color: COLORS.dark, fontWeight:'500' },
   detailItemQty:        { fontSize:11, color: COLORS.textMuted, marginTop:2 },

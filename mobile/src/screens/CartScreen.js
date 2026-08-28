@@ -6,6 +6,7 @@ import {
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getCart, updateCartItem, removeFromCart } from '../services/cartService';
+import api from '../services/api';
 import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
@@ -107,6 +108,11 @@ export default function CartScreen({ navigation }) {
     } else {
       handleUpdateQty(cartId, num, maxStock);
     }
+  }
+
+  // ─── Update Cart Item Options ────────────────────────
+  async function updateCartItemOptions(cartId, options) {
+    await api.put(`/cart/${cartId}`, { selected_options: options });
   }
 
   // ─── Remove ───────────────────────────────────────────
@@ -249,9 +255,25 @@ export default function CartScreen({ navigation }) {
                       {product?.product_name || '—'}
                     </Text>
                     {product?.brand
-                      ? <Text style={styles.itemBrand}>{item.product.brand}</Text>
+                      ? <Text style={styles.itemBrand}>{product.brand}</Text>
                       : null
                     }
+
+                    {/* Selected Options + Edit Button */}
+                    {item.selected_options && Object.keys(item.selected_options).length > 0 && (
+                      <TouchableOpacity
+                        style={styles.optionEditBtn}
+                        onPress={() => {
+                          setEditItem(item);
+                          setEditOptions(item.selected_options || {});
+                        }}
+                      >
+                        <Text style={styles.optionEditText}>
+                          {Object.entries(item.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                        </Text>
+                        <Feather name="chevron-down" size={11} color={COLORS.primary}/>
+                      </TouchableOpacity>
+                    )}
 
                     {/* Price */}
                     {disc ? (
@@ -330,6 +352,76 @@ export default function CartScreen({ navigation }) {
           </View>
         </>
       )}
+      {/* ─── Edit Options Modal ─── */}
+      <Modal
+        visible={!!editItem}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setEditItem(null)}
+      >
+        <View style={styles.optModalOverlay}>
+          <View style={styles.optModalCard}>
+            <View style={styles.optModalHeader}>
+              <Text style={styles.optModalTitle}>Edit Options</Text>
+              <TouchableOpacity onPress={() => setEditItem(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+
+            {/* Product name */}
+            <Text style={styles.optModalProduct} numberOfLines={1}>
+              {Array.isArray(editItem?.product) ? editItem.product[0]?.product_name : editItem?.product?.product_name}
+            </Text>
+
+            {/* Option Groups */}
+            {(editItem?.product?.option_groups || []).map((group, gi) => (
+              <View key={gi} style={styles.optGroup}>
+                <Text style={styles.optGroupLabel}>{group.label}</Text>
+                <View style={styles.optChoicesRow}>
+                  {group.choices.map((choice, ci) => {
+                    const isSelected = editOptions[group.label] === choice;
+                    return (
+                      <TouchableOpacity
+                        key={ci}
+                        style={[styles.optChip, isSelected && styles.optChipSelected]}
+                        onPress={() => setEditOptions(prev => ({ ...prev, [group.label]: choice }))}
+                      >
+                        <Text style={[styles.optChipText, isSelected && styles.optChipTextSelected]}>
+                          {choice}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+              </View>
+            ))}
+
+            {/* Confirm Button */}
+            <TouchableOpacity
+              style={styles.optConfirmBtn}
+              onPress={async () => {
+                if (editItem) {
+                  // Update selected_options via API
+                  try {
+                    await updateCartItemOptions(editItem.cart_id, editOptions);
+                    setCart(prev => prev.map(i =>
+                      i.cart_id === editItem.cart_id
+                        ? { ...i, selected_options: editOptions }
+                        : i
+                    ));
+                    setEditItem(null);
+                  } catch (e) {
+                    Alert.alert('Error', 'Failed to update options.');
+                  }
+                }
+              }}
+            >
+              <Text style={styles.optConfirmText}>Confirm</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -388,6 +480,22 @@ const styles = StyleSheet.create({
   checkoutBtnText:     { color: COLORS.white, fontWeight: '700', fontSize: 15 },
 
   // Empty
+  optionEditBtn:    { flexDirection:'row', alignItems:'center', gap:4, marginTop:4, backgroundColor:'rgba(22,163,74,0.08)', borderRadius:6, paddingHorizontal:8, paddingVertical:4, alignSelf:'flex-start', borderWidth:1, borderColor:'rgba(22,163,74,0.2)' },
+  optionEditText:   { fontSize:11, color: COLORS.primary, fontWeight:'600', flex:1 },
+  optModalOverlay:  { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
+  optModalCard:     { backgroundColor: COLORS.white, borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, maxHeight:'80%' },
+  optModalHeader:   { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:8 },
+  optModalTitle:    { fontSize:16, fontWeight:'700', color: COLORS.dark },
+  optModalProduct:  { fontSize:13, color: COLORS.textMuted, marginBottom:16 },
+  optGroup:         { marginBottom:16 },
+  optGroupLabel:    { fontSize:13, fontWeight:'700', color: COLORS.dark, marginBottom:8 },
+  optChoicesRow:    { flexDirection:'row', flexWrap:'wrap', gap:8 },
+  optChip:          { borderRadius:999, paddingHorizontal:14, paddingVertical:7, borderWidth:1.5, borderColor: COLORS.grayBorder, backgroundColor: COLORS.white },
+  optChipSelected:  { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
+  optChipText:      { fontSize:13, color: COLORS.dark, fontWeight:'500' },
+  optChipTextSelected: { color: COLORS.white, fontWeight:'700' },
+  optConfirmBtn:    { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding:14, alignItems:'center', marginTop:8 },
+  optConfirmText:   { color: COLORS.white, fontWeight:'700', fontSize:14 },
   emptyWrap:           { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: SPACING.sm },
   emptyTitle:          { fontSize: 18, fontWeight: '700', color: COLORS.dark },
   emptyText:           { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center' },

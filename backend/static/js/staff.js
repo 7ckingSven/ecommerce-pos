@@ -684,17 +684,58 @@ function renderStaffOrders(orders) {
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
           <td>${badge(o.status)}</td>
-          <td>
+          <td style="display:flex;gap:6px;align-items:center;">
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
               onchange="updateOrderStatus('${o.order_id}', this.value)">
-              <option value="pending"    ${o.status==='pending'    ?'selected':''}>Pending</option>
-              <option value="processing" ${o.status==='processing' ?'selected':''}>Processing</option>
-              <option value="completed"  ${o.status==='completed'  ?'selected':''}>Completed</option>
-              <option value="cancelled"  ${o.status==='cancelled'  ?'selected':''}>Cancelled</option>
+              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
+              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
+              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
+              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
+              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
             </select>
+            <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
+}
+
+// ─── View Staff Order Items Modal ─────────────────────
+function viewStaffOrderItems(order) {
+  const items = order.order_item || [];
+  const content = items.length
+    ? items.map(i => {
+        const opts = i.selected_options && Object.keys(i.selected_options).length > 0
+          ? Object.entries(i.selected_options).map(([k,v]) => `<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">${k}: ${v}</span>`).join(' ')
+          : '<span style="color:var(--text-muted);font-size:11px;">No options</span>';
+        return `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <div style="font-size:13px;font-weight:600;">${i.product?.product_name || '—'}</div>
+                <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${opts}</div>
+              </div>
+              <div style="text-align:right;margin-left:12px;">
+                <div style="font-size:13px;font-weight:700;">₱${Number(i.price * i.qty).toFixed(2)}</div>
+                <div style="font-size:11px;color:var(--text-muted);">x${i.qty} @ ₱${Number(i.price).toFixed(2)}</div>
+              </div>
+            </div>
+          </div>`;
+      }).join('')
+    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
+
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  document.getElementById('modalTitle').textContent = `Order #${shortId(order.order_id)} — ${customer}`;
+  document.getElementById('modalBody').innerHTML = `
+    ${content}
+    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
+      <span style="font-weight:700;">Total</span>
+      <span style="font-weight:700;color:#16a34a;">₱${Number(order.total).toFixed(2)}</span>
+    </div>
+  `;
+  document.getElementById('modalOverlay').classList.add('open');
+  document.getElementById('modal').classList.add('open');
 }
 
 function filterStaffOrders(status) {
@@ -832,8 +873,13 @@ async function openRequestModal() {
   if (!invProducts.length) await loadInventory();
   const sel = document.getElementById('reqProduct');
   if (sel) {
+    // Use branch_stock quantity for this branch, fallback to product.quantity
     sel.innerHTML = '<option value="">Select product</option>' +
-      invProducts.map(p => `<option value="${p.product_id}" data-stock="${p.quantity}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+      invProducts.map(p => {
+        const branchStock = p.branch_stock?.find(bs => bs.branch_id === staffBranchId);
+        const stock = branchStock ? branchStock.quantity : p.quantity || 0;
+        return `<option value="${p.product_id}" data-stock="${stock}">${p.product_name} (Stock: ${stock})</option>`;
+      }).join('');
   }
   document.getElementById('requestModalOverlay')?.classList.add('open');
   document.getElementById('requestModal')?.classList.add('open');
@@ -848,8 +894,8 @@ function closeRequestModal() {
 
 function updateCurrentStock(sel) {
   const opt   = sel.options[sel.selectedIndex];
-  const stock = opt?.dataset?.stock || '';
-  document.getElementById('reqCurrentStock').value = stock ? `${stock} units` : '';
+  const stock = opt?.dataset?.stock;
+  document.getElementById('reqCurrentStock').value = stock !== undefined && stock !== '' ? `${stock} units` : '';
 }
 
 async function submitRequest(e) {

@@ -255,10 +255,11 @@ export default function CheckoutScreen({ route, navigation }) {
                 const origPrice  = Number(i.product?.price || 0);
                 const finalPrice = disc ? origPrice * (1 - disc.percentage / 100) : origPrice;
                 return {
-                  product_id: i.product_id || i.product?.product_id,
-                  cart_id:    (i.cart_id && i.cart_id !== 'buy_now') ? i.cart_id : null,
-                  quantity:   i.quantity,
-                  price:      finalPrice, // use discounted price if applicable
+                  product_id:       i.product_id || i.product?.product_id,
+                  cart_id:          (i.cart_id && i.cart_id !== 'buy_now') ? i.cart_id : null,
+                  quantity:         i.quantity,
+                  price:            finalPrice,
+                  selected_options: i.selected_options || {},
                 };
               });
               const res = await placeOrder(items, payment, refNo.trim(), branchId || cartItems[0]?.branch_id || null, shippingFee);
@@ -357,6 +358,11 @@ export default function CheckoutScreen({ route, navigation }) {
                   <Text style={styles.orderItemName} numberOfLines={1}>
                     {item.product?.product_name || '—'}
                   </Text>
+                  {item.selected_options && Object.keys(item.selected_options).length > 0 && (
+                    <Text style={styles.orderItemOptions}>
+                      {Object.entries(item.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                    </Text>
+                  )}
                   <Text style={styles.orderItemQty}>x{item.quantity}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
@@ -566,6 +572,7 @@ const styles = StyleSheet.create({
   // Order Items
   orderItem:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   orderItemLeft:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
+  orderItemOptions:    { fontSize: 11, color: COLORS.primary, marginTop: 2 },
   orderItemName:      { fontSize: 13, color: COLORS.dark, flex: 1 },
   orderItemQty:       { fontSize: 12, color: COLORS.textMuted, fontWeight: '600' },
   orderItemPrice:     { fontSize: 13, fontWeight: '700', color: COLORS.dark },

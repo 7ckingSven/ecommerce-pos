@@ -77,7 +77,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
     setLoadingCart(true);
     try {
-      await addToCart(product.product_id, quantity, branchId || product.branch_id || null);
+      await addToCart(product.product_id, quantity, branchId || product.branch_id || null, selectedOptions);
       Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
         { text: 'Continue Shopping', onPress: () => navigation.goBack() },
         { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
@@ -115,9 +115,10 @@ export default function ProductDetailScreen({ route, navigation }) {
       : product.discount || null;
 
     const buyNowItem = [{
-      cart_id:    'buy_now',
-      product_id: product.product_id,
+      cart_id:          'buy_now',
+      product_id:       product.product_id,
       quantity,
+      selected_options: selectedOptions,
       product: {
         product_name: product.product_name,
         price:        Number(product.price),
@@ -125,6 +126,8 @@ export default function ProductDetailScreen({ route, navigation }) {
         image_urls:   product.image_urls || [],
         brand:        product.brand,
         discount:     normalizedDiscount,
+        net_weight:   product.net_weight || 0,
+        net_weight_unit: product.net_weight_unit || 'kg',
       },
     }];
     const buyNowTotal = effectivePrice * quantity;

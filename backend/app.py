@@ -686,8 +686,11 @@ def api_update_cart(cart_id):
         return jsonify({'error': 'Unauthorized'}), 401
     data     = request.get_json()
     quantity = data.get('quantity', 1)
+    updates  = {'quantity': quantity}
+    if 'selected_options' in data:
+        updates['selected_options'] = data['selected_options']
     try:
-        res = supabase.table('cart').update({'quantity': quantity}).eq('cart_id', cart_id).eq('customer_id', customer_id).execute()
+        res = supabase.table('cart').update(updates).eq('cart_id', cart_id).eq('customer_id', customer_id).execute()
         return jsonify({'message': 'Cart updated.', 'cart': res.data[0]}), 200
     except Exception as e:
         print(f"API update cart error: {e}")
@@ -973,7 +976,7 @@ def staff_create_stock_request():
 def admin_get_stock_requests():
     try:
         res = supabase.table('stock_request').select(
-            '*, product(product_name, quantity), staff(fname, lname), branch(branch_name)'
+            '*, product(product_name, quantity, branch_stock(branch_id, quantity, branch(branch_name))), staff(fname, lname), branch(branch_name)'
         ).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:

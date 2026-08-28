@@ -967,6 +967,51 @@ async function loadOrders() {
   } catch (e) { console.error('Orders error:', e); }
 }
 
+
+// ─── View Order Items Modal ───────────────────────────
+function viewOrderItems(order) {
+  const items   = order.order_item || [];
+  const content = items.length
+    ? items.map(i => {
+        const opts = i.selected_options && Object.keys(i.selected_options).length > 0
+          ? Object.entries(i.selected_options).map(([k,v]) => `<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">${k}: ${v}</span>`).join(' ')
+          : '<span style="color:var(--text-muted);font-size:11px;">No options selected</span>';
+        return `
+          <div style="padding:10px 0;border-bottom:1px solid var(--border);">
+            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+              <div>
+                <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${i.product?.product_name || '—'}</div>
+                <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${opts}</div>
+              </div>
+              <div style="text-align:right;margin-left:12px;">
+                <div style="font-size:13px;font-weight:700;">₱${Number(i.price * i.qty).toFixed(2)}</div>
+                <div style="font-size:11px;color:var(--text-muted);">x${i.qty} @ ₱${Number(i.price).toFixed(2)}</div>
+              </div>
+            </div>
+          </div>`;
+      }).join('')
+    : '<p style="color:var(--text-muted);text-align:center;">No items found</p>';
+
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+
+  showModal(`
+    <div style="padding:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Order Items</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#${shortId(order.order_id)} · ${customer}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);">✕</button>
+      </div>
+      ${content}
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
+        <span style="font-weight:700;">Total</span>
+        <span style="font-weight:700;color:#16a34a;">₱${Number(order.total).toFixed(2)}</span>
+      </div>
+    </div>
+  `);
+}
+
 function renderOrders(orders) {
   document.getElementById('ordersBody').innerHTML = orders.length
     ? orders.map(o => `
@@ -979,7 +1024,7 @@ function renderOrders(orders) {
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
           <td>${badge(o.status)}</td>
-          <td>
+          <td style="display:flex;gap:6px;align-items:center;">
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
               onchange="updateOrderStatus('${o.order_id}', this.value)">
               <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
@@ -988,6 +1033,9 @@ function renderOrders(orders) {
               <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
               <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
             </select>
+            <button class="btn-icon" onclick="viewOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
@@ -1689,7 +1737,13 @@ function renderStockRequests(requests) {
     ? requests.map(r => `
         <tr>
           <td><strong>${r.product?.product_name || '—'}</strong></td>
-          <td>${r.product?.quantity ?? '—'} units</td>
+          <td>${(() => {
+            const bs = r.product?.branch_stock || [];
+            const branchBs = bs.find(b => b.branch_id === r.branch_id);
+            if (branchBs) return `${branchBs.quantity} units`;
+            const total = bs.reduce((s, b) => s + Number(b.quantity), 0);
+            return total > 0 ? `${total} units` : `${r.product?.quantity ?? 0} units`;
+          })()}</td>
           <td>${r.quantity_needed} units</td>
           <td>${r.staff ? `${r.staff.fname} ${r.staff.lname}` : '—'}</td>
           <td>${r.branch?.branch_name || '—'}</td>
@@ -1794,15 +1848,43 @@ function addPOItemRow() {
   const row  = document.createElement('div');
   row.style.cssText = 'display:grid;grid-template-columns:1fr 80px 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
-    <select class="form-input form-select po-product" onchange="updatePOTotal()">
-      <option value="">Select product</option>
-      ${allProducts.map(p => `<option value="${p.product_id}">${p.product_name}</option>`).join('')}
-    </select>
+    <div style="display:flex;flex-direction:column;gap:4px;">
+      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();">
+        <option value="">Select product</option>
+        ${allProducts.map(p => {
+          const bs = p.branch_stock || [];
+          const totalStock = bs.length
+            ? bs.reduce((s, b) => s + Number(b.quantity), 0)
+            : Number(p.quantity || 0);
+          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}'>${p.product_name}</option>`;
+        }).join('')}
+      </select>
+      <span class="po-stock-info" style="font-size:11px;color:var(--text-muted);padding-left:4px;"></span>
+    </div>
     <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="updatePOTotal()"/>
     <input type="number" class="form-input po-cost" min="0" step="0.01" placeholder="Unit Cost" oninput="updatePOTotal()"/>
     <button type="button" onclick="this.parentElement.remove();updatePOTotal();" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
   `;
   wrap.appendChild(row);
+}
+
+
+function updatePORowStock(sel) {
+  const opt  = sel.options[sel.selectedIndex];
+  const stock = opt?.dataset?.stock || '0';
+  const bsRaw = opt?.dataset?.bs;
+  let info    = `Current stock: ${stock} units`;
+  if (bsRaw) {
+    try {
+      const bs = JSON.parse(bsRaw);
+      if (bs.length > 1) {
+        info = bs.map(b => `${b.branch?.branch_name || 'Branch'}: ${b.quantity}`).join(' | ');
+      }
+    } catch {}
+  }
+  const row = sel.closest('[style]');
+  const infoEl = row?.querySelector('.po-stock-info');
+  if (infoEl) infoEl.textContent = opt.value ? info : '';
 }
 
 function updatePOTotal() {
