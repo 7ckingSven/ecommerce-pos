@@ -1579,6 +1579,9 @@ def admin_update_product(product_id):
         res = supabase.table('product').update(updates).eq('product_id', product_id).execute()
         return jsonify(res.data[0]), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"PUT product error: {type(e).__name__}: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/products/<product_id>', methods=['DELETE'])
