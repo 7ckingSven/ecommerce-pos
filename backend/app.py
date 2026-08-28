@@ -1224,29 +1224,28 @@ def admin_add_branch_stock():
         existing = supabase.table('branch_stock').select('*').eq('product_id', product_id).eq('branch_id', branch_id).execute()
 
         if existing.data:
-            new_qty = existing.data[0]['quantity'] + quantity
+            qty_before = existing.data[0]['quantity']
+            new_qty    = qty_before + quantity
             supabase.table('branch_stock').update({
                 'quantity':   new_qty,
                 'updated_at': 'now()'
             }).eq('product_id', product_id).eq('branch_id', branch_id).execute()
         else:
+            qty_before = 0
+            new_qty    = quantity
             supabase.table('branch_stock').insert({
                 'product_id': product_id,
                 'branch_id':  branch_id,
                 'quantity':   quantity,
             }).execute()
 
-        # Also record in inventory
-        prod_res   = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
-        qty_before = prod_res.data[0]['quantity'] if prod_res.data else 0
-        qty_after  = qty_before + quantity
-        supabase.table('product').update({'quantity': qty_after}).eq('product_id', product_id).execute()
+        # Record in inventory — use branch_stock qty for before/after, NOT product.quantity
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
             'quantity_added':  quantity,
             'quantity_before': qty_before,
-            'quantity_after':  qty_after,
+            'quantity_after':  new_qty,
             'from_branch_id':  None,  # Restock from supplier — no from branch
             'to_branch_id':    branch_id,
             'note':            'Branch stock added — restock',
@@ -1624,31 +1623,77 @@ def admin_add_inventory():
         if not product_id or qty_change == 0:
             return jsonify({'error': 'Product and quantity are required.'}), 400
 
-        prod_res   = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
-        qty_before = prod_res.data[0]['quantity'] if prod_res.data else 0
-        qty_after  = qty_before + qty_change  # negative for adjustments
+        if inv_type == 'transfer' and from_branch_id:
+            # ── Transfer: move stock from source branch to destination branch ──
+            src = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+            if not src.data or src.data[0]['quantity'] < qty_change:
+                available = src.data[0]['quantity'] if src.data else 0
+                return jsonify({'error': f'Insufficient stock in source branch. Only {available} unit(s) available.'}), 400
 
-        # Prevent stock going below 0
-        if qty_after < 0:
-            return jsonify({'error': f'Insufficient stock. Only {qty_before} unit(s) available.'}), 400
+            qty_before = src.data[0]['quantity']
+            qty_after  = qty_before - qty_change
 
+            # Deduct from source branch
+            supabase.table('branch_stock').update({
+                'quantity':   qty_after,
+                'updated_at': 'now()'
+            }).eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+
+            # Add to destination branch
+            if to_branch_id:
+                dst = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+                if dst.data:
+                    supabase.table('branch_stock').update({
+                        'quantity':   dst.data[0]['quantity'] + qty_change,
+                        'updated_at': 'now()'
+                    }).eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+                else:
+                    supabase.table('branch_stock').insert({
+                        'product_id': product_id,
+                        'branch_id':  to_branch_id,
+                        'quantity':   qty_change,
+                    }).execute()
+
+        else:
+            # ── Restock or adjustment: update to_branch stock only ──
+            if not to_branch_id:
+                return jsonify({'error': 'Destination branch is required for restock/adjustment.'}), 400
+
+            dst = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+            qty_before = dst.data[0]['quantity'] if dst.data else 0
+            qty_after  = qty_before + qty_change
+
+            if qty_after < 0:
+                return jsonify({'error': f'Insufficient stock. Only {qty_before} unit(s) available.'}), 400
+
+            if dst.data:
+                supabase.table('branch_stock').update({
+                    'quantity':   qty_after,
+                    'updated_at': 'now()'
+                }).eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+            else:
+                supabase.table('branch_stock').insert({
+                    'product_id': product_id,
+                    'branch_id':  to_branch_id,
+                    'quantity':   qty_change,
+                }).execute()
+
+            qty_before_log = qty_before
+            qty_after_log  = qty_after
+
+        # Log to inventory table
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
             'quantity_added':  qty_change,
-            'quantity_before': qty_before,
-            'quantity_after':  qty_after,
+            'quantity_before': qty_before if inv_type == 'transfer' else qty_before_log,
+            'quantity_after':  qty_after  if inv_type == 'transfer' else qty_after_log,
             'from_branch_id':  from_branch_id,
             'to_branch_id':    to_branch_id,
             'note':            note,
         }).execute()
 
-        supabase.table('product').update({
-            'quantity':   qty_after,
-            'updated_at': 'now()'
-        }).eq('product_id', product_id).execute()
-
-        return jsonify({'message': 'Stock updated.', 'quantity_after': qty_after}), 201
+        return jsonify({'message': 'Stock updated.'}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -1863,9 +1908,21 @@ def staff_get_orders():
         if limit > 200:
             limit = 200
 
-        res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
-        ).order('created_at', desc=True).limit(limit).execute()
+        staff_id = session.get('staff_id')
+
+        # Get staff's assigned branch
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        query = supabase.table('order').select(
+            'order_id, total, status, order_type, date, created_at, branch_id, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
+        ).order('created_at', desc=True).limit(limit)
+
+        # Filter to this branch's orders only
+        if branch_id:
+            query = query.eq('branch_id', branch_id)
+
+        res = query.execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1979,9 +2036,21 @@ def staff_update_order(order_id):
 @staff_required
 def staff_get_inventory():
     try:
-        res = supabase.table('inventory').select(
+        staff_id = session.get('staff_id')
+
+        # Get staff's assigned branch
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        query = supabase.table('inventory').select(
             '*, product(product_name, category), from_branch:branch!from_branch_id(branch_name), to_branch:branch!to_branch_id(branch_name)'
-        ).order('date', desc=True).execute()
+        )
+
+        # Filter to records involving this branch (as source or destination)
+        if branch_id:
+            query = query.or_(f'to_branch_id.eq.{branch_id},from_branch_id.eq.{branch_id}')
+
+        res = query.order('date', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2000,10 +2069,28 @@ def staff_add_inventory():
         if not product_id or qty_added <= 0:
             return jsonify({'error': 'Product and quantity are required.'}), 400
 
-        prod_res   = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
-        qty_before = prod_res.data[0]['quantity'] if prod_res.data else 0
+        if not to_branch_id:
+            return jsonify({'error': 'Destination branch is required.'}), 400
+
+        # Read current branch_stock for the destination branch
+        dst = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+        qty_before = dst.data[0]['quantity'] if dst.data else 0
         qty_after  = qty_before + qty_added
 
+        # Update destination branch_stock
+        if dst.data:
+            supabase.table('branch_stock').update({
+                'quantity':   qty_after,
+                'updated_at': 'now()'
+            }).eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+        else:
+            supabase.table('branch_stock').insert({
+                'product_id': product_id,
+                'branch_id':  to_branch_id,
+                'quantity':   qty_added,
+            }).execute()
+
+        # Log to inventory table
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
@@ -2014,11 +2101,6 @@ def staff_add_inventory():
             'to_branch_id':    to_branch_id,
             'note':            note,
         }).execute()
-
-        supabase.table('product').update({
-            'quantity':   qty_after,
-            'updated_at': 'now()'
-        }).eq('product_id', product_id).execute()
 
         return jsonify({'message': 'Stock updated.', 'quantity_after': qty_after}), 201
     except Exception as e:

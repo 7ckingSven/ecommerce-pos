@@ -151,7 +151,10 @@ async function loadOverview() {
     const totalSales = payments.reduce((s, p) => s + Number(p.total || 0), 0);
     document.getElementById('statSales').textContent    = peso(totalSales);
 
-    const lowStock = products.filter(p => Number(p.quantity) <= 10);
+    const getTotal = p => p.branch_stock?.length
+      ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
+      : Number(p.quantity);
+    const lowStock = products.filter(p => getTotal(p) <= 10);
     document.getElementById('statLowStock').textContent = lowStock.length;
 
     // Recent Orders
@@ -168,12 +171,18 @@ async function loadOverview() {
 
     // Low Stock Alert
     document.getElementById('lowStockBody').innerHTML = lowStock.length
-      ? lowStock.map(p => `
+      ? lowStock.map(p => {
+          const total = getTotal(p);
+          const branchBreakdown = p.branch_stock?.length
+            ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' / ')
+            : `${total}`;
+          return `
           <tr>
             <td>${p.product_name}</td>
             <td>${p.category}</td>
-            <td><span style="color:#ef4444;font-weight:600;">${p.quantity}</span></td>
-          </tr>`).join('')
+            <td><span style="color:#ef4444;font-weight:600;">${branchBreakdown}</span></td>
+          </tr>`;
+        }).join('')
       : '<tr><td colspan="3" class="table-empty">All products have sufficient stock ✓</td></tr>';
 
   } catch (e) { console.error('Overview error:', e); }
@@ -611,8 +620,11 @@ async function loadInventory() {
     allInventory    = await invRes.json();
     const products  = await prodRes.json();
 
-    // Check low stock products
-    const lowStock = products.filter(p => p.status === 'active' && Number(p.quantity) <= 10);
+    // Check low stock products — use sum of branch_stock quantities as the real total
+    const getBranchTotal = p => p.branch_stock?.length
+      ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
+      : Number(p.quantity);
+    const lowStock = products.filter(p => p.status === 'active' && getBranchTotal(p) <= 10);
     const banner   = document.getElementById('lowStockBanner');
     const bannerText = document.getElementById('lowStockBannerText');
 
@@ -708,17 +720,26 @@ async function filterInventoryType(type, el) {
     try {
       const res      = await fetch('/api/admin/products');
       const products = await res.json();
-      const lowStock = products.filter(p => p.status === 'active' && Number(p.quantity) <= 10);
+      const getBranchTotalF = p => p.branch_stock?.length
+        ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
+        : Number(p.quantity);
+      const lowStock = products.filter(p => p.status === 'active' && getBranchTotalF(p) <= 10);
       document.getElementById('inventoryBody').innerHTML = lowStock.length
         ? `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#ef4444;">⚠️ Low Stock Products (≤ 10 units)</strong></td></tr>` +
-          lowStock.map(p => `
+          lowStock.map(p => {
+            const total = getBranchTotalF(p);
+            const branchBreakdown = p.branch_stock?.length
+              ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(', ')
+              : `${total} units`;
+            return `
             <tr style="background:rgba(239,68,68,0.05);">
               <td><strong>${p.product_name}</strong></td>
               <td>—</td>
-              <td colspan="2"><span style="color:#ef4444;font-weight:700;">${p.quantity} units remaining</span></td>
+              <td colspan="2"><span style="color:#ef4444;font-weight:700;">${branchBreakdown} remaining</span></td>
               <td>${p.category}</td>
               <td colspan="4">—</td>
-            </tr>`).join('')
+            </tr>`;
+          }).join('')
         : '<tr><td colspan="9" class="table-empty">✅ All products have sufficient stock</td></tr>';
     } catch (e) { console.error('Low stock filter error:', e); }
     return;
@@ -739,7 +760,12 @@ async function openAddStockModal() {
 
   const sel = document.getElementById('addStockProduct');
   if (sel) sel.innerHTML = '<option value="">Select product</option>' +
-    allProducts.map(p => `<option value="${p.product_id}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+    allProducts.map(p => {
+      const branchStockLabel = p.branch_stock?.length
+        ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' | ')
+        : `Stock: ${p.quantity}`;
+      return `<option value="${p.product_id}">${p.product_name} (${branchStockLabel})</option>`;
+    }).join('');
 
   const branchSel = document.getElementById('addStockBranch');
   if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
@@ -788,7 +814,12 @@ async function openTransferModal() {
 
   const prodSel = document.getElementById('transferProduct');
   if (prodSel) prodSel.innerHTML = '<option value="">Select product</option>' +
-    allProducts.map(p => `<option value="${p.product_id}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+    allProducts.map(p => {
+      const branchStockLabel = p.branch_stock?.length
+        ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' | ')
+        : `Stock: ${p.quantity}`;
+      return `<option value="${p.product_id}">${p.product_name} (${branchStockLabel})</option>`;
+    }).join('');
 
   const opts = '<option value="">Select branch</option>' +
     allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
@@ -844,7 +875,12 @@ async function openAdjustModal() {
 
   const sel = document.getElementById('adjustProduct');
   if (sel) sel.innerHTML = '<option value="">Select product</option>' +
-    allProducts.map(p => `<option value="${p.product_id}">${p.product_name} (Stock: ${p.quantity})</option>`).join('');
+    allProducts.map(p => {
+      const branchStockLabel = p.branch_stock?.length
+        ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' | ')
+        : `Stock: ${p.quantity}`;
+      return `<option value="${p.product_id}">${p.product_name} (${branchStockLabel})</option>`;
+    }).join('');
 
   const branchSel = document.getElementById('adjustBranch');
   if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
@@ -868,11 +904,15 @@ async function submitAdjust(e) {
   const branchId  = document.getElementById('adjustBranch').value;
   const note      = document.getElementById('adjustNote').value;
 
-  // Find current stock
-  const product   = allProducts.find(p => p.product_id === productId);
+  // Find current stock — check branch-level stock if branchId is set
+  const product = allProducts.find(p => p.product_id === productId);
   if (!product) { showToast('Product not found.', 'error'); return; }
-  if (qty > product.quantity) {
-    showToast(`Cannot deduct ${qty} — only ${product.quantity} units in stock.`, 'error');
+  const branchStock = branchId && product.branch_stock?.length
+    ? product.branch_stock.find(bs => bs.branch_id === branchId)
+    : null;
+  const availableQty = branchStock ? branchStock.quantity : product.quantity;
+  if (qty > availableQty) {
+    showToast(`Cannot deduct ${qty} — only ${availableQty} units in stock for this branch.`, 'error');
     return;
   }
 

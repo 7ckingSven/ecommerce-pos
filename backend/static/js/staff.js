@@ -157,7 +157,11 @@ function populateBranchSelects() {
   // Stock modal branch selects
   ['stockFromBranch', 'stockToBranch'].forEach(id => {
     const el = document.getElementById(id);
-    if (el) el.innerHTML = options;
+    if (el) {
+      el.innerHTML = options;
+      // Default to_branch to staff's own branch
+      if (id === 'stockToBranch' && staffBranchId) el.value = staffBranchId;
+    }
   });
 }
 
@@ -607,11 +611,14 @@ function closeStockModal() {
 
 async function submitStock(e) {
   e.preventDefault();
+  const fromBranch = document.getElementById('stockFromBranch').value;
+  const toBranch   = document.getElementById('stockToBranch').value;
+  if (!toBranch) { showToast('Please select a destination branch.', 'error'); return; }
   const data = {
     product_id:     document.getElementById('stockProduct').value,
     quantity:       parseInt(document.getElementById('stockQty').value),
-    from_branch_id: document.getElementById('stockFromBranch').value,  // ← FK
-    to_branch_id:   document.getElementById('stockToBranch').value,    // ← FK
+    from_branch_id: fromBranch || null,  // null if restock (no source branch)
+    to_branch_id:   toBranch,
     note:           document.getElementById('stockNote').value,
   };
   try {
