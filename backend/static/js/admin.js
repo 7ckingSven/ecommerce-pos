@@ -346,93 +346,112 @@ function closeProductModal() {
   if (pImagesEl) pImagesEl.value = '';
   const existingInput = document.getElementById('pExistingImages');
   if (existingInput) existingInput.value = '[]';
-  const chipsEl = document.getElementById('variantChips');
-  if (chipsEl) chipsEl.innerHTML = '';
-  const varEl = document.getElementById('pVariants');
-  if (varEl) varEl.value = '[]';
-  const varInput = document.getElementById('variantInput');
-  if (varInput) varInput.value = '';
+  optionGroups = [];
+  selectedImageFiles = [];
+  const ogWrap = document.getElementById('optionGroupsWrap');
+  if (ogWrap) ogWrap.innerHTML = '';
+  const ogEl = document.getElementById('pOptionGroups');
+  if (ogEl) ogEl.value = '[]';
+  const nwEl = document.getElementById('pNetWeight');
+  if (nwEl) nwEl.value = '';
+  const previewWrapEl = document.getElementById('imagePreviewsWrap');
+  if (previewWrapEl) previewWrapEl.innerHTML = '';
 }
 
 // ─── Variant Chip Functions ───────────────────────────
 
-function renderVariantChips(variants) {
-  const container = document.getElementById('variantChips');
-  if (!container) return;
-  container.innerHTML = variants.map((v, i) => `
-    <span onclick="removeVariantChip(${i})" style="
-      display:inline-flex;align-items:center;gap:4px;
-      background:rgba(22,163,74,0.12);color:#16a34a;
-      border:1px solid rgba(22,163,74,0.3);
-      border-radius:999px;padding:4px 10px;font-size:12px;
-      font-weight:600;cursor:pointer;user-select:none;
-    " title="Click to remove">
-      ${v} <span style="font-size:14px;line-height:1;">&times;</span>
-    </span>
+// ─── Option Group Functions ───────────────────────────
+
+let optionGroups = [];
+
+function renderOptionGroups() {
+  const wrap = document.getElementById('optionGroupsWrap');
+  if (!wrap) return;
+  wrap.innerHTML = optionGroups.map((g, gi) => `
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--surface-1);margin-bottom:4px;">
+      <div style="display:flex;gap:8px;margin-bottom:8px;align-items:center;">
+        <input
+          type="text"
+          class="form-input"
+          placeholder="Group label (e.g. Size, Color)"
+          value="${g.label}"
+          oninput="updateGroupLabel(${gi}, this.value)"
+          style="flex:1;"
+        />
+        <button type="button" onclick="removeOptionGroup(${gi})"
+          style="background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;white-space:nowrap;">
+          Remove
+        </button>
+      </div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;">
+        ${g.choices.map((c, ci) => `
+          <span onclick="removeChoice(${gi}, ${ci})" style="
+            display:inline-flex;align-items:center;gap:4px;
+            background:rgba(22,163,74,0.12);color:#16a34a;
+            border:1px solid rgba(22,163,74,0.3);
+            border-radius:999px;padding:4px 10px;font-size:12px;
+            font-weight:600;cursor:pointer;"
+            title="Click to remove">
+            ${c} &times;
+          </span>`).join('')}
+      </div>
+      <div style="display:flex;gap:8px;">
+        <input
+          type="text"
+          class="form-input"
+          placeholder="Add choice (e.g. XS, Red...)"
+          id="choiceInput_${gi}"
+          style="flex:1;font-size:13px;"
+          onkeydown="if(event.key==='Enter'){event.preventDefault();addChoice(${gi});}"
+        />
+        <button type="button" onclick="addChoice(${gi})"
+          class="btn btn-cancel" style="white-space:nowrap;font-size:12px;">
+          + Add
+        </button>
+      </div>
+    </div>
   `).join('');
+  const el = document.getElementById('pOptionGroups');
+  if (el) el.value = JSON.stringify(optionGroups);
 }
 
-function addVariantChip() {
-  const input   = document.getElementById('variantInput');
-  const val     = input.value.trim();
-  if (!val) return;
-  const current = JSON.parse(document.getElementById('pVariants').value || '[]');
-  if (current.includes(val)) { input.value = ''; return; }
-  current.push(val);
-  document.getElementById('pVariants').value = JSON.stringify(current);
-  renderVariantChips(current);
-  input.value = '';
-  input.focus();
+function addOptionGroup() {
+  optionGroups.push({ label: '', choices: [] });
+  renderOptionGroups();
 }
 
-function removeVariantChip(index) {
-  const current = JSON.parse(document.getElementById('pVariants').value || '[]');
-  current.splice(index, 1);
-  document.getElementById('pVariants').value = JSON.stringify(current);
-  renderVariantChips(current);
+function removeOptionGroup(gi) {
+  optionGroups.splice(gi, 1);
+  renderOptionGroups();
 }
 
-
-// ─── Variant Chip Functions ───────────────────────────
-
-function renderVariantChips(variants) {
-  const container = document.getElementById('variantChips');
-  if (!container) return;
-  container.innerHTML = (variants || []).map((v, i) => `
-    <span onclick="removeVariantChip(${i})" style="
-      display:inline-flex;align-items:center;gap:4px;
-      background:rgba(22,163,74,0.12);color:#16a34a;
-      border:1px solid rgba(22,163,74,0.3);
-      border-radius:999px;padding:4px 10px;font-size:12px;
-      font-weight:600;cursor:pointer;user-select:none;"
-      title="Click to remove">
-      ${v} <span style="font-size:14px;">&times;</span>
-    </span>
-  `).join('');
+function updateGroupLabel(gi, val) {
+  optionGroups[gi].label = val;
+  const el = document.getElementById('pOptionGroups');
+  if (el) el.value = JSON.stringify(optionGroups);
 }
 
-function addVariantChip() {
-  const input = document.getElementById('variantInput');
+function addChoice(gi) {
+  const input = document.getElementById(`choiceInput_${gi}`);
   if (!input) return;
   const val = input.value.trim();
   if (!val) return;
-  const varEl = document.getElementById('pVariants');
-  const current = JSON.parse(varEl?.value || '[]');
-  if (current.includes(val)) { input.value = ''; return; }
-  current.push(val);
-  if (varEl) varEl.value = JSON.stringify(current);
-  renderVariantChips(current);
+  if (!optionGroups[gi].choices.includes(val)) {
+    optionGroups[gi].choices.push(val);
+    renderOptionGroups();
+  }
   input.value = '';
-  input.focus();
 }
 
-function removeVariantChip(index) {
-  const varEl = document.getElementById('pVariants');
-  const current = JSON.parse(varEl?.value || '[]');
-  current.splice(index, 1);
-  if (varEl) varEl.value = JSON.stringify(current);
-  renderVariantChips(current);
+function removeChoice(gi, ci) {
+  optionGroups[gi].choices.splice(ci, 1);
+  renderOptionGroups();
 }
+
+// Legacy variant functions — kept for compatibility
+function renderVariantChips(variants) {}
+function addVariantChip() {}
+function removeVariantChip(index) {}
 
 
 async function editProduct(id) {
@@ -459,13 +478,10 @@ async function submitProduct(e) {
   formData.append('price',         document.getElementById('pPrice').value);
   formData.append('quantity',      '0'); // Stock managed via Inventory
 
-  // Multiple images
-  const pImagesEl = document.getElementById('pImages');
-  if (pImagesEl?.files?.length) {
-    Array.from(pImagesEl.files).slice(0, 20).forEach(file => {
-      formData.append('images', file);
-    });
-  }
+  // Multiple images — use selectedImageFiles array (supports removal)
+  selectedImageFiles.forEach(file => {
+    formData.append('images', file);
+  });
   // Keep existing images not removed
   const existingInput = document.getElementById('pExistingImages');
   if (existingInput) formData.append('existing_images', existingInput.value);
@@ -473,7 +489,10 @@ async function submitProduct(e) {
   formData.append('description',   document.getElementById('pDescription').value);
   formData.append('discount_id',   document.getElementById('pDiscount').value);
   formData.append('available_at',  document.getElementById('pAvailableAt').value);
-  formData.append('variants',      document.getElementById('pVariants').value);
+  const ogEl2 = document.getElementById('pOptionGroups');
+  formData.append('option_groups', ogEl2 ? ogEl2.value : '[]');
+  const nwEl2 = document.getElementById('pNetWeight');
+  formData.append('net_weight',    nwEl2 ? (nwEl2.value || '0') : '0');
   const img = document.getElementById('pImage').files[0];
   if (img) formData.append('image', img);
 
@@ -495,28 +514,59 @@ async function submitProduct(e) {
 // Image preview
 // ─── Multiple Image Functions ─────────────────────────
 
+// Track selected new image files separately so we can remove individually
+let selectedImageFiles = [];
+
 function previewImages(input) {
-  const wrap = document.getElementById('imagePreviewsWrap');
+  const existingCount = JSON.parse(document.getElementById('pExistingImages')?.value || '[]').length;
+  const maxNew        = 20 - existingCount;
+  const newFiles      = Array.from(input.files).slice(0, maxNew);
+
+  // Merge with already selected files (avoid duplicates by name)
+  newFiles.forEach(f => {
+    if (!selectedImageFiles.find(sf => sf.name === f.name && sf.size === f.size)) {
+      selectedImageFiles.push(f);
+    }
+  });
+
+  // Trim to max
+  if (selectedImageFiles.length > maxNew) selectedImageFiles = selectedImageFiles.slice(0, maxNew);
+
+  renderNewImagePreviews();
+
+  // Reset file input so same file can be re-added after removal
+  input.value = '';
+}
+
+function renderNewImagePreviews() {
+  const wrap          = document.getElementById('imagePreviewsWrap');
+  const existingCount = JSON.parse(document.getElementById('pExistingImages')?.value || '[]').length;
   if (!wrap) return;
   wrap.innerHTML = '';
 
-  const existingCount = JSON.parse(document.getElementById('pExistingImages')?.value || '[]').length;
-  const maxNew = 20 - existingCount;
-  const files  = Array.from(input.files).slice(0, maxNew);
-
-  files.forEach((file, idx) => {
+  selectedImageFiles.forEach((file, idx) => {
     const reader = new FileReader();
     reader.onload = e => {
-      const div = document.createElement('div');
-      div.style.cssText = 'position:relative;width:80px;height:80px;';
-      div.innerHTML = `
+      const div       = document.createElement('div');
+      div.style.cssText = 'position:relative;width:80px;height:80px;flex-shrink:0;';
+      const isMain    = idx === 0 && existingCount === 0;
+      div.innerHTML   = `
         <img src="${e.target.result}" style="width:80px;height:80px;object-fit:cover;border-radius:8px;border:2px solid var(--border);" />
-        ${idx === 0 && existingCount === 0 ? '<span style="position:absolute;bottom:2px;left:2px;background:rgba(22,163,74,0.9);color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;">Main</span>' : ''}
+        ${isMain ? '<span style="position:absolute;bottom:2px;left:2px;background:rgba(22,163,74,0.9);color:#fff;font-size:9px;padding:1px 4px;border-radius:4px;">Main</span>' : ''}
+        <button type="button" onclick="removeNewImage(${idx})"
+          style="position:absolute;top:-6px;right:-6px;width:20px;height:20px;border-radius:50%;background:#ef4444;color:#fff;border:none;cursor:pointer;font-size:13px;line-height:1;display:flex;align-items:center;justify-content:center;font-weight:700;box-shadow:0 1px 4px rgba(0,0,0,0.3);">
+          &times;
+        </button>
       `;
       wrap.appendChild(div);
     };
     reader.readAsDataURL(file);
   });
+}
+
+function removeNewImage(idx) {
+  selectedImageFiles.splice(idx, 1);
+  renderNewImagePreviews();
 }
 
 function renderExistingImages(urls) {

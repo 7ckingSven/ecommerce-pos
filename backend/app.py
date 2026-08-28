@@ -575,7 +575,7 @@ def api_products():
     try:
         category = request.args.get('category', '')
         res      = supabase.table('product').select(
-            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name))'
+            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight'
         ).eq('status', 'active')
         if category:
             res = res.eq('category', category)
@@ -1482,20 +1482,30 @@ def admin_add_product():
         except Exception:
             variants = []
 
+        option_groups_raw = request.form.get('option_groups', '[]')
+        try:
+            option_groups = json.loads(option_groups_raw) if option_groups_raw else []
+        except Exception:
+            option_groups = []
+
+        net_weight = float(request.form.get('net_weight', 0) or 0)
+
         res = supabase.table('product').insert({
-            'staff_id':     session.get('staff_id'),
-            'discount_id':  discount_id,
-            'product_name': product_name,
-            'brand':        brand,
-            'category':     category,
-            'price':        float(price),
-            'quantity':     int(quantity),
-            'status':       status,
-            'description':  description,
-            'image_url':    image_url,
-            'image_urls':   image_urls,
-            'available_at': available_at,
-            'variants':     variants,
+            'staff_id':      session.get('staff_id'),
+            'discount_id':   discount_id,
+            'product_name':  product_name,
+            'brand':         brand,
+            'category':      category,
+            'price':         float(price),
+            'quantity':      int(quantity),
+            'status':        status,
+            'description':   description,
+            'image_url':     image_url,
+            'image_urls':    image_urls,
+            'available_at':  available_at,
+            'variants':      variants,
+            'option_groups': option_groups,
+            'net_weight':    net_weight,
         }).execute()
 
         return jsonify(res.data[0]), 201
@@ -1513,6 +1523,14 @@ def admin_update_product(product_id):
         except Exception:
             variants = []
 
+        option_groups_raw = request.form.get('option_groups', '[]')
+        try:
+            option_groups = json.loads(option_groups_raw) if option_groups_raw else []
+        except Exception:
+            option_groups = []
+
+        net_weight = float(request.form.get('net_weight', 0) or 0)
+
         updates = {
             'product_name': request.form.get('product_name'),
             'brand':        request.form.get('brand'),
@@ -1522,7 +1540,9 @@ def admin_update_product(product_id):
             'status':       request.form.get('status'),
             'description':  request.form.get('description'),
             'discount_id':  discount_id,
-            'available_at': request.form.get('available_at', 'both'),
+            'available_at':  request.form.get('available_at', 'both'),
+            'option_groups': option_groups,
+            'net_weight':    net_weight,
             'variants':     variants,
             'updated_at':   'now()',
         }
