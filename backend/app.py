@@ -1247,8 +1247,9 @@ def admin_add_branch_stock():
             'quantity_added':  quantity,
             'quantity_before': qty_before,
             'quantity_after':  qty_after,
+            'from_branch_id':  None,  # Restock from supplier — no from branch
             'to_branch_id':    branch_id,
-            'note':            f'Branch stock added',
+            'note':            'Branch stock added — restock',
         }).execute()
 
         return jsonify({'message': 'Branch stock updated.'}), 201
@@ -1488,7 +1489,8 @@ def admin_add_product():
         except Exception:
             option_groups = []
 
-        net_weight = float(request.form.get('net_weight', 0) or 0)
+        net_weight      = float(request.form.get('net_weight', 0) or 0)
+        net_weight_unit = request.form.get('net_weight_unit', 'kg')
 
         res = supabase.table('product').insert({
             'staff_id':      session.get('staff_id'),
@@ -1505,7 +1507,8 @@ def admin_add_product():
             'available_at':  available_at,
             'variants':      variants,
             'option_groups': option_groups,
-            'net_weight':    net_weight,
+            'net_weight':      net_weight,
+            'net_weight_unit': net_weight_unit,
         }).execute()
 
         return jsonify(res.data[0]), 201
@@ -1529,7 +1532,8 @@ def admin_update_product(product_id):
         except Exception:
             option_groups = []
 
-        net_weight = float(request.form.get('net_weight', 0) or 0)
+        net_weight      = float(request.form.get('net_weight', 0) or 0)
+        net_weight_unit = request.form.get('net_weight_unit', 'kg')
 
         updates = {
             'product_name': request.form.get('product_name'),
@@ -1542,8 +1546,9 @@ def admin_update_product(product_id):
             'discount_id':  discount_id,
             'available_at':  request.form.get('available_at', 'both'),
             'option_groups': option_groups,
-            'net_weight':    net_weight,
-            'variants':     variants,
+            'net_weight':      net_weight,
+            'net_weight_unit': net_weight_unit,
+            'variants':        variants,
             'updated_at':   'now()',
         }
 
