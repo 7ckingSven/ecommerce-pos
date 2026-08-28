@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
-  FlatList, Image, Alert, ActivityIndicator,
+  FlatList, Image, Alert, ActivityIndicator, Modal,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getCart, updateCartItem, removeFromCart } from '../services/cartService';
