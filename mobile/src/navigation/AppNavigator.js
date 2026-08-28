@@ -8,6 +8,9 @@ import Feather from 'react-native-vector-icons/Feather';
 import SplashScreen        from '../screens/SplashScreen';
 import LoginScreen         from '../screens/LoginScreen';
 import RegisterScreen      from '../screens/RegisterScreen';
+import ForgotPasswordScreen from '../screens/ForgotPasswordScreen';
+import VerifyOTPScreen      from '../screens/VerifyOTPScreen';
+import ResetPasswordScreen  from '../screens/ResetPasswordScreen';
 import HomeScreen          from '../screens/HomeScreen';
 import ProductDetailScreen from '../screens/ProductDetailScreen';
 import CartScreen          from '../screens/CartScreen';
@@ -93,7 +96,10 @@ export default function AppNavigator() {
 
         {/* Auth screens */}
         <Stack.Screen name="Login"    component={LoginScreen}/>
-        <Stack.Screen name="Register" component={RegisterScreen}/>
+        <Stack.Screen name="Register"        component={RegisterScreen}/>
+        <Stack.Screen name="ForgotPassword" component={ForgotPasswordScreen}/>
+        <Stack.Screen name="VerifyOTP"      component={VerifyOTPScreen}/>
+        <Stack.Screen name="ResetPassword"  component={ResetPasswordScreen}/>
 
         {/* Main app with bottom tabs */}
         <Stack.Screen name="Main"     component={MainTabs}/>

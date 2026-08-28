@@ -1,4 +1,5 @@
 import json
+import random
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_cors import CORS
 from flask_mail import Mail, Message
@@ -1050,6 +1051,124 @@ def admin_update_purchase_order(po_id):
         return jsonify({'message': f'PO status updated to {status}.'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+
+
+
+
+# ─── Email OTP Helper ─────────────────────────────────
+def send_otp_email(recipient_email, otp):
+    try:
+        msg = Message(
+            subject    = 'Your OTP — Triple E & Fiel Collins',
+            recipients = [recipient_email],
+            body       = f"""Hello,
+
+Your One-Time Password (OTP) for password reset is:
+
+    {otp}
+
+This code expires in 5 minutes.
+Do not share this with anyone.
+
+— Triple E & Fiel Collins General Merchandise"""
+        )
+        mail.send(msg)
+        return True
+    except Exception as e:
+        print(f'Email error: {e}')
+        return False
+
+# ══════════════════════════════════════════════════════
+# FORGOT PASSWORD — GMAIL OTP ROUTES (Mobile)
+# ══════════════════════════════════════════════════════
+
+@app.route('/api/auth/forgot-password', methods=['POST'])
+def api_auth_forgot_password():
+    try:
+        data  = request.get_json()
+        email = data.get('email', '').strip().lower()
+        if not email:
+            return jsonify({'error': 'Email is required.'}), 400
+
+        # Email is in customer table — get user_id from there
+        cust_res = supabase.table('customer').select('user_id, email').eq('email', email).execute()
+        if not cust_res.data:
+            return jsonify({'message': 'If this email exists, an OTP has been sent.'}), 200
+
+        # Generate OTP
+        otp        = str(random.randint(100000, 999999))
+        expires_at = (datetime.now() + timedelta(minutes=5)).isoformat()
+
+        # Invalidate old OTPs
+        supabase.table('otp_codes').update({'used': True}).eq('email', email).eq('used', False).execute()
+
+        # Store new OTP
+        supabase.table('otp_codes').insert({
+            'email':      email,
+            'otp':        otp,
+            'expires_at': expires_at,
+            'used':       False,
+        }).execute()
+
+        # Send email
+        sent = send_otp_email(email, otp)
+        if not sent:
+            return jsonify({'error': 'Failed to send OTP. Please try again.'}), 500
+
+        return jsonify({'message': 'If this email exists, an OTP has been sent.'}), 200
+    except Exception as e:
+        print(f'Forgot password error: {e}')
+        return jsonify({'error': 'Something went wrong.'}), 500
+
+
+@app.route('/api/auth/verify-otp', methods=['POST'])
+def api_auth_verify_otp():
+    try:
+        data  = request.get_json()
+        email = data.get('email', '').strip().lower()
+        otp   = data.get('otp', '').strip()
+        if not email or not otp:
+            return jsonify({'error': 'Email and OTP are required.'}), 400
+
+        res = supabase.table('otp_codes').select('*').eq('email', email).eq('otp', otp).eq('used', False).execute()
+        if not res.data:
+            return jsonify({'error': 'Invalid OTP. Please try again.'}), 400
+
+        otp_record = res.data[0]
+        expires_at = datetime.fromisoformat(otp_record['expires_at'])
+        if datetime.now() > expires_at:
+            return jsonify({'error': 'OTP has expired. Please request a new one.'}), 400
+
+        supabase.table('otp_codes').update({'used': True}).eq('id', otp_record['id']).execute()
+        return jsonify({'message': 'OTP verified.', 'email': email}), 200
+    except Exception as e:
+        print(f'Verify OTP error: {e}')
+        return jsonify({'error': 'Something went wrong.'}), 500
+
+
+@app.route('/api/auth/reset-password', methods=['POST'])
+def api_auth_reset_password():
+    try:
+        data         = request.get_json()
+        email        = data.get('email', '').strip().lower()
+        new_password = data.get('new_password', '')
+        if not email or not new_password:
+            return jsonify({'error': 'Email and new password are required.'}), 400
+        if len(new_password) < 8:
+            return jsonify({'error': 'Password must be at least 8 characters.'}), 400
+
+        cust_res = supabase.table('customer').select('user_id').eq('email', email).execute()
+        if not cust_res.data:
+            return jsonify({'error': 'User not found.'}), 404
+
+        new_hash = hash_password(new_password)
+        supabase.table('user').update({'password': new_hash}).eq('user_id', cust_res.data[0]['user_id']).execute()
+        return jsonify({'message': 'Password reset successfully.'}), 200
+    except Exception as e:
+        print(f'Reset password error: {e}')
+        return jsonify({'error': 'Something went wrong.'}), 500
 
 
 # ADMIN API ROUTES — Dashboard Data
