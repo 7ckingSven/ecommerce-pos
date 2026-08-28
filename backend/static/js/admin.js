@@ -352,8 +352,10 @@ function closeProductModal() {
   if (ogWrap) ogWrap.innerHTML = '';
   const ogEl = document.getElementById('pOptionGroups');
   if (ogEl) ogEl.value = '[]';
-  const nwEl = document.getElementById('pNetWeight');
+  const nwEl     = document.getElementById('pNetWeight');
   if (nwEl) nwEl.value = '';
+  const nwUnitEl = document.getElementById('pNetWeightUnit');
+  if (nwUnitEl) nwUnitEl.value = 'kg';
   const previewWrapEl = document.getElementById('imagePreviewsWrap');
   if (previewWrapEl) previewWrapEl.innerHTML = '';
 }
@@ -491,10 +493,11 @@ async function submitProduct(e) {
   formData.append('available_at',  document.getElementById('pAvailableAt').value);
   const ogEl2 = document.getElementById('pOptionGroups');
   formData.append('option_groups', ogEl2 ? ogEl2.value : '[]');
-  const nwEl2 = document.getElementById('pNetWeight');
-  formData.append('net_weight',    nwEl2 ? (nwEl2.value || '0') : '0');
-  const img = document.getElementById('pImage').files[0];
-  if (img) formData.append('image', img);
+  const nwEl2   = document.getElementById('pNetWeight');
+  const nwUnit2 = document.getElementById('pNetWeightUnit');
+  formData.append('net_weight',      nwEl2   ? (nwEl2.value   || '0')  : '0');
+  formData.append('net_weight_unit', nwUnit2 ? (nwUnit2.value || 'kg') : 'kg');
+  // pImage removed — using pImages (multiple) via selectedImageFiles array
 
   try {
     const url    = id ? `/api/admin/products/${id}` : '/api/admin/products';
