@@ -21,6 +21,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const [payment,       setPayment]       = useState('cash_on_delivery');
   const [refNo,         setRefNo]         = useState('');
   const [loading,       setLoading]       = useState(false);
+  const [shippingFee,   setShippingFee]   = useState(0);
   const [profileLoading,setProfileLoading]= useState(true);
   const [address,       setAddress]       = useState('');
   const [customerName,  setCustomerName]  = useState('');
@@ -29,6 +30,77 @@ export default function CheckoutScreen({ route, navigation }) {
   const [editAddress,   setEditAddress]   = useState('');
   // Address handled via PSGCAddressPicker
   const [savingAddr,    setSavingAddr]    = useState(false);
+
+  // ─── Delivery Date Calculation ──────────────────────
+  function getDeliveryEstimate(addr) {
+    const parts    = (addr || '').split('|');
+    const province = parts[3]?.trim().toLowerCase() || '';
+    const inSC     = province.includes('south cotabato') ||
+                     province.includes('southcotabato');
+
+    const today  = new Date();
+    const minDays = inSC ? 2 : 5;
+    const maxDays = inSC ? 3 : 7;
+    const zone    = inSC ? 'Within South Cotabato' : 'Outside South Cotabato';
+
+    const minDate = new Date(today); minDate.setDate(today.getDate() + minDays);
+    const maxDate = new Date(today); maxDate.setDate(today.getDate() + maxDays);
+
+    const fmt = d => d.toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' });
+    return {
+      label:    `${fmt(minDate)} - ${fmt(maxDate)}`,
+      zone,
+      minDays,
+      maxDays,
+    };
+  }
+
+  // ─── Shipping Fee Calculation ──────────────────────
+  function calculateShipping(addr, items) {
+    // Get total weight from items
+    const totalWeight = items.reduce((sum, item) => {
+      const w = Number(item.product?.net_weight || 0);
+      return sum + w * Number(item.quantity || 1);
+    }, 0);
+
+    // Parse address parts
+    const parts    = (addr || '').split('|');
+    const city     = parts[2]?.trim().toLowerCase() || '';
+    const province = parts[3]?.trim().toLowerCase() || '';
+    const region   = parts[4]?.trim().toLowerCase() || '';
+
+    const inKoronadal = city.includes('koronadal');
+    const inSC        = province.includes('south cotabato');
+    const inR12       = region.includes('xii') || region.includes('12') || region.includes('soccsksargen');
+
+    // Subtotal
+    const subtotal = items.reduce((sum, item) => {
+      const disc       = Array.isArray(item.product?.discount) ? item.product.discount[0] : item.product?.discount;
+      const origPrice  = Number(item.product?.price || 0);
+      const finalPrice = disc ? origPrice * (1 - Number(disc.percentage) / 100) : origPrice;
+      return sum + finalPrice * Number(item.quantity || 1);
+    }, 0);
+
+    if (inKoronadal) {
+      if (subtotal >= 500) return 0;
+      if (totalWeight <= 3) return 0;
+      return Math.ceil(totalWeight - 3) * 25;
+    }
+    if (inSC) {
+      const base = 50;
+      const extra = totalWeight > 3 ? Math.ceil(totalWeight - 3) * 25 : 0;
+      return base + extra;
+    }
+    if (inR12) {
+      const base = 120;
+      const extra = totalWeight > 5 ? Math.ceil(totalWeight - 5) * 30 : 0;
+      return base + extra;
+    }
+    // Outside Region XII
+    const base = 200;
+    const extra = totalWeight > 5 ? Math.ceil(totalWeight - 5) * 35 : 0;
+    return base + extra;
+  }
 
   useEffect(() => {
     async function init() {
@@ -68,10 +140,12 @@ export default function CheckoutScreen({ route, navigation }) {
       try {
         const fresh = await getProfile();
         if (fresh && typeof fresh === 'object') {
-          setAddress(fresh.address || '');
+          const freshAddr = fresh.address || '';
+          setAddress(freshAddr);
           setCustomerName(
             ((fresh.fname || '') + ' ' + (fresh.lname || '')).trim()
           );
+          setShippingFee(calculateShipping(freshAddr, cartItems));
         }
       } catch (apiErr) {
         // API failed — keep cached data, no crash
@@ -110,6 +184,7 @@ export default function CheckoutScreen({ route, navigation }) {
     try {
       await updateProfile({ address: combined });
       setAddress(combined);
+      setShippingFee(calculateShipping(combined, cartItems));
       setShowAddrModal(false);
       Alert.alert('Success', 'Address updated successfully!');
     } catch (e) {
@@ -154,7 +229,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
     Alert.alert(
       'Confirm Order',
-      `Total: ₱${total.toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}\nDeliver to: ${address}`,
+      `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nGrand Total: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}\nDeliver to: ${address.split('|').map(s=>s.trim()).filter(Boolean).join(', ')}`,
       [
         { text: 'Cancel' },
         {
@@ -290,6 +365,21 @@ export default function CheckoutScreen({ route, navigation }) {
             <Text style={styles.totalVal}>₱{total.toFixed(2)}</Text>
           </View>
         </View>
+
+        {/* ─── Delivery Estimate ─── */}
+        {address ? (() => {
+          const est = getDeliveryEstimate(address);
+          return (
+            <View style={[styles.card, { borderLeftWidth:3, borderLeftColor: COLORS.primary }]}>
+              <View style={styles.cardTitleRow}>
+                <Feather name="truck" size={16} color={COLORS.primary}/>
+                <Text style={styles.cardTitle}>Estimated Delivery</Text>
+              </View>
+              <Text style={styles.deliveryDate}>{est.label}</Text>
+              <Text style={styles.deliveryZone}>{est.zone} · {est.minDays}-{est.maxDays} business days</Text>
+            </View>
+          );
+        })() : null}
 
         {/* ─── Payment Method ─── */}
         <View style={styles.card}>
@@ -436,6 +526,8 @@ const styles = StyleSheet.create({
   // Address
   addressWrap:        { gap: SPACING.sm },
   addressInfo:        { gap: 4 },
+  deliveryDate:       { fontSize: 14, fontWeight: '700', color: COLORS.dark, marginTop: 4 },
+  deliveryZone:       { fontSize: 12, color: COLORS.textMuted, marginTop: 3 },
   addressName:        { fontSize: 13, fontWeight: '700', color: COLORS.dark },
   addressText:        { fontSize: 13, color: COLORS.textSecondary, lineHeight: 20 },
   addressActions:     { flexDirection: 'row', gap: SPACING.sm },

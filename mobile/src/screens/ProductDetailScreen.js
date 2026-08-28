@@ -67,6 +67,13 @@ export default function ProductDetailScreen({ route, navigation }) {
       ]);
       return;
     }
+    // Validate all option groups selected
+    for (const g of (product.option_groups || [])) {
+      if (!selectedOptions[g.label]) {
+        Alert.alert('Required', `Please select a ${g.label}.`);
+        return;
+      }
+    }
     setLoadingCart(true);
     try {
       await addToCart(product.product_id, quantity, branchId || product.branch_id || null);
@@ -90,6 +97,13 @@ export default function ProductDetailScreen({ route, navigation }) {
         { text: 'Log In', onPress: () => navigation.navigate('Login') }
       ]);
       return;
+    }
+    // Validate all option groups selected
+    for (const g of (product.option_groups || [])) {
+      if (!selectedOptions[g.label]) {
+        Alert.alert('Required', `Please select a ${g.label}.`);
+        return;
+      }
     }
     // Buy Now — go directly to Checkout with only this product
     // Does NOT add to cart — cart stays untouched
@@ -255,6 +269,36 @@ export default function ProductDetailScreen({ route, navigation }) {
                   <Feather name="plus" size={16} color={quantity >= product.quantity ? COLORS.grayLight : COLORS.dark}/>
                 </TouchableOpacity>
               </View>
+            </View>
+          )}
+
+          {/* Option Groups */}
+          {(product.option_groups?.length > 0) && (
+            <View style={styles.optionsWrap}>
+              {product.option_groups.map((group, gi) => (
+                <View key={gi} style={styles.optionGroup}>
+                  <Text style={styles.optionGroupLabel}>
+                    {`Select ${group.label}`}
+                    {!selectedOptions[group.label] && <Text style={{color:'#ef4444'}}> *</Text>}
+                  </Text>
+                  <View style={styles.optionChoicesRow}>
+                    {group.choices.map((choice, ci) => {
+                      const isSelected = selectedOptions[group.label] === choice;
+                      return (
+                        <TouchableOpacity
+                          key={ci}
+                          style={[styles.optionChip, isSelected && styles.optionChipSelected]}
+                          onPress={() => setSelectedOptions(prev => ({ ...prev, [group.label]: choice }))}
+                        >
+                          <Text style={[styles.optionChipText, isSelected && styles.optionChipTextSelected]}>
+                            {choice}
+                          </Text>
+                        </TouchableOpacity>
+                      );
+                    })}
+                  </View>
+                </View>
+              ))}
             </View>
           )}
 

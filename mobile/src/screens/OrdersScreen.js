@@ -8,6 +8,29 @@ import { getOrders } from '../services/orderService';
 import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
+// ─── Delivery Estimate Helper ────────────────────────
+function getDeliveryEstimate(order) {
+  const addr     = order.address || '';
+  const parts    = addr.split('|');
+  const province = parts[3]?.trim().toLowerCase() || '';
+  const inSC     = province.includes('south cotabato');
+
+  const created  = new Date(order.created_at || order.date || Date.now());
+  const minDays  = inSC ? 2 : 5;
+  const maxDays  = inSC ? 3 : 7;
+
+  const minDate  = new Date(created); minDate.setDate(created.getDate() + minDays);
+  const maxDate  = new Date(created); maxDate.setDate(created.getDate() + maxDays);
+
+  const fmt = d => d.toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' });
+  return {
+    label: `${fmt(minDate)} – ${fmt(maxDate)}`,
+    zone:  inSC ? 'Within South Cotabato' : 'Outside South Cotabato',
+    minDays,
+    maxDays,
+  };
+}
+
 function statusColor(s) {
   const map = { pending:'#eab308', processing:'#3b82f6', out_for_delivery:'#8b5cf6', completed: COLORS.primary, cancelled:'#ef4444' };
   return map[s] || COLORS.textMuted;
@@ -117,6 +140,15 @@ export default function OrdersScreen({ navigation }) {
                 </View>
                 <Text style={styles.orderTotal}>₱{Number(item.total).toFixed(2)}</Text>
               </View>
+              {/* Delivery Estimate */}
+              {item.status !== 'completed' && item.status !== 'cancelled' && (
+                <View style={styles.deliveryRow}>
+                  <Feather name="truck" size={11} color={COLORS.primary}/>
+                  <Text style={styles.deliveryText}>
+                    Est. Delivery: {getDeliveryEstimate(item).label}
+                  </Text>
+                </View>
+              )}
 
               {/* Payment */}
               {item.payment && (
@@ -260,6 +292,8 @@ const styles = StyleSheet.create({
   emptyText:        { fontSize:13, color: COLORS.textSecondary, textAlign:'center' },
   shopBtn:          { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.lg, paddingVertical:12, marginTop: SPACING.sm },
   shopBtnText:      { color: COLORS.white, fontWeight:'700', fontSize:14 },
+  deliveryRow:      { flexDirection:'row', alignItems:'center', gap:4, marginTop:6 },
+  deliveryText:     { fontSize:11, color: COLORS.primary, fontWeight:'600', flex:1 },
   loginBtn:         { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.lg, paddingVertical:12, marginTop: SPACING.sm },
   loginBtnText:     { color: COLORS.white, fontWeight:'700', fontSize:14 },
 
