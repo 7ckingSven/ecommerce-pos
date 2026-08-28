@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  FlatList, ActivityIndicator,
+  FlatList, ActivityIndicator, Modal, ScrollView,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getOrders } from '../services/orderService';
@@ -14,9 +14,10 @@ function statusColor(s) {
 }
 
 export default function OrdersScreen({ navigation }) {
-  const [orders,   setOrders]   = useState([]);
-  const [loading,  setLoading]  = useState(true);
-  const [loggedIn, setLoggedIn] = useState(false);
+  const [orders,       setOrders]       = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [loggedIn,     setLoggedIn]     = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
 
   useEffect(() => {
     isLoggedIn().then(logged => {
@@ -84,7 +85,7 @@ export default function OrdersScreen({ navigation }) {
           onRefresh={loadOrders}
           refreshing={loading}
           renderItem={({ item }) => (
-            <View style={styles.orderCard}>
+            <TouchableOpacity style={styles.orderCard} onPress={() => setSelectedOrder(item)} activeOpacity={0.85}>
               {/* Order Header */}
               <View style={styles.orderHeader}>
                 <View>
@@ -126,10 +127,108 @@ export default function OrdersScreen({ navigation }) {
                   </Text>
                 </View>
               )}
-            </View>
+            </TouchableOpacity>
           )}
         />
       )}
+      {/* ─── Order Detail Modal ─── */}
+      <Modal
+        visible={!!selectedOrder}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setSelectedOrder(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Order Details</Text>
+                <Text style={styles.modalOrderId}>#{selectedOrder?.order_id?.slice(0,8).toUpperCase()}</Text>
+              </View>
+              <TouchableOpacity onPress={() => setSelectedOrder(null)}>
+                <Feather name="x" size={22} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+
+              {/* Status */}
+              <View style={styles.detailSection}>
+                <View style={[styles.statusBadgeLarge, { backgroundColor: statusColor(selectedOrder?.status) + '20' }]}>
+                  <Text style={[styles.statusTextLarge, { color: statusColor(selectedOrder?.status) }]}>
+                    {selectedOrder?.status === 'out_for_delivery' ? 'Out for Delivery' : selectedOrder?.status?.replace(/_/g,' ').toUpperCase()}
+                  </Text>
+                </View>
+              </View>
+
+              {/* Order Info */}
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionTitle}>Order Info</Text>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Date</Text>
+                  <Text style={styles.detailValue}>{selectedOrder ? new Date(selectedOrder.date || selectedOrder.created_at).toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' }) : '—'}</Text>
+                </View>
+                <View style={styles.detailRow}>
+                  <Text style={styles.detailLabel}>Type</Text>
+                  <Text style={styles.detailValue}>{selectedOrder?.order_type === 'online' ? 'Online Order' : 'Walk-in'}</Text>
+                </View>
+                {selectedOrder?.branch_name && (
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Branch</Text>
+                    <Text style={styles.detailValue}>{selectedOrder.branch_name}</Text>
+                  </View>
+                )}
+              </View>
+
+              {/* Items */}
+              <View style={styles.detailSection}>
+                <Text style={styles.detailSectionTitle}>Items Ordered</Text>
+                {(selectedOrder?.order_item || []).map((oi, idx) => (
+                  <View key={idx} style={styles.detailItemRow}>
+                    <View style={{ flex:1 }}>
+                      <Text style={styles.detailItemName}>{oi.product?.product_name || '—'}</Text>
+                      <Text style={styles.detailItemQty}>x{oi.qty || oi.quantity}</Text>
+                    </View>
+                    <Text style={styles.detailItemPrice}>₱{(Number(oi.price) * Number(oi.qty || oi.quantity)).toFixed(2)}</Text>
+                  </View>
+                ))}
+                <View style={styles.detailTotalRow}>
+                  <Text style={styles.detailTotalLabel}>Total</Text>
+                  <Text style={styles.detailTotalValue}>₱{Number(selectedOrder?.total || 0).toFixed(2)}</Text>
+                </View>
+              </View>
+
+              {/* Payment */}
+              {selectedOrder?.payment && (
+                <View style={styles.detailSection}>
+                  <Text style={styles.detailSectionTitle}>Payment</Text>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Method</Text>
+                    <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.payment_method?.replace(/_/g,' ')}</Text>
+                  </View>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Status</Text>
+                    <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.status}</Text>
+                  </View>
+                  {(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Ref No.</Text>
+                      <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no}</Text>
+                    </View>
+                  )}
+                </View>
+              )}
+
+            </ScrollView>
+
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedOrder(null)}>
+              <Text style={styles.closeBtnText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -163,4 +262,27 @@ const styles = StyleSheet.create({
   shopBtnText:      { color: COLORS.white, fontWeight:'700', fontSize:14 },
   loginBtn:         { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.lg, paddingVertical:12, marginTop: SPACING.sm },
   loginBtnText:     { color: COLORS.white, fontWeight:'700', fontSize:14 },
+
+  // Order Detail Modal
+  modalOverlay:         { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
+  modalCard:            { backgroundColor: COLORS.white, borderTopLeftRadius:20, borderTopRightRadius:20, maxHeight:'90%', padding: SPACING.md },
+  modalHeader:          { flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start', marginBottom: SPACING.md, paddingBottom: SPACING.sm, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
+  modalTitle:           { fontSize:16, fontWeight:'700', color: COLORS.dark },
+  modalOrderId:         { fontSize:12, color: COLORS.textMuted, marginTop:2 },
+  detailSection:        { marginBottom: SPACING.md, paddingBottom: SPACING.sm, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
+  detailSectionTitle:   { fontSize:13, fontWeight:'700', color: COLORS.dark, marginBottom: SPACING.sm },
+  detailRow:            { flexDirection:'row', justifyContent:'space-between', marginBottom:6 },
+  detailLabel:          { fontSize:13, color: COLORS.textMuted },
+  detailValue:          { fontSize:13, color: COLORS.dark, fontWeight:'500', flex:1, textAlign:'right', textTransform:'capitalize' },
+  detailItemRow:        { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical:6, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
+  detailItemName:       { fontSize:13, color: COLORS.dark, fontWeight:'500' },
+  detailItemQty:        { fontSize:11, color: COLORS.textMuted, marginTop:2 },
+  detailItemPrice:      { fontSize:13, fontWeight:'700', color: COLORS.dark },
+  detailTotalRow:       { flexDirection:'row', justifyContent:'space-between', marginTop: SPACING.sm },
+  detailTotalLabel:     { fontSize:14, fontWeight:'700', color: COLORS.dark },
+  detailTotalValue:     { fontSize:16, fontWeight:'700', color: COLORS.primary },
+  statusBadgeLarge:     { alignSelf:'flex-start', borderRadius: RADIUS.full, paddingHorizontal:14, paddingVertical:6 },
+  statusTextLarge:      { fontSize:12, fontWeight:'700' },
+  closeBtn:             { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding:14, alignItems:'center', marginTop: SPACING.md },
+  closeBtnText:         { color: COLORS.white, fontWeight:'700', fontSize:14 },
 });
