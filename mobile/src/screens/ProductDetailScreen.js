@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState } from 'react';
 import {
   View, Text, Image, TouchableOpacity, TextInput, StyleSheet,
-  ScrollView, Alert, ActivityIndicator,
+  ScrollView, Alert, ActivityIndicator, FlatList, Dimensions,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { isLoggedIn } from '../services/authService';
@@ -22,7 +22,8 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [quantity, setQty]   = useState(1);
   const [loadingCart, setLoadingCart] = useState(false);
   const [loadingBuy,  setLoadingBuy]  = useState(false);
-  const [activeIdx,   setActiveIdx]   = useState(0);
+  const [activeIdx,       setActiveIdx]       = useState(0);
+  const [selectedOptions, setSelectedOptions] = useState({});
   const { width } = Dimensions.get('window');
   const images = product.image_urls?.length
     ? product.image_urls
@@ -430,4 +431,24 @@ const styles = StyleSheet.create({
   cartBtnDisabled:       { backgroundColor: COLORS.grayLight },
   cartBtnInner:          { flexDirection:'row', alignItems:'center', gap:8 },
   cartBtnText:           { color: COLORS.white, fontWeight:'700', fontSize:15 },
+
+  // ─── Option Groups ───────────────────────────────
+  optionsWrap:            { marginBottom: SPACING.md },
+  optionGroup:            { marginBottom: SPACING.md },
+  optionGroupLabel:       { fontSize: 13, fontWeight: '700', color: COLORS.dark, marginBottom: 8 },
+  optionChoicesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  optionChip:             { 
+    backgroundColor: COLORS.white, 
+    borderRadius: RADIUS.full, 
+    paddingHorizontal: 16, 
+    paddingVertical: 8, 
+    borderWidth: 1.5, 
+    borderColor: COLORS.grayBorder,
+  },
+  optionChipSelected:     { 
+    backgroundColor: COLORS.primary, 
+    borderColor: COLORS.primary,
+  },
+  optionChipText:         { fontSize: 13, color: COLORS.dark, fontWeight: '500' },
+  optionChipTextSelected: { color: COLORS.white, fontWeight: '700' },
 });

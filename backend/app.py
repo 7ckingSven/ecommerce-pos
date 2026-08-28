@@ -742,14 +742,16 @@ def api_place_order():
         total    = sum(item['price'] * item['quantity'] for item in cart_items)
         quantity = sum(item['quantity'] for item in cart_items)
 
-        branch_id = data.get('branch_id')
+        branch_id    = data.get('branch_id')
+        shipping_fee = float(data.get('shipping_fee', 0) or 0)
         order_res = supabase.table('order').insert({
-            'customer_id': customer_id,
-            'order_type':  'online',
-            'quantity':    quantity,
-            'total':       total,
-            'status':      'pending',
-            'branch_id':   branch_id,
+            'customer_id':  customer_id,
+            'order_type':   'online',
+            'quantity':     quantity,
+            'total':        total,
+            'status':       'pending',
+            'branch_id':    branch_id,
+            'shipping_fee': shipping_fee,
         }).execute()
 
         order_id    = order_res.data[0]['order_id']
@@ -1724,11 +1726,44 @@ def admin_get_orders():
 @admin_required
 def admin_update_order(order_id):
     try:
-        data   = request.get_json()
-        status = data.get('status')
+        data       = request.get_json()
+        status     = data.get('status')
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled']
+        if status not in valid_statuses:
+            return jsonify({'error': 'Invalid status.'}), 400
+
         supabase.table('order').update({'status': status}).eq('order_id', order_id).execute()
-        return jsonify({'message': 'Order status updated.'}), 200
+
+        # If cancelled — return stock to branch
+        if status == 'cancelled':
+            order_res = supabase.table('order').select(
+                'branch_id, order_item(product_id, qty)'
+            ).eq('order_id', order_id).execute()
+            if order_res.data:
+                order_data = order_res.data[0]
+                br_id      = order_data.get('branch_id')
+                for item in order_data.get('order_item', []):
+                    pid = item.get('product_id')
+                    qty = int(item.get('qty', 0))
+                    if not pid or not qty:
+                        continue
+                    # Return to branch_stock
+                    if br_id:
+                        bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                        if bs.data:
+                            supabase.table('branch_stock').update({
+                                'quantity': bs.data[0]['quantity'] + qty
+                            }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    # Return to product total
+                    pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                    if pr.data:
+                        supabase.table('product').update({
+                            'quantity': pr.data[0]['quantity'] + qty
+                        }).eq('product_id', pid).execute()
+
+        return jsonify({'message': f'Order status updated to {status}.'}), 200
     except Exception as e:
+        import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 # ─── Sales Transactions ───────────────────────────────
@@ -2021,10 +2056,40 @@ def staff_place_order():
 @staff_required
 def staff_update_order(order_id):
     try:
-        data   = request.get_json()
-        status = data.get('status')
+        data       = request.get_json()
+        status     = data.get('status')
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled']
+        if status not in valid_statuses:
+            return jsonify({'error': 'Invalid status.'}), 400
+
         supabase.table('order').update({'status': status}).eq('order_id', order_id).execute()
-        return jsonify({'message': 'Order updated.'}), 200
+
+        # If cancelled — return stock to branch
+        if status == 'cancelled':
+            order_res = supabase.table('order').select(
+                'branch_id, order_item(product_id, qty)'
+            ).eq('order_id', order_id).execute()
+            if order_res.data:
+                order_data = order_res.data[0]
+                br_id      = order_data.get('branch_id')
+                for item in order_data.get('order_item', []):
+                    pid = item.get('product_id')
+                    qty = int(item.get('qty', 0))
+                    if not pid or not qty:
+                        continue
+                    if br_id:
+                        bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                        if bs.data:
+                            supabase.table('branch_stock').update({
+                                'quantity': bs.data[0]['quantity'] + qty
+                            }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                    if pr.data:
+                        supabase.table('product').update({
+                            'quantity': pr.data[0]['quantity'] + qty
+                        }).eq('product_id', pid).execute()
+
+        return jsonify({'message': f'Order status updated to {status}.'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

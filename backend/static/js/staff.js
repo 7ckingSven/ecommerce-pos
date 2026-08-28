@@ -671,10 +671,11 @@ function renderStaffOrders(orders) {
           <td>
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
               onchange="updateOrderStatus('${o.order_id}', this.value)">
-              <option value="pending"    ${o.status==='pending'    ?'selected':''}>Pending</option>
-              <option value="processing" ${o.status==='processing' ?'selected':''}>Processing</option>
-              <option value="completed"  ${o.status==='completed'  ?'selected':''}>Completed</option>
-              <option value="cancelled"  ${o.status==='cancelled'  ?'selected':''}>Cancelled</option>
+              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
+              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
+              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
+              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
+              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
             </select>
           </td>
         </tr>`).join('')
@@ -704,8 +705,10 @@ let allSummaryOrders = []; // store all orders for date filtering
 
 async function loadSummary() {
   try {
+    // Staff orders API already filters by branch_id server-side
     const res    = await fetch('/api/staff/orders?limit=500');
-    allSummaryOrders = await res.json();
+    const data   = await res.json();
+    allSummaryOrders = Array.isArray(data) ? data : [];
 
     // Set today's date in picker and render
     const today = new Date().toISOString().split('T')[0];

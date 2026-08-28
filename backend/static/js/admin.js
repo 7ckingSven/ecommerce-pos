@@ -333,11 +333,18 @@ function openProductModal(product = null) {
   const availEl = document.getElementById('pAvailableAt');
   if (availEl) availEl.value = product?.available_at || 'both';
 
-  // Variants
-  const existingVariants = product?.variants || [];
-  const varEl = document.getElementById('pVariants');
-  if (varEl) varEl.value = JSON.stringify(existingVariants);
-  renderVariantChips(existingVariants);
+  // Option Groups — load existing
+  optionGroups = [];
+  if (product?.option_groups?.length) {
+    optionGroups = JSON.parse(JSON.stringify(product.option_groups)); // deep copy
+  }
+  renderOptionGroups();
+
+  // Net Weight + Unit
+  const netWeightEl   = document.getElementById('pNetWeight');
+  const netWeightUnit = document.getElementById('pNetWeightUnit');
+  if (netWeightEl)   netWeightEl.value   = product?.net_weight      || '';
+  if (netWeightUnit) netWeightUnit.value = product?.net_weight_unit || 'kg';
 
   document.getElementById('productModalOverlay').classList.add('open');
   document.getElementById('productModal').classList.add('open');
@@ -975,10 +982,11 @@ function renderOrders(orders) {
           <td>
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
               onchange="updateOrderStatus('${o.order_id}', this.value)">
-              <option value="pending"    ${o.status==='pending'    ?'selected':''}>Pending</option>
-              <option value="processing" ${o.status==='processing' ?'selected':''}>Processing</option>
-              <option value="completed"  ${o.status==='completed'  ?'selected':''}>Completed</option>
-              <option value="cancelled"  ${o.status==='cancelled'  ?'selected':''}>Cancelled</option>
+              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
+              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
+              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
+              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
+              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
             </select>
           </td>
         </tr>`).join('')

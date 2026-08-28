@@ -11,10 +11,10 @@ export async function getOrders() {
   return res.data;
 }
 
-export async function placeOrder(cartItems, paymentMethod, refNo = '', branchId = null) {
+export async function placeOrder(cartItems, paymentMethod, refNo = '', branchId = null, shippingFee = 0) {
   const customerId = await getCustomerId();
   const res = await api.post('/orders',
-    { cart_items: cartItems, payment_method: paymentMethod, ref_no: refNo, branch_id: branchId },
+    { cart_items: cartItems, payment_method: paymentMethod, ref_no: refNo, branch_id: branchId, shipping_fee: shippingFee },
     { headers: headers(customerId) }
   );
   return res.data;

@@ -138,7 +138,17 @@ export default function OrdersScreen({ navigation }) {
                   <Feather name={item.order_type === 'online' ? 'smartphone' : 'monitor'} size={12} color={COLORS.textMuted}/>
                   <Text style={styles.orderTypeText}>{item.order_type === 'online' ? 'Online Order' : 'Walk-in'}</Text>
                 </View>
-                <Text style={styles.orderTotal}>₱{Number(item.total).toFixed(2)}</Text>
+                <View style={{ alignItems: 'flex-end' }}>
+                  {item.shipping_fee != null && item.shipping_fee > 0 && (
+                    <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
+                      +₱{Number(item.shipping_fee).toFixed(2)} shipping
+                    </Text>
+                  )}
+                  {item.shipping_fee != null && item.shipping_fee === 0 && (
+                    <Text style={{ fontSize: 11, color: COLORS.primary }}>FREE shipping</Text>
+                  )}
+                  <Text style={styles.orderTotal}>₱{Number(item.total).toFixed(2)}</Text>
+                </View>
               </View>
               {/* Delivery Estimate */}
               {item.status !== 'completed' && item.status !== 'cancelled' && (
@@ -225,8 +235,20 @@ export default function OrdersScreen({ navigation }) {
                     <Text style={styles.detailItemPrice}>₱{(Number(oi.price) * Number(oi.qty || oi.quantity)).toFixed(2)}</Text>
                   </View>
                 ))}
+                {selectedOrder?.shipping_fee != null && (
+                  <View style={[styles.detailItemRow, { borderBottomWidth: 0 }]}>
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.detailItemName}>Shipping Fee</Text>
+                    </View>
+                    <Text style={[styles.detailItemPrice, { 
+                      color: selectedOrder.shipping_fee === 0 ? COLORS.primary : COLORS.dark 
+                    }]}>
+                      {selectedOrder.shipping_fee === 0 ? 'FREE' : `₱${Number(selectedOrder.shipping_fee).toFixed(2)}`}
+                    </Text>
+                  </View>
+                )}
                 <View style={styles.detailTotalRow}>
-                  <Text style={styles.detailTotalLabel}>Total</Text>
+                  <Text style={styles.detailTotalLabel}>Grand Total</Text>
                   <Text style={styles.detailTotalValue}>₱{Number(selectedOrder?.total || 0).toFixed(2)}</Text>
                 </View>
               </View>

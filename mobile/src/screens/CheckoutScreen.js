@@ -57,21 +57,32 @@ export default function CheckoutScreen({ route, navigation }) {
 
   // ─── Shipping Fee Calculation ──────────────────────
   function calculateShipping(addr, items) {
-    // Get total weight from items
+    // Get total weight from items (in kg)
+    // Convert units: gram → kg, mL → assume 1mL=0.001kg, L → 1kg
     const totalWeight = items.reduce((sum, item) => {
-      const w = Number(item.product?.net_weight || 0);
-      return sum + w * Number(item.quantity || 1);
+      const w    = Number(item.product?.net_weight || 0);
+      const unit = (item.product?.net_weight_unit || 'kg').toLowerCase();
+      let wKg    = w;
+      if (unit === 'gram') wKg = w / 1000;
+      else if (unit === 'ml') wKg = w / 1000;
+      else if (unit === 'l') wKg = w;
+      return sum + wKg * Number(item.quantity || 1);
     }, 0);
 
-    // Parse address parts
-    const parts    = (addr || '').split('|');
-    const city     = parts[2]?.trim().toLowerCase() || '';
-    const province = parts[3]?.trim().toLowerCase() || '';
-    const region   = parts[4]?.trim().toLowerCase() || '';
+    // Parse address — fixed format: Street|Barangay|City|Province|Region|Zip
+    // Search all parts for province/city/region keywords to handle missing fields
+    const parts     = (addr || '').split('|').map(p => p.trim().toLowerCase());
+    const fullAddr  = parts.join(' ');
 
-    const inKoronadal = city.includes('koronadal');
-    const inSC        = province.includes('south cotabato');
-    const inR12       = region.includes('xii') || region.includes('12') || region.includes('soccsksargen');
+    // Detect location from full address string (more reliable than fixed index)
+    const inKoronadal = parts.some(p => p.includes('koronadal'));
+    const inSC        = parts.some(p =>
+      p.includes('south cotabato') || p.includes('southcotabato')
+    );
+    const inR12       = parts.some(p =>
+      p.includes('xii') || p.includes('soccsksargen') ||
+      p.includes('region 12') || p.includes('region xii')
+    );
 
     // Subtotal
     const subtotal = items.reduce((sum, item) => {
@@ -81,24 +92,26 @@ export default function CheckoutScreen({ route, navigation }) {
       return sum + finalPrice * Number(item.quantity || 1);
     }, 0);
 
+    console.log('Shipping calc:', { inKoronadal, inSC, inR12, totalWeight, subtotal, parts });
+
     if (inKoronadal) {
       if (subtotal >= 500) return 0;
       if (totalWeight <= 3) return 0;
-      return Math.ceil(totalWeight - 3) * 25;
+      return Math.ceil((totalWeight - 3) * 25);
     }
     if (inSC) {
-      const base = 50;
-      const extra = totalWeight > 3 ? Math.ceil(totalWeight - 3) * 25 : 0;
+      const base  = 50;
+      const extra = totalWeight > 3 ? Math.ceil((totalWeight - 3) * 25) : 0;
       return base + extra;
     }
     if (inR12) {
-      const base = 120;
-      const extra = totalWeight > 5 ? Math.ceil(totalWeight - 5) * 30 : 0;
+      const base  = 120;
+      const extra = totalWeight > 5 ? Math.ceil((totalWeight - 5) * 30) : 0;
       return base + extra;
     }
     // Outside Region XII
-    const base = 200;
-    const extra = totalWeight > 5 ? Math.ceil(totalWeight - 5) * 35 : 0;
+    const base  = 200;
+    const extra = totalWeight > 5 ? Math.ceil((totalWeight - 5) * 35) : 0;
     return base + extra;
   }
 
@@ -248,7 +261,7 @@ export default function CheckoutScreen({ route, navigation }) {
                   price:      finalPrice, // use discounted price if applicable
                 };
               });
-              const res = await placeOrder(items, payment, refNo.trim(), branchId || cartItems[0]?.branch_id || null);
+              const res = await placeOrder(items, payment, refNo.trim(), branchId || cartItems[0]?.branch_id || null, shippingFee);
               Alert.alert(
                 '🎉 Order Placed!',
                 `Your order has been placed successfully!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
@@ -361,8 +374,21 @@ export default function CheckoutScreen({ route, navigation }) {
           })}
           <View style={styles.divider}/>
           <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Total Amount</Text>
+            <Text style={styles.totalLabel}>Subtotal</Text>
             <Text style={styles.totalVal}>₱{total.toFixed(2)}</Text>
+          </View>
+          <View style={[styles.totalRow, { marginTop: 6 }]}>
+            <Text style={styles.totalLabel}>Shipping Fee</Text>
+            <Text style={[styles.totalVal, { color: shippingFee === 0 ? COLORS.primary : COLORS.dark }]}>
+              {shippingFee === 0 ? 'FREE' : `₱${shippingFee.toFixed(2)}`}
+            </Text>
+          </View>
+          <View style={styles.divider}/>
+          <View style={styles.totalRow}>
+            <Text style={[styles.totalLabel, { fontWeight: '700', fontSize: 15 }]}>Grand Total</Text>
+            <Text style={[styles.totalVal, { color: COLORS.primary, fontSize: 16 }]}>
+              ₱{(total + shippingFee).toFixed(2)}
+            </Text>
           </View>
         </View>
 
