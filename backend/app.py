@@ -31,7 +31,7 @@ supabase = create_client(
 # Configure Flask-Mail
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
 app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
-app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', True)
+app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'True').lower() in ('true', '1', 'yes')
 app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
 app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
 app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', os.getenv('MAIL_USERNAME'))
@@ -1459,8 +1459,9 @@ def admin_add_product():
         image_urls = []
         for img in images[:20]:  # max 5
             file_bytes = img.read()
-            file_name  = f"products/{product_name.replace(' ', '_')}_{img.filename}"
-            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': img.content_type})
+            file_name    = f"products/{product_name.replace(' ', '_')}_{img.filename}"
+            content_type = img.content_type or 'image/jpeg'
+            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': str(content_type)})
             url = supabase.storage.from_('product-images').get_public_url(file_name)
             image_urls.append(url)
 
@@ -1561,20 +1562,14 @@ def admin_update_product(product_id):
 
         new_urls = []
         for img in images[:20]:
-            file_bytes = img.read()
-            file_name  = f"products/{product_id}_{img.filename}"
-            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': img.content_type, 'upsert': True})
+            if not img or not img.filename:
+                continue
+            file_bytes   = img.read()
+            file_name    = f"products/{product_id}_{img.filename}"
+            content_type = img.content_type or 'image/jpeg'
+            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': str(content_type), 'upsert': True})
             url = supabase.storage.from_('product-images').get_public_url(file_name)
             new_urls.append(url)
-
-        # Fallback single image
-        if not images:
-            image = request.files.get('image')
-            if image:
-                file_bytes = image.read()
-                file_name  = f"products/{product_id}_{image.filename}"
-                supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': image.content_type, 'upsert': True})
-                new_urls = [supabase.storage.from_('product-images').get_public_url(file_name)]
 
         all_urls = existing_urls + new_urls
         if all_urls:
