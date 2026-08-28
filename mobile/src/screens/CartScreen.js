@@ -5,8 +5,7 @@ import {
   FlatList, Image, Alert, ActivityIndicator, Modal,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { getCart, updateCartItem, removeFromCart } from '../services/cartService';
-import api from '../services/api';
+import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
@@ -15,7 +14,9 @@ export default function CartScreen({ navigation }) {
   const [cart,       setCart]       = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [loggedIn,   setLoggedIn]   = useState(false);
-  const [selected,   setSelected]   = useState({}); // { cart_id: true/false }
+  const [selected,   setSelected]   = useState({});
+  const [editItem,   setEditItem]   = useState(null);
+  const [editOptions,setEditOptions]= useState({}); // { cart_id: true/false }
 
   const { refreshCartCount } = useCart();
 
@@ -111,9 +112,7 @@ export default function CartScreen({ navigation }) {
   }
 
   // ─── Update Cart Item Options ────────────────────────
-  async function updateCartItemOptions(cartId, options) {
-    await api.put(`/cart/${cartId}`, { selected_options: options });
-  }
+  // updateCartItemOptions imported from cartService
 
   // ─── Remove ───────────────────────────────────────────
   async function handleRemove(cartId) {
@@ -228,11 +227,7 @@ export default function CartScreen({ navigation }) {
               const finalSub   = finalPrice * item.quantity;
 
               return (
-                <TouchableOpacity
-                  style={[styles.cartItem, isSelected && styles.cartItemSelected]}
-                  onPress={() => toggleItem(item.cart_id)}
-                  activeOpacity={0.85}
-                >
+                <View style={[styles.cartItem, isSelected && styles.cartItemSelected]}>
                   {/* Checkbox */}
                   <TouchableOpacity
                     style={[styles.checkbox, isSelected && styles.checkboxChecked]}
@@ -260,7 +255,7 @@ export default function CartScreen({ navigation }) {
                     }
 
                     {/* Selected Options + Edit Button */}
-                    {item.selected_options && Object.keys(item.selected_options).length > 0 && (
+                    {(product?.option_groups?.length > 0) && (
                       <TouchableOpacity
                         style={styles.optionEditBtn}
                         onPress={() => {
@@ -268,8 +263,10 @@ export default function CartScreen({ navigation }) {
                           setEditOptions(item.selected_options || {});
                         }}
                       >
-                        <Text style={styles.optionEditText}>
-                          {Object.entries(item.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                        <Text style={styles.optionEditText} numberOfLines={1}>
+                          {item.selected_options && Object.keys(item.selected_options).length > 0
+                            ? Object.entries(item.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')
+                            : 'Select options'}
                         </Text>
                         <Feather name="chevron-down" size={11} color={COLORS.primary}/>
                       </TouchableOpacity>
@@ -319,7 +316,7 @@ export default function CartScreen({ navigation }) {
 
                   {/* Item Subtotal */}
                   <Text style={styles.itemTotal}>₱{finalSub.toFixed(2)}</Text>
-                </TouchableOpacity>
+                </View>
               );
             }}
           />

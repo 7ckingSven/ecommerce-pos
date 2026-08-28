@@ -638,7 +638,7 @@ def api_get_cart():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         res = supabase.table('cart').select(
-            '*, product(product_id, product_name, price, image_url, brand, category, discount(discount_name, percentage))'
+            '*, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -651,9 +651,11 @@ def api_add_to_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
 
-    data       = request.get_json()
-    product_id = data.get('product_id')
-    quantity   = data.get('quantity', 1)
+    data             = request.get_json()
+    product_id       = data.get('product_id')
+    quantity         = data.get('quantity', 1)
+    branch_id        = data.get('branch_id')
+    selected_options = data.get('selected_options', {})
 
     if not product_id:
         return jsonify({'error': 'Product ID is required.'}), 400
@@ -664,13 +666,19 @@ def api_add_to_cart():
         if existing.data:
             cart_id      = existing.data[0]['cart_id']
             new_quantity = existing.data[0]['quantity'] + quantity
-            res = supabase.table('cart').update({'quantity': new_quantity}).eq('cart_id', cart_id).execute()
+            res = supabase.table('cart').update({
+                'quantity':         new_quantity,
+                'selected_options': selected_options,
+                'branch_id':        branch_id,
+            }).eq('cart_id', cart_id).execute()
         else:
             res = supabase.table('cart').insert({
-                'customer_id': customer_id,
-                'product_id':  product_id,
-                'quantity':    quantity,
-                'status':      'active'
+                'customer_id':      customer_id,
+                'product_id':       product_id,
+                'quantity':         quantity,
+                'branch_id':        branch_id,
+                'selected_options': selected_options,
+                'status':           'active'
             }).execute()
 
         return jsonify({'message': 'Item added to cart.', 'cart': res.data[0]}), 200
@@ -717,7 +725,7 @@ def api_get_orders():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         res = supabase.table('order').select(
-            '*, order_item(order_item_id, product_id, qty, price, product(product_name, image_url, price)), payment(*)'
+            '*, order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url, price)), payment(*), branch(branch_name)'
         ).eq('customer_id', customer_id).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
