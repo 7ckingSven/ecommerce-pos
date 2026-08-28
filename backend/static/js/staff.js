@@ -693,39 +693,72 @@ async function updateOrderStatus(id, status) {
 // ══════════════════════════════════════════════════════
 // SALES SUMMARY
 // ══════════════════════════════════════════════════════
+let allSummaryOrders = []; // store all orders for date filtering
+
 async function loadSummary() {
   try {
-    const res    = await fetch('/api/staff/orders?limit=100');
-    const orders = await res.json();
-    const today  = new Date().toLocaleDateString('en-PH');
+    const res    = await fetch('/api/staff/orders?limit=500');
+    allSummaryOrders = await res.json();
 
-    const todayOrders = orders.filter(o =>
-      new Date(o.date).toLocaleDateString('en-PH') === today
-    );
+    // Set today's date in picker and render
+    const today = new Date().toISOString().split('T')[0];
+    const picker = document.getElementById('summaryDatePicker');
+    if (picker && !picker.value) picker.value = today;
 
-    const todayTotal = todayOrders
-      .filter(o => o.status === 'completed')
-      .reduce((s, o) => s + Number(o.total || 0), 0);
-
-    document.getElementById('summaryToday').textContent  = peso(todayTotal);
-    document.getElementById('summaryOrders').textContent = todayOrders.length;
-    document.getElementById('summaryWalkin').textContent = todayOrders.filter(o => o.order_type === 'walk_in').length;
-    document.getElementById('summaryOnline').textContent = todayOrders.filter(o => o.order_type === 'online').length;
-
-    document.getElementById('summaryTodayBody').innerHTML = todayOrders.length
-      ? todayOrders.map(o => `
-          <tr>
-            <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
-            <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-            <td>${badge(o.order_type)}</td>
-            <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
-            <td>${peso(o.total)}</td>
-            <td>${new Date(o.date).toLocaleTimeString('en-PH', { hour: '2-digit', minute: '2-digit' })}</td>
-            <td>${badge(o.status)}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="7" class="table-empty">No transactions today yet</td></tr>';
-
+    renderSummaryForDate(picker?.value || today);
   } catch (e) { console.error('Summary error:', e); }
+}
+
+function renderSummaryForDate(dateStr) {
+  const isToday = dateStr === new Date().toISOString().split('T')[0];
+  const label   = isToday ? 'Today' : new Date(dateStr + 'T00:00:00').toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' });
+
+  // Update labels
+  const summaryLabel = document.getElementById('summaryLabel');
+  const tableTitle   = document.getElementById('summaryTableTitle');
+  if (summaryLabel) summaryLabel.textContent = `${label}'s Sales`;
+  if (tableTitle)   tableTitle.textContent   = `${label}'s Transactions`;
+
+  const labelEl = document.getElementById('summaryDateLabel');
+  if (labelEl) labelEl.textContent = isToday ? '📅 Today' : `📅 ${label}`;
+
+  // Filter orders by date
+  const filtered = allSummaryOrders.filter(o => {
+    const d = new Date(o.date || o.created_at || 0);
+    return d.toISOString().split('T')[0] === dateStr;
+  });
+
+  const total  = filtered.filter(o => o.status === 'completed').reduce((s,o) => s + Number(o.total || 0), 0);
+
+  document.getElementById('summaryToday').textContent  = peso(total);
+  document.getElementById('summaryOrders').textContent = filtered.length;
+  document.getElementById('summaryWalkin').textContent = filtered.filter(o => o.order_type === 'walk_in').length;
+  document.getElementById('summaryOnline').textContent = filtered.filter(o => o.order_type === 'online').length;
+
+  document.getElementById('summaryTodayBody').innerHTML = filtered.length
+    ? filtered.map(o => `
+        <tr>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+          <td>${badge(o.order_type)}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
+          <td>${peso(o.total)}</td>
+          <td>${new Date(o.date || o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' })}</td>
+          <td>${badge(o.status)}</td>
+        </tr>`).join('')
+    : `<tr><td colspan="7" class="table-empty">No transactions for ${label}</td></tr>`;
+}
+
+function loadSummaryByDate(dateStr) {
+  if (!dateStr) return;
+  renderSummaryForDate(dateStr);
+}
+
+function resetSummaryDate() {
+  const today  = new Date().toISOString().split('T')[0];
+  const picker = document.getElementById('summaryDatePicker');
+  if (picker) picker.value = today;
+  renderSummaryForDate(today);
 }
 
 // ─── Init ─────────────────────────────────────────────
