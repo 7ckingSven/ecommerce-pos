@@ -207,16 +207,17 @@
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Image</th><th>Product Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Discount</th><th>Branch Stock</th><th>Status</th><th>Actions</th></tr>
+              <tr><th>Image</th><th>Product Name</th><th>Brand</th><th>Category</th><th>Price</th><th>Status</th><th>Actions</th></tr>
             </thead>
-            <tbody id="productsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
+            <tbody id="productsBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
       </div>
     </section>
 
     <!-- ─── INVENTORY SECTION ──────────────────────── -->
-    <section class="section" id="section-inventory">
+        <section class="section" id="section-inventory">
+
       <!-- Low Stock Alert Banner -->
       <div id="lowStockBanner" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 16px;margin-bottom:1rem;display:flex;align-items:center;gap:10px;">
         <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
@@ -224,6 +225,7 @@
         <button class="btn-text" style="margin-left:auto;color:#ef4444;" onclick="filterInventoryType('low_stock', document.getElementById('invTypeFilter'))">View Low Stock</button>
       </div>
 
+      <!-- Toolbar: Search + Filters + Action Buttons -->
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -249,6 +251,7 @@
           Adjust Stock
         </button>
       </div>
+
       <!-- Inventory Summary Stats -->
       <div class="stat-grid" style="margin-bottom:1.5rem;">
         <div class="stat-card">
@@ -266,6 +269,16 @@
         <div class="stat-card">
           <div class="stat-icon stat-icon--yellow"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg></div>
           <div class="stat-info"><span class="stat-label">Net Movement</span><span class="stat-value" id="invStatNet">—</span><span class="stat-sub">Total units change</span></div>
+        </div>
+      </div>
+
+      <!-- Branch Stock Summary -->
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h3 class="card-title">🏪 Branch Stock Summary</h3>
+        </div>
+        <div id="branchStockSummary" style="padding:0.5rem 0;">
+          <p style="color:var(--text-muted);font-size:13px;">Loading...</p>
         </div>
       </div>
 
@@ -296,6 +309,8 @@
         </div>
       </div>
     </section>
+
+
 
     <!-- ─── ORDERS SECTION ────────────────────────── -->
     <section class="section" id="section-orders">
@@ -537,14 +552,13 @@
             <thead>
               <tr>
                 <th>Discount Name</th>
-                <th>Percentage</th>
+                <th>Percentage &amp; Status</th>
                 <th>Assigned Products</th>
-                <th>Created</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody id="discountsBody">
-              <tr><td colspan="5" class="table-empty">Loading...</td></tr>
+              <tr><td colspan="4" class="table-empty">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -561,15 +575,14 @@
             <thead>
               <tr>
                 <th>Product</th>
-                <th>Category</th>
                 <th>Original Price</th>
                 <th>Discount</th>
-                <th>Discounted Price</th>
+                <th>Sale Price</th>
                 <th>Action</th>
               </tr>
             </thead>
             <tbody id="discountedProductsBody">
-              <tr><td colspan="6" class="table-empty">Loading...</td></tr>
+              <tr><td colspan="5" class="table-empty">Loading...</td></tr>
             </tbody>
           </table>
         </div>
@@ -654,21 +667,14 @@
             <option value="inactive">Inactive</option>
           </select>
         </div>
-        <!-- Discount assignment -->
-        <div class="form-group">
-          <label class="form-label">Discount (optional)</label>
-          <select id="pDiscount" class="form-input form-select">
-            <option value="">No Discount</option>
-          </select>
-        </div>
         <div class="form-group">
           <label class="form-label">Description</label>
           <textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..."></textarea>
         </div>
         <div class="form-group">
-          <label class="form-label">Product Images <span style="font-weight:400;color:var(--text-muted);">(up to 20 — first image is main thumbnail)</span></label>
+          <label class="form-label">Product Images <span style="font-weight:400;color:var(--text-muted);">(optional — first image is main thumbnail)</span></label>
           <input type="file" id="pImages" class="form-input" accept="image/jpg,image/jpeg,image/png" multiple onchange="previewImages(this)"/>
-          <span class="field-hint">Select multiple images at once. JPG, JPEG, PNG only. Max 5MB each. Up to 20 images.</span>
+          <span class="field-hint">Optional. JPG, JPEG, PNG only. Max 5MB each. Up to 20 images.</span>
           <!-- Image previews -->
           <div id="imagePreviewsWrap" style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;"></div>
           <!-- Existing images when editing -->
@@ -676,16 +682,7 @@
           <input type="hidden" id="pExistingImages" value="[]"/>
         </div>
 
-        <!-- Available At -->
-        <div class="form-group">
-          <label class="form-label">Available At <span class="req">*</span></label>
-          <select id="pAvailableAt" class="form-input form-select">
-            <option value="both">Both Branches</option>
-            <option value="triple_e">Triple E Only</option>
-            <option value="fiel_collins">Fiel Collins Only</option>
-          </select>
-          <span class="field-hint">Which branch sells this product?</span>
-        </div>
+        <!-- Available At removed — branch stock controls visibility -->
 
         <!-- Net Weight + Unit -->
         <div class="form-group">
@@ -742,6 +739,14 @@
             <label class="form-label">Percentage (%) <span class="req">*</span></label>
             <input type="number" id="dPercentage" class="form-input" step="0.01" min="0.01" max="100" required placeholder="e.g. 10"/>
           </div>
+          <div class="form-group">
+            <label class="form-label">Starts From <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+            <input type="datetime-local" id="dStartsAt" class="form-input"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ends On <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+            <input type="datetime-local" id="dEndsAt" class="form-input"/>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeDiscountModal()">Cancel</button>
@@ -762,9 +767,14 @@
     </div>
     <div class="modal-body">
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem;">Select products to apply this discount to. Uncheck to remove discount from a product.</p>
-      <div class="search-wrap" style="margin-bottom:1rem;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-        <input type="text" class="search-input" placeholder="Search products..." oninput="filterAssignProducts(this.value)"/>
+      <div style="display:flex;gap:8px;margin-bottom:1rem;">
+        <div class="search-wrap" style="flex:1;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          <input type="text" id="assignSearchInput" class="search-input" placeholder="Search products..." oninput="filterAssignProducts(this.value)"/>
+        </div>
+        <select id="assignBranchFilter" class="filter-select" style="width:160px;" onchange="filterAssignProducts(document.getElementById('assignSearchInput').value)">
+          <option value="">All Branches</option>
+        </select>
       </div>
       <div id="assignProductList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
         <p class="table-empty">Loading products...</p>
@@ -897,7 +907,6 @@
               <option value="loss">Loss</option>
               <option value="stolen">Stolen</option>
               <option value="damaged">Damaged</option>
-              <option value="expired">Expired</option>
               <option value="other">Other</option>
             </select>
           </div>
@@ -1072,6 +1081,12 @@
   </div>
 
 <div class="toast" id="toast"></div>
+
+  <!-- Generic Order Detail Modal -->
+  <div class="modal-overlay" id="genericModalOverlay" onclick="closeModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;"></div>
+  <div class="modal" id="genericModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1001;width:90%;max-width:600px;max-height:85vh;overflow-y:auto;background:var(--card-bg);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div id="genericModalContent"></div>
+  </div>
 
   <script src="{{ url_for('static', filename='js/admin.js') }}?v=2"></script>
 </body>

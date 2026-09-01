@@ -216,6 +216,11 @@ export default function ProductDetailScreen({ route, navigation }) {
           {/* Product Name */}
           <Text style={styles.name}>{product.product_name}</Text>
 
+          {/* Sold Count */}
+          <Text style={styles.soldCount}>
+            {Number(product.total_sold || 0).toLocaleString()} sold
+          </Text>
+
           {/* Price Block */}
           {hasDiscount ? (
             <View style={styles.priceBlock}>
@@ -386,6 +391,7 @@ const styles = StyleSheet.create({
   discountTagText:       { fontSize:11, fontWeight:'700', color: COLORS.white },
 
   // Product name
+  soldCount:      { fontSize: 12, color: COLORS.textMuted, marginBottom: 4 },
   name:                  { fontSize:22, fontWeight:'700', color: COLORS.dark, marginBottom: SPACING.sm },
 
   // Price — no discount

@@ -22,6 +22,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const [refNo,         setRefNo]         = useState('');
   const [loading,       setLoading]       = useState(false);
   const [shippingFee,   setShippingFee]   = useState(0);
+  const [orderLoading,  setOrderLoading]  = useState(false);
   const [profileLoading,setProfileLoading]= useState(true);
   const [address,       setAddress]       = useState('');
   const [customerName,  setCustomerName]  = useState('');
@@ -227,6 +228,8 @@ export default function CheckoutScreen({ route, navigation }) {
 
   // ─── Place Order ──────────────────────────────────────
   async function handlePlaceOrder() {
+    if (orderLoading) return;
+    setOrderLoading(true);
     if (!address.trim()) {
       Alert.alert('Address Required', 'Please add a delivery address before placing your order.', [
         { text: 'Add Address', onPress: openAddressModal },
@@ -475,7 +478,7 @@ export default function CheckoutScreen({ route, navigation }) {
         <TouchableOpacity
           style={styles.orderBtn}
           onPress={handlePlaceOrder}
-          disabled={loading}
+          disabled={orderLoading || loading}
           activeOpacity={0.85}
         >
           {loading ? (

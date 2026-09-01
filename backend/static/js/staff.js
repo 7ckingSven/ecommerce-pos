@@ -1,3 +1,20 @@
+// ─── Button Loading Helper ───────────────────────────
+function setButtonLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn._orig    = btn.innerHTML;
+    btn.disabled = true;
+    btn.style.opacity = '0.7';
+    btn.style.cursor  = 'not-allowed';
+    btn.innerHTML = '<span style="display:inline-flex;align-items:center;gap:6px;"><svg style="width:14px;height:14px;animation:spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Processing...</span>';
+  } else {
+    btn.disabled = false;
+    btn.style.opacity = '1';
+    btn.style.cursor  = '';
+    btn.innerHTML = btn._orig || btn.innerHTML;
+  }
+}
+
 // ══════════════════════════════════════════════════════
 // STAFF DASHBOARD — Triple E & Fiel Collins
 // ══════════════════════════════════════════════════════
@@ -35,6 +52,36 @@ const pageTitles = {
   requests:  ['Stock Requests',   'Request stock from admin'],
 };
 
+
+// ─── Auto Refresh (5 seconds) ─────────────────────────
+let autoRefreshTimer = null;
+const AUTO_REFRESH_SECTIONS = ['orders', 'inventory', 'pos'];
+const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
+
+function startAutoRefresh(section) {
+  stopAutoRefresh();
+  if (!AUTO_REFRESH_SECTIONS.includes(section)) return;
+  autoRefreshTimer = setInterval(() => {
+    if (loaders[section]) loaders[section]();
+  }, AUTO_REFRESH_INTERVAL);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopAutoRefresh();
+  } else {
+    const section = localStorage.getItem('staff-section') || 'pos';
+    startAutoRefresh(section);
+  }
+});
+
 function showSection(name, el) {
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
   if (el) {
@@ -51,6 +98,7 @@ function showSection(name, el) {
   window.location.hash = name;
   localStorage.setItem('staff-section', name);
   loaders[name] && loaders[name]();
+  startAutoRefresh(name);
 }
 
 const loaders = {
@@ -337,10 +385,13 @@ function computeChange() {
 
 async function processOrder() {
   if (!orderItems.length) return;
+  const processBtn = document.getElementById('processOrderBtn');
+  setButtonLoading(processBtn, true);
 
   // Branch is auto-detected from staff profile
   const branchId = staffBranchId || document.getElementById('posBranch').value;
   if (!branchId) {
+    setButtonLoading(processBtn, false);
     showToast('Branch not assigned. Please contact admin.', 'error');
     return;
   }
@@ -391,10 +442,15 @@ async function processOrder() {
 
     const data = await res.json();
     if (res.ok) {
-      showToast('Order processed successfully!');
-      showReceipt(data);
+      // Capture receipt data BEFORE clearing order
+      const receiptItems    = [...orderItems];
+      const receiptReceived = parseFloat(document.getElementById('posCashReceived').value) || 0;
+      const receiptPayment  = selectedPayment;
+      const receiptRefNo    = document.getElementById('posGcashRef').value;
       clearOrder();
       loadPosProducts();
+      showToast('Order processed successfully!');
+      showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo);
     } else {
       showToast(data.error || 'Failed to process order.', 'error');
     }
@@ -404,11 +460,21 @@ async function processOrder() {
 }
 
 // ─── Receipt ──────────────────────────────────────────
-function showReceipt(data) {
-  const total    = orderItems.length ? orderItems.reduce((s, i) => s + i.price * i.quantity, 0) : data.total;
-  const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
-  const change   = received - total;
-  const now      = new Date();
+function showReceipt(data, items, received, payment, refNo) {
+  // Use passed parameters (captured before clearOrder)
+  items    = items    || orderItems;
+  received = received !== undefined ? received : parseFloat(document.getElementById('posCashReceived').value) || 0;
+  payment  = payment  || selectedPayment;
+  refNo    = refNo    || document.getElementById('posGcashRef').value;
+
+  const total     = items.reduce((s, i) => s + i.price * i.quantity, 0) || Number(data.total) || 0;
+  const change    = received - total;
+  const now       = new Date();
+
+  // VAT Inclusive (12%) breakdown
+  const VAT_RATE  = 0.12;
+  const vatAmount = total - (total / (1 + VAT_RATE));
+  const baseAmt   = total - vatAmount;
 
   // Get branch name for receipt
   const branchId   = staffBranchId || document.getElementById('posBranch').value;
@@ -424,18 +490,27 @@ function showReceipt(data) {
     </div>
     <hr class="receipt-divider"/>
     <div style="margin-bottom:0.5rem;">
-      ${orderItems.map(i => `
+      ${items.map(i => `
         <div class="receipt-row">
           <span>${i.name} x${i.quantity}</span>
           <span>${peso(i.price * i.quantity)}</span>
         </div>`).join('')}
     </div>
     <hr class="receipt-divider"/>
+    <div class="receipt-row">
+      <span>VAT Exclusive Amount</span>
+      <span>${peso(baseAmt)}</span>
+    </div>
+    <div class="receipt-row">
+      <span>VAT (12%)</span>
+      <span>${peso(vatAmount)}</span>
+    </div>
+    <hr class="receipt-divider"/>
     <div class="receipt-row receipt-total">
-      <span>TOTAL</span>
+      <span>TOTAL (VAT Inclusive)</span>
       <span>${peso(total)}</span>
     </div>
-    ${selectedPayment === 'walk_in_cash' ? `
+    ${payment === 'walk_in_cash' ? `
       <div class="receipt-row">
         <span>Cash Received</span>
         <span>${peso(received)}</span>
@@ -444,15 +519,16 @@ function showReceipt(data) {
         <span>Change</span>
         <span>${peso(Math.max(change, 0))}</span>
       </div>` : ''}
-    ${selectedPayment === 'gcash' ? `
+    ${payment === 'gcash' ? `
       <div class="receipt-row">
         <span>GCash Ref</span>
-        <span>${document.getElementById('posGcashRef').value}</span>
+        <span>${refNo}</span>
       </div>` : ''}
     <hr class="receipt-divider"/>
     <div class="receipt-footer">
       Order ID: ${shortId(data.order_id)}<br>
-      Payment: ${selectedPayment.replace(/_/g, ' ').toUpperCase()}<br>
+      Payment: ${payment.replace(/_/g, ' ').toUpperCase()}<br>
+      VAT Reg. TIN: 000-000-000-000<br>
       Thank you for shopping!
     </div>`;
 
@@ -611,6 +687,8 @@ function closeStockModal() {
 
 async function submitStock(e) {
   e.preventDefault();
+  const stockBtn = e.submitter || document.querySelector('#stockForm button[type="submit"]');
+  setButtonLoading(stockBtn, true);
   const fromBranch = document.getElementById('stockFromBranch').value;
   const toBranch   = document.getElementById('stockToBranch').value;
   if (!toBranch) { showToast('Please select a destination branch.', 'error'); return; }
@@ -702,41 +780,101 @@ function renderStaffOrders(orders) {
 }
 
 // ─── View Staff Order Items Modal ─────────────────────
+
+// ─── Generic Modal ────────────────────────────────────
+function showGenericModal(html) {
+  const overlay = document.getElementById('genericModalOverlay');
+  const modal   = document.getElementById('genericModal');
+  const cont    = document.getElementById('genericModalContent');
+  if (!overlay || !modal || !cont) return;
+  cont.innerHTML        = html;
+  overlay.style.display = 'block';
+  modal.style.display   = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeGenericModal() {
+  const overlay = document.getElementById('genericModalOverlay');
+  const modal   = document.getElementById('genericModal');
+  if (overlay) overlay.style.display = 'none';
+  if (modal)   modal.style.display   = 'none';
+  document.body.style.overflow = '';
+}
+
 function viewStaffOrderItems(order) {
-  const items = order.order_item || [];
-  const content = items.length
+  const items    = order.order_item || [];
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const branch   = order.branch_name || order.branch?.branch_name || staffBranchName || '—';
+
+  // Parse delivery address
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : order.address || '';
+
+  const itemsHtml = items.length
     ? items.map(i => {
         const opts = i.selected_options && Object.keys(i.selected_options).length > 0
-          ? Object.entries(i.selected_options).map(([k,v]) => `<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">${k}: ${v}</span>`).join(' ')
-          : '<span style="color:var(--text-muted);font-size:11px;">No options</span>';
-        return `
-          <div style="padding:10px 0;border-bottom:1px solid var(--border);">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-              <div>
-                <div style="font-size:13px;font-weight:600;">${i.product?.product_name || '—'}</div>
-                <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${opts}</div>
-              </div>
-              <div style="text-align:right;margin-left:12px;">
-                <div style="font-size:13px;font-weight:700;">₱${Number(i.price * i.qty).toFixed(2)}</div>
-                <div style="font-size:11px;color:var(--text-muted);">x${i.qty} @ ₱${Number(i.price).toFixed(2)}</div>
-              </div>
-            </div>
-          </div>`;
+          ? Object.entries(i.selected_options).map(([k,v]) =>
+              '<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">' + k + ': ' + v + '</span>'
+            ).join(' ')
+          : '';
+        const imgUrl = i.product?.image_url;
+        const imgHtml = imgUrl
+          ? '<img src="' + imgUrl + '" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="' + (i.product?.product_name || '') + '"/>'
+          : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
+        const optsHtml = opts
+          ? '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' + opts + '</div>'
+          : '';
+        return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
+          + '<div style="display:flex;gap:10px;align-items:flex-start;">'
+          + imgHtml
+          + '<div style="flex:1;">'
+          + '<div style="font-size:13px;font-weight:600;">' + (i.product?.product_name || '—') + '</div>'
+          + optsHtml
+          + '</div>'
+          + '<div style="text-align:right;flex-shrink:0;">'
+          + '<div style="font-size:13px;font-weight:700;">₱' + Number(i.price * i.qty).toFixed(2) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-muted);">x' + i.qty + ' @ ₱' + Number(i.price).toFixed(2) + '</div>'
+          + '</div></div></div>';
       }).join('')
     : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
 
-  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  document.getElementById('modalTitle').textContent = `Order #${shortId(order.order_id)} — ${customer}`;
-  document.getElementById('modalBody').innerHTML = `
-    ${content}
-    <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
-      <span style="font-weight:700;">Total</span>
-      <span style="font-weight:700;color:#16a34a;">₱${Number(order.total).toFixed(2)}</span>
-    </div>
-  `;
-  document.getElementById('modalOverlay').classList.add('open');
-  document.getElementById('modal').classList.add('open');
+  const shippingHtml = order.shipping_fee != null
+    ? '<span style="margin-left:8px;color:var(--text-muted);">· Shipping: ' + (Number(order.shipping_fee) === 0 ? 'FREE' : peso(order.shipping_fee)) + '</span>'
+    : '';
+
+  const addrHtml = (order.order_type === 'online')
+    ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
+      + '<div style="color:var(--text-muted);margin-bottom:2px;">📍 Delivery Address</div>'
+      + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
+      + shippingHtml
+      + '</div>'
+    : '';
+
+  showGenericModal(
+    '<div style="padding:1.5rem;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">'
+    + '<div><h3 style="margin:0;font-size:16px;">Order Details</h3>'
+    + '<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#' + shortId(order.order_id) + '</p></div>'
+    + '<button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>'
+    + '</div>'
+    + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
+    + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ' + branch + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
+    + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
+    + '</div>'
+    + addrHtml
+    + '<div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>'
+    + itemsHtml
+    + '<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">'
+    + '<span style="font-weight:700;">Grand Total</span>'
+    + '<span style="font-weight:700;color:#16a34a;font-size:16px;">₱' + Number(order.total).toFixed(2) + '</span>'
+    + '</div></div>'
+  );
 }
+
 
 function filterStaffOrders(status) {
   renderStaffOrders(status ? staffOrders.filter(o => o.status === status) : staffOrders);
@@ -788,7 +926,7 @@ function renderSummaryForDate(dateStr) {
 
   // Filter orders by date
   const filtered = allSummaryOrders.filter(o => {
-    const d = new Date(o.date || o.created_at || 0);
+    const d = new Date(o.created_at || o.date || 0);
     return d.toISOString().split('T')[0] === dateStr;
   });
 
@@ -900,6 +1038,8 @@ function updateCurrentStock(sel) {
 
 async function submitRequest(e) {
   e.preventDefault();
+  const reqBtn = e.submitter || document.querySelector('#requestForm button[type="submit"]');
+  setButtonLoading(reqBtn, true);
   const productId = document.getElementById('reqProduct').value;
   const qty       = parseInt(document.getElementById('reqQty').value);
   const note      = document.getElementById('reqNote').value;
@@ -952,3 +1092,8 @@ window.addEventListener('beforeunload', function () {
   else
     localStorage.removeItem('staff-open-modal');
 });
+(function() {
+  const style = document.createElement('style');
+  style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
+  document.head.appendChild(style);
+})();

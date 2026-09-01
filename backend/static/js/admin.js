@@ -1,3 +1,21 @@
+// ─── Button Loading Helper ───────────────────────────
+function setButtonLoading(btn, loading, originalText = null) {
+  if (!btn) return;
+  if (loading) {
+    btn._originalText   = btn.innerHTML;
+    btn._originalDisabled = btn.disabled;
+    btn.disabled        = true;
+    btn.style.opacity   = '0.7';
+    btn.style.cursor    = 'not-allowed';
+    btn.innerHTML       = '<span style="display:inline-flex;align-items:center;gap:6px;"><svg style="width:14px;height:14px;animation:spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Processing...</span>';
+  } else {
+    btn.disabled        = btn._originalDisabled || false;
+    btn.style.opacity   = '1';
+    btn.style.cursor    = '';
+    btn.innerHTML       = originalText || btn._originalText || btn.innerHTML;
+  }
+}
+
 // ══════════════════════════════════════════════════════
 // ADMIN DASHBOARD — Triple E & Fiel Collins
 // ══════════════════════════════════════════════════════
@@ -41,6 +59,38 @@ const pageTitles = {
   users:     ['User Management',   'Manage staff and customer accounts'],
 };
 
+
+// ─── Auto Refresh (5 seconds) ─────────────────────────
+let autoRefreshTimer = null;
+const AUTO_REFRESH_SECTIONS = ['overview', 'orders', 'inventory'];
+const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
+
+function startAutoRefresh(section) {
+  stopAutoRefresh(); // clear any existing timer
+  if (!AUTO_REFRESH_SECTIONS.includes(section)) return;
+  autoRefreshTimer = setInterval(() => {
+    if (loaders[section]) loaders[section]();
+  }, AUTO_REFRESH_INTERVAL);
+}
+
+function stopAutoRefresh() {
+  if (autoRefreshTimer) {
+    clearInterval(autoRefreshTimer);
+    autoRefreshTimer = null;
+  }
+}
+
+// Stop refresh when tab is hidden
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) {
+    stopAutoRefresh();
+  } else {
+    // Resume for current section
+    const section = localStorage.getItem('admin-section') || 'overview';
+    startAutoRefresh(section);
+  }
+});
+
 function showSection(name, el) {
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
   if (el) {
@@ -57,6 +107,7 @@ function showSection(name, el) {
   window.location.hash = name;
   localStorage.setItem('admin-section', name);
   loaders[name] && loaders[name]();
+  startAutoRefresh(name);
 }
 
 // ─── Toast ────────────────────────────────────────────
@@ -228,10 +279,6 @@ async function loadProducts() {
 function renderProducts(products) {
   document.getElementById('productsBody').innerHTML = products.length
     ? products.map(p => {
-        const disc = p.discount;
-        const discountCell = disc
-          ? `<span class="badge badge--blue">${disc.discount_name} (${disc.percentage}%)</span>`
-          : `<span style="color:var(--text-muted);font-size:12px;">—</span>`;
         return `
           <tr>
             <td>
@@ -244,12 +291,6 @@ function renderProducts(products) {
             <td>${p.brand || '—'}</td>
             <td>${p.category}</td>
             <td>${peso(p.price)}</td>
-            <td>${discountCell}</td>
-            <td>
-              ${p.branch_stock?.length
-                ? p.branch_stock.map(bs => `<span style="font-size:11px;background:rgba(22,163,74,0.1);color:var(--g-400);border-radius:4px;padding:2px 6px;margin-right:3px;">${bs.branch?.branch_name || '—'}: ${bs.quantity}</span>`).join('')
-                : `<span style="font-size:12px;">${p.quantity}</span>`}
-            </td>
             <td>${badge(p.status)}</td>
             <td>
               <div style="display:flex;gap:6px;">
@@ -263,7 +304,7 @@ function renderProducts(products) {
             </td>
           </tr>`;
       }).join('')
-    : '<tr><td colspan="9" class="table-empty">No products found</td></tr>';
+    : '<tr><td colspan="7" class="table-empty">No products found</td></tr>';
 }
 
 function filterProducts(q) {
@@ -305,11 +346,7 @@ function openProductModal(product = null) {
   document.getElementById('pDescription').value = product?.description || '';
 
   // Populate discount dropdown
-  const discSel = document.getElementById('pDiscount');
-  discSel.innerHTML = '<option value="">No Discount</option>' +
-    allDiscounts.map(d =>
-      `<option value="${d.discount_id}" ${product?.discount_id === d.discount_id ? 'selected' : ''}>${d.discount_name} (${d.percentage}%)</option>`
-    ).join('');
+  // Discount managed via Discount modal — not in product creation
 
   // Clear new image previews
   const previewWrap = document.getElementById('imagePreviewsWrap');
@@ -330,8 +367,7 @@ function openProductModal(product = null) {
   }
 
   // Available At
-  const availEl = document.getElementById('pAvailableAt');
-  if (availEl) availEl.value = product?.available_at || 'both';
+  // available_at removed — branch stock controls visibility
 
   // Option Groups — load existing
   optionGroups = [];
@@ -488,6 +524,8 @@ async function deleteProduct(id, name) {
 
 async function submitProduct(e) {
   e.preventDefault();
+  const submitBtn = e.submitter || document.querySelector('#productForm button[type="submit"]');
+  setButtonLoading(submitBtn, true);
   const id       = document.getElementById('productId').value;
   const formData = new FormData();
   formData.append('product_name',  document.getElementById('pName').value);
@@ -505,8 +543,8 @@ async function submitProduct(e) {
   if (existingInput) formData.append('existing_images', existingInput.value);
   formData.append('status',        document.getElementById('pStatus').value);
   formData.append('description',   document.getElementById('pDescription').value);
-  formData.append('discount_id',   document.getElementById('pDiscount').value);
-  formData.append('available_at',  document.getElementById('pAvailableAt').value);
+  formData.append('discount_id', ''); // managed via Discount modal
+  // available_at removed — not needed anymore
   const ogEl2 = document.getElementById('pOptionGroups');
   formData.append('option_groups', ogEl2 ? ogEl2.value : '[]');
   const nwEl2   = document.getElementById('pNetWeight');
@@ -618,6 +656,81 @@ function removeExistingImage(idx) {
 // Store all inventory records globally for filtering
 let allInventory = [];
 
+
+// ─── Branch Stock Summary in Inventory ───────────────
+function updateBranchStockSummary(products) {
+  const wrap = document.getElementById('branchStockSummary');
+  if (!wrap) return;
+
+  // Group by branch
+  const branchMap = {};
+  products.forEach(p => {
+    (p.branch_stock || []).forEach(bs => {
+      const name = bs.branch?.branch_name || 'Unknown';
+      if (!branchMap[name]) branchMap[name] = [];
+      branchMap[name].push({
+        product_name: p.product_name,
+        quantity:     bs.quantity,
+        image_url:    p.image_url,
+        image_urls:   p.image_urls,
+      });
+    });
+  });
+
+  if (!Object.keys(branchMap).length) {
+    wrap.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">No branch stock data found.</p>';
+    return;
+  }
+
+  // Render branches side by side using CSS classes
+  wrap.innerHTML = `
+    <div class="branch-stock-grid">
+      ${Object.entries(branchMap).map(([branch, items]) => `
+        <div class="branch-stock-card">
+          <div class="branch-stock-header">
+            <span>🏪</span>
+            <span class="branch-stock-name">${branch}</span>
+            <span class="branch-stock-count">${items.length} items</span>
+          </div>
+          <table class="data-table" style="margin:0;">
+            <thead>
+              <tr>
+                <th>Product</th>
+                <th style="text-align:center;">Stock</th>
+                <th>Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${items.map(i => `
+                <tr>
+                  <td>
+                    <div style="display:flex;align-items:center;gap:8px;">
+                      ${i.image_url
+                        ? `<img src="${i.image_urls?.length ? i.image_urls[0] : i.image_url}" class="product-img-cell" alt="${i.product_name}" style="width:32px;height:32px;"/>`
+                        : `<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>`}
+                      <span style="font-size:12px;font-weight:600;">${i.product_name}</span>
+                    </div>
+                  </td>
+                  <td style="text-align:center;">
+                    <span class="branch-stock-qty ${i.quantity === 0 ? 'out-stock' : i.quantity <= 5 ? 'low-stock' : 'in-stock'}">
+                      ${i.quantity}
+                    </span>
+                  </td>
+                  <td>
+                    ${i.quantity === 0
+                      ? '<span class="badge badge--red">Out of Stock</span>'
+                      : i.quantity <= 5
+                        ? '<span class="badge badge--yellow">Low Stock</span>'
+                        : '<span class="badge badge--green">In Stock</span>'}
+                  </td>
+                </tr>`).join('')}
+            </tbody>
+          </table>
+        </div>
+      `).join('')}
+    </div>`;
+}
+
 async function loadInventory() {
   try {
     const [invRes, prodRes] = await Promise.all([
@@ -626,6 +739,9 @@ async function loadInventory() {
     ]);
     allInventory    = await invRes.json();
     const products  = await prodRes.json();
+
+    // Update branch stock summary with products that have branch_stock
+    updateBranchStockSummary(products);
 
     // Check low stock products — use sum of branch_stock quantities as the real total
     const getBranchTotal = p => p.branch_stock?.length
@@ -790,6 +906,8 @@ function closeAddStockModal() {
 
 async function submitAddStock(e) {
   e.preventDefault();
+  const addStockBtn = e.submitter || document.querySelector('#addStockForm button[type="submit"]');
+  setButtonLoading(addStockBtn, true);
   const data = {
     product_id:   document.getElementById('addStockProduct').value,
     quantity:     parseInt(document.getElementById('addStockQty').value),
@@ -956,34 +1074,81 @@ async function loadOrders() {
   try {
     const res  = await fetch('/api/admin/orders?limit=80');
     const data = await res.json();
-    // Sort newest first using created_at timestamp
-    allOrders = data.sort((a, b) => {
-      // Use created_at (precise timestamp) for sorting — requires created_at column in order table
+    allOrders  = data.sort((a, b) => {
       const da = a.created_at ? new Date(a.created_at) : new Date(a.date || 0);
       const db = b.created_at ? new Date(b.created_at) : new Date(b.date || 0);
       return db - da;
     });
     renderOrders(allOrders);
+    updateAdminOrdersBadge(allOrders);
   } catch (e) { console.error('Orders error:', e); }
+}
+
+function updateAdminOrdersBadge(orders) {
+  const badge   = document.getElementById('adminOrdersBadge');
+  if (!badge) return;
+  const pending = orders.filter(o => o.status === 'pending' && o.order_type === 'online').length;
+  if (pending > 0) {
+    badge.textContent  = pending > 99 ? '99+' : pending;
+    badge.style.display = 'inline-block';
+  } else {
+    badge.style.display = 'none';
+  }
 }
 
 
 // ─── View Order Items Modal ───────────────────────────
+
+// ─── Generic Modal ────────────────────────────────────
+function showModal(html) {
+  const overlay = document.getElementById('genericModalOverlay');
+  const modal   = document.getElementById('genericModal');
+  const content = document.getElementById('genericModalContent');
+  if (!overlay || !modal || !content) return;
+  content.innerHTML  = html;
+  overlay.style.display = 'block';
+  modal.style.display   = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeModal() {
+  const overlay = document.getElementById('genericModalOverlay');
+  const modal   = document.getElementById('genericModal');
+  if (overlay) overlay.style.display = 'none';
+  if (modal)   modal.style.display   = 'none';
+  document.body.style.overflow = '';
+}
+
 function viewOrderItems(order) {
-  const items   = order.order_item || [];
-  const content = items.length
+  const items    = order.order_item || [];
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const branch   = order.branch_name || order.branch?.branch_name || '—';
+
+  // Parse delivery address
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : order.address || '—';
+
+  const itemsHtml = items.length
     ? items.map(i => {
         const opts = i.selected_options && Object.keys(i.selected_options).length > 0
-          ? Object.entries(i.selected_options).map(([k,v]) => `<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">${k}: ${v}</span>`).join(' ')
-          : '<span style="color:var(--text-muted);font-size:11px;">No options selected</span>';
+          ? Object.entries(i.selected_options).map(([k,v]) =>
+              `<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">${k}: ${v}</span>`
+            ).join(' ')
+          : '';
+        const imgUrl = i.product?.image_url;
         return `
           <div style="padding:10px 0;border-bottom:1px solid var(--border);">
-            <div style="display:flex;justify-content:space-between;align-items:flex-start;">
-              <div>
+            <div style="display:flex;gap:10px;align-items:flex-start;">
+              ${imgUrl
+                ? `<img src="${imgUrl}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="${i.product?.product_name}"/>`
+                : `<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>`}
+              <div style="flex:1;">
                 <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${i.product?.product_name || '—'}</div>
-                <div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${opts}</div>
+                ${opts ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${opts}</div>` : ''}
               </div>
-              <div style="text-align:right;margin-left:12px;">
+              <div style="text-align:right;flex-shrink:0;">
                 <div style="font-size:13px;font-weight:700;">₱${Number(i.price * i.qty).toFixed(2)}</div>
                 <div style="font-size:11px;color:var(--text-muted);">x${i.qty} @ ₱${Number(i.price).toFixed(2)}</div>
               </div>
@@ -992,21 +1157,43 @@ function viewOrderItems(order) {
       }).join('')
     : '<p style="color:var(--text-muted);text-align:center;">No items found</p>';
 
-  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-
   showModal(`
-    <div style="padding:1.5rem;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+    <div style="padding:1.5rem;max-height:80vh;overflow-y:auto;">
+      <!-- Header -->
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
         <div>
-          <h3 style="margin:0;font-size:16px;">Order Items</h3>
-          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#${shortId(order.order_id)} · ${customer}</p>
+          <h3 style="margin:0;font-size:16px;">Order Details</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#${shortId(order.order_id)}</p>
         </div>
-        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);">✕</button>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
       </div>
-      ${content}
-      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;">
-        <span style="font-weight:700;">Total</span>
-        <span style="font-weight:700;color:#16a34a;">₱${Number(order.total).toFixed(2)}</span>
+
+      <!-- Order Info -->
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+        <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
+        <div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ${branch}</strong></div>
+        <div><span style="color:var(--text-muted);">Type</span><br/>${badge(order.order_type)}</div>
+        <div><span style="color:var(--text-muted);">Status</span><br/>${badge(order.status)}</div>
+        <div><span style="color:var(--text-muted);">Payment</span><br/>${order.payment?.payment_method ? badge(order.payment.payment_method) : '—'}</div>
+        <div><span style="color:var(--text-muted);">Date</span><br/><strong>${order.date || order.created_at ? new Date(order.date || order.created_at).toLocaleDateString('en-PH') : '—'}</strong></div>
+      </div>
+
+      <!-- Delivery Address (online orders only) -->
+      ${order.order_type === 'online' ? `
+        <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">
+          <div style="color:var(--text-muted);margin-bottom:2px;">📍 Delivery Address</div>
+          <strong>${addrString && addrString.trim() ? addrString : 'No address provided'}</strong>
+          ${order.shipping_fee != null ? `<span style="margin-left:8px;color:var(--text-muted);">· Shipping: ${Number(order.shipping_fee) === 0 ? 'FREE' : peso(order.shipping_fee)}</span>` : ''}
+        </div>` : ''}
+
+      <!-- Items -->
+      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>
+      ${itemsHtml}
+
+      <!-- Total -->
+      <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
+        <span style="font-weight:700;">Grand Total</span>
+        <span style="font-weight:700;color:#16a34a;font-size:16px;">₱${Number(order.total).toFixed(2)}</span>
       </div>
     </div>
   `);
@@ -1022,7 +1209,7 @@ function renderOrders(orders) {
           <td>${badge(o.order_type)}</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
-          <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
+          <td>${o.date || o.created_at ? new Date(o.date || o.created_at).toLocaleDateString('en-PH') : '—'}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
@@ -1346,36 +1533,84 @@ async function loadDiscounts() {
   } catch (e) { console.error('Discounts error:', e); }
 }
 
+
+// ─── Discount Status Helper ───────────────────────────
+function getDiscountStatus(d) {
+  const now   = new Date();
+  const start = d.starts_at ? new Date(d.starts_at) : null;
+  const end   = d.ends_at   ? new Date(d.ends_at)   : null;
+
+  if (end && now > end) return { label: '⛔ Ended',   color: '#ef4444', class: 'badge--red',    ended: true  };
+  if (start && now < start) {
+    const diff  = start - now;
+    const days  = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const label = days > 0 ? `⏰ Starts in ${days}d ${hours}h` : `⏰ Starts in ${hours}h`;
+    return { label, color: '#f59e0b', class: 'badge--yellow', ended: false };
+  }
+  if (end) {
+    const diff  = end - now;
+    const days  = Math.floor(diff / (1000 * 60 * 60 * 24));
+    const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+    const mins  = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+    let label;
+    if (days > 0)       label = `⏳ ${days}d ${hours}h left`;
+    else if (hours > 0) label = `⏳ ${hours}h ${mins}m left`;
+    else                label = `⏳ ${mins}m left`;
+    return { label, color: '#16a34a', class: 'badge--green', ended: false };
+  }
+  return { label: '✅ Active', color: '#16a34a', class: 'badge--green', ended: false };
+}
+
 function renderDiscounts(discounts) {
   document.getElementById('discountsBody').innerHTML = discounts.length
     ? discounts.map(d => {
-        const assignedCount = allProducts.filter(p => p.discount_id === d.discount_id).length;
+        const assignedProducts = allProducts.filter(p => p.discount_id === d.discount_id);
+        const assignedCount    = assignedProducts.length;
+        const previewNames     = assignedProducts.slice(0, 3).map(p => p.product_name).join(', ');
+        const hasMore          = assignedCount > 3;
+        const status = getDiscountStatus(d);
         return `
-          <tr>
-            <td><strong>${d.discount_name}</strong></td>
+          <tr style="${status.ended ? 'opacity:0.6;' : ''}">
             <td>
-              <span style="font-size:18px;font-weight:700;color:var(--g-400);">${d.percentage}%</span>
+              <strong>${d.discount_name}</strong>
+              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                Created ${new Date(d.created_at).toLocaleDateString('en-PH')}
+              </div>
+              ${d.starts_at ? `<div style="font-size:11px;color:var(--text-muted);">Starts: ${new Date(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
+              ${d.ends_at   ? `<div style="font-size:11px;color:var(--text-muted);">Ends: ${new Date(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
             </td>
             <td>
-              <span class="badge badge--blue">${assignedCount} product${assignedCount !== 1 ? 's' : ''}</span>
+              <span style="font-size:20px;font-weight:700;color:${status.ended ? '#ef4444' : 'var(--g-400)'};">${d.percentage}%</span>
+              <div style="font-size:11px;color:var(--text-muted);">off original price</div>
+              <span class="badge ${status.class}" style="margin-top:4px;display:inline-block;">${status.label}</span>
             </td>
-            <td>${new Date(d.created_at).toLocaleDateString('en-PH')}</td>
             <td>
-              <div style="display:flex;gap:6px;">
-                <button class="btn-icon" onclick="openAssignModal('${d.discount_id}', '${d.discount_name.replace(/'/g, "\\'")}')" title="Assign to products">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+              <div style="display:flex;flex-direction:column;gap:4px;">
+                <span class="badge badge--blue" style="align-self:flex-start;">${assignedCount} product${assignedCount !== 1 ? 's' : ''}</span>
+                <span style="font-size:11px;color:var(--text-muted);">
+                  ${assignedCount > 0 ? previewNames + (hasMore ? ` +${assignedCount - 3} more` : '') : 'No products assigned yet'}
+                </span>
+              </div>
+            </td>
+            <td>
+              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+                <button class="btn btn-cancel" style="font-size:12px;padding:5px 10px;display:inline-flex;align-items:center;gap:4px;"
+                  onclick="openAssignModal('${d.discount_id}', '${d.discount_name.replace(/'/g, "\\'")}')">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
+                  Assign
                 </button>
                 <button class="btn-icon" onclick="editDiscount('${d.discount_id}')" title="Edit">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
                 <button class="btn-icon btn-icon--red" onclick="deleteDiscount('${d.discount_id}', '${d.discount_name.replace(/'/g, "\\'")}')" title="Delete">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                 </button>
               </div>
             </td>
           </tr>`;
       }).join('')
-    : '<tr><td colspan="5" class="table-empty">No discounts yet. Click "Add Discount" to create one.</td></tr>';
+    : '<tr><td colspan="4" class="table-empty">No discounts yet. Click "Add Discount" to create one.</td></tr>';
 }
 
 function filterDiscounts(q) {
@@ -1389,23 +1624,41 @@ function loadDiscountedProducts() {
   const discounted = allProducts.filter(p => p.discount_id);
   document.getElementById('discountedProductsBody').innerHTML = discounted.length
     ? discounted.map(p => {
-        const disc         = p.discount;
-        const discounted   = p.price * (1 - (disc?.percentage || 0) / 100);
+        const disc       = Array.isArray(p.discount) ? p.discount[0] : p.discount;
+        const discPrice  = p.price * (1 - (disc?.percentage || 0) / 100);
+        const savings    = p.price - discPrice;
         return `
           <tr>
-            <td><strong>${p.product_name}</strong></td>
-            <td>${p.category}</td>
-            <td>${peso(p.price)}</td>
-            <td><span class="badge badge--blue">${disc?.discount_name || '—'} (${disc?.percentage || 0}%)</span></td>
-            <td><strong style="color:var(--g-400);">${peso(discounted)}</strong></td>
             <td>
-              <button class="btn-icon btn-icon--red" onclick="removeProductDiscount('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}')" title="Remove discount">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${p.image_url
+                  ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" class="product-img-cell" style="width:32px;height:32px;" alt="${p.product_name}"/>`
+                  : `<div class="product-img-placeholder" style="width:32px;height:32px;"></div>`}
+                <div>
+                  <strong>${p.product_name}</strong>
+                  <div style="font-size:11px;color:var(--text-muted);">${p.category}</div>
+                </div>
+              </div>
+            </td>
+            <td>${peso(p.price)}</td>
+            <td>
+              <span class="badge badge--blue">${disc?.discount_name || '—'}</span>
+              <span style="font-size:12px;color:var(--g-400);font-weight:700;margin-left:4px;">${disc?.percentage || 0}% OFF</span>
+            </td>
+            <td>
+              <strong style="color:var(--g-400);font-size:14px;">${peso(discPrice)}</strong>
+              <div style="font-size:11px;color:var(--text-muted);">Save ${peso(savings)}</div>
+            </td>
+            <td>
+              <button class="btn btn-cancel" style="font-size:12px;padding:5px 10px;color:#ef4444;border-color:#ef4444;display:inline-flex;align-items:center;gap:4px;"
+                onclick="removeProductDiscount('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+                Remove
               </button>
             </td>
           </tr>`;
       }).join('')
-    : '<tr><td colspan="6" class="table-empty">No products with discounts yet</td></tr>';
+    : '<tr><td colspan="5" class="table-empty">No products with discounts yet. Use "Assign" button on any discount.</td></tr>';
 }
 
 async function removeProductDiscount(productId, name) {
@@ -1424,9 +1677,17 @@ async function removeProductDiscount(productId, name) {
 // Discount Modal
 function openDiscountModal(discount = null) {
   document.getElementById('discountModalTitle').textContent = discount ? 'Edit Discount' : 'Add Discount';
-  document.getElementById('discountId').value   = discount?.discount_id || '';
-  document.getElementById('dName').value        = discount?.discount_name || '';
-  document.getElementById('dPercentage').value  = discount?.percentage || '';
+  document.getElementById('discountId').value    = discount?.discount_id || '';
+  document.getElementById('dName').value         = discount?.discount_name || '';
+  document.getElementById('dPercentage').value   = discount?.percentage || '';
+
+  // Load date fields — convert to datetime-local format
+  const toLocal = iso => iso ? iso.slice(0, 16) : '';
+  const startsEl = document.getElementById('dStartsAt');
+  const endsEl   = document.getElementById('dEndsAt');
+  if (startsEl) startsEl.value = toLocal(discount?.starts_at);
+  if (endsEl)   endsEl.value   = toLocal(discount?.ends_at);
+
   document.getElementById('discountModalOverlay').classList.add('open');
   document.getElementById('discountModal').classList.add('open');
 }
@@ -1435,6 +1696,10 @@ function closeDiscountModal() {
   document.getElementById('discountModalOverlay').classList.remove('open');
   document.getElementById('discountModal').classList.remove('open');
   document.getElementById('discountForm').reset();
+  const startsEl = document.getElementById('dStartsAt');
+  const endsEl   = document.getElementById('dEndsAt');
+  if (startsEl) startsEl.value = '';
+  if (endsEl)   endsEl.value   = '';
 }
 
 function editDiscount(id) {
@@ -1453,10 +1718,16 @@ async function deleteDiscount(id, name) {
 
 async function submitDiscount(e) {
   e.preventDefault();
+  const discBtn = e.submitter || document.querySelector('#discountForm button[type="submit"]');
+  setButtonLoading(discBtn, true);
   const id   = document.getElementById('discountId').value;
+  const startsAtVal = document.getElementById('dStartsAt')?.value;
+  const endsAtVal   = document.getElementById('dEndsAt')?.value;
   const data = {
     discount_name: document.getElementById('dName').value.trim(),
     percentage:    parseFloat(document.getElementById('dPercentage').value),
+    starts_at:     startsAtVal ? new Date(startsAtVal).toISOString() : null,
+    ends_at:       endsAtVal   ? new Date(endsAtVal).toISOString()   : null,
   };
   try {
     const url    = id ? `/api/admin/discounts/${id}` : '/api/admin/discounts';
@@ -1487,8 +1758,21 @@ function openAssignModal(discountId, discountName) {
     product_id:   p.product_id,
     product_name: p.product_name,
     category:     p.category,
+    branch_stock: p.branch_stock || [],
     checked:      p.discount_id === discountId,
   }));
+
+  // Populate branch filter from allBranches
+  const branchSel = document.getElementById('assignBranchFilter');
+  if (branchSel) {
+    branchSel.innerHTML = '<option value="">All Branches</option>' +
+      allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+    branchSel.value = ''; // reset to all
+  }
+
+  // Reset search
+  const searchEl = document.getElementById('assignSearchInput');
+  if (searchEl) searchEl.value = '';
 
   renderAssignProducts(assignProductState);
 
@@ -1506,26 +1790,37 @@ function closeAssignModal() {
 function renderAssignProducts(products) {
   const wrap = document.getElementById('assignProductList');
   wrap.innerHTML = products.length
-    ? products.map(p => `
-        <label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:var(--surface-2);transition:background 0.15s;"
-          onmouseover="this.style.background='var(--surface-3)'" onmouseout="this.style.background='var(--surface-2)'">
-          <input type="checkbox" value="${p.product_id}" ${p.checked ? 'checked' : ''}
-            onchange="toggleAssignProduct('${p.product_id}', this.checked)"
-            style="accent-color:var(--g-400);width:15px;height:15px;flex-shrink:0;"/>
-          <div style="flex:1;min-width:0;">
-            <div style="font-weight:500;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.product_name}</div>
-            <div style="font-size:11px;color:var(--text-muted);">${p.category}</div>
-          </div>
-          ${p.checked ? '<span class="badge badge--blue" style="flex-shrink:0;font-size:10px;">Assigned</span>' : ''}
-        </label>`).join('')
+    ? products.map(p => {
+        const branchTags = (p.branch_stock || []).map(bs =>
+          `<span style="font-size:10px;background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 5px;">🏪 ${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}</span>`
+        ).join(' ');
+        return `
+          <label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:var(--surface-2);transition:background 0.15s;"
+            onmouseover="this.style.background='var(--surface-3)'" onmouseout="this.style.background='var(--surface-2)'">
+            <input type="checkbox" value="${p.product_id}" ${p.checked ? 'checked' : ''}
+              onchange="toggleAssignProduct('${p.product_id}', this.checked)"
+              style="accent-color:var(--g-400);width:15px;height:15px;flex-shrink:0;"/>
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:500;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.product_name}</div>
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">${p.category}</div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">${branchTags || '<span style="font-size:10px;color:var(--text-muted);">No branch stock</span>'}</div>
+            </div>
+            ${p.checked ? '<span class="badge badge--blue" style="flex-shrink:0;font-size:10px;">Assigned</span>' : ''}
+          </label>`;
+      }).join('')
     : '<p class="table-empty">No products found</p>';
 }
 
 function filterAssignProducts(q) {
-  const filtered = assignProductState.filter(p =>
-    p.product_name.toLowerCase().includes(q.toLowerCase()) ||
-    p.category.toLowerCase().includes(q.toLowerCase())
-  );
+  const branchId = document.getElementById('assignBranchFilter')?.value || '';
+  const filtered = assignProductState.filter(p => {
+    const matchSearch = !q ||
+      p.product_name.toLowerCase().includes(q.toLowerCase()) ||
+      p.category.toLowerCase().includes(q.toLowerCase());
+    const matchBranch = !branchId ||
+      (p.branch_stock || []).some(bs => bs.branch_id === branchId);
+    return matchSearch && matchBranch;
+  });
   renderAssignProducts(filtered);
 }
 
@@ -1909,7 +2204,7 @@ async function submitCreatePO() {
     const productId = row.querySelector('.po-product')?.value;
     const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
     const unitCost  = parseFloat(row.querySelector('.po-cost')?.value || 0);
-    if (productId && qty > 0) items.push({ product_id: productId, quantity: qty, unit_cost: unitCost });
+    if (productId && qty > 0) items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost });
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
 
@@ -1924,11 +2219,112 @@ async function submitCreatePO() {
       showToast(`PO ${data.po_number} created!`);
       closeCreatePOModal();
       loadPurchaseOrders();
+      // Show digital receipt
+      const receiptItems = items.map(i => ({
+        product_name: allProducts.find(p => p.product_id === i.product_id)?.product_name || '—',
+        quantity:     i.quantity,
+        unit_cost:    i.unitCost || i.unit_cost,
+      }));
+      const receiptTotal = items.reduce((s, i) => s + (i.unitCost || i.unit_cost || 0) * i.quantity, 0);
+      showPOReceipt({ po_number: data.po_number, supplier, note, status: 'draft' }, receiptItems, receiptTotal);
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to create PO.', 'error');
     }
   } catch (e) { showToast('Error.', 'error'); }
+}
+
+
+// ─── PO Digital Receipt ───────────────────────────────
+function showPOReceipt(po, items, total) {
+  const now    = new Date();
+  const dateStr = now.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
+  const timeStr = now.toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' });
+
+  const itemsHtml = items.map(i => `
+    <tr>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${i.product?.product_name || i.product_name || '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>
+    </tr>`).join('');
+
+  showModal(`
+    <div style="padding:1.5rem;" id="poReceiptContent">
+      <!-- Header -->
+      <div style="text-align:center;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:2px dashed var(--border);">
+        <div style="font-size:20px;font-weight:700;color:var(--text-primary);">Triple E & Fiel Collins</div>
+        <div style="font-size:12px;color:var(--text-muted);">General Merchandise</div>
+        <div style="font-size:12px;color:var(--text-muted);">Koronadal City, South Cotabato</div>
+        <div style="margin-top:8px;font-size:14px;font-weight:700;color:var(--g-400);">PURCHASE ORDER RECEIPT</div>
+      </div>
+
+      <!-- PO Info -->
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem;font-size:13px;">
+        <div><span style="color:var(--text-muted);">PO Number</span><br/><strong>${po.po_number || '—'}</strong></div>
+        <div><span style="color:var(--text-muted);">Status</span><br/>${badge(po.status)}</div>
+        <div><span style="color:var(--text-muted);">Supplier</span><br/><strong>${po.supplier || '—'}</strong></div>
+        <div><span style="color:var(--text-muted);">Date</span><br/><strong>${dateStr} ${timeStr}</strong></div>
+        ${po.note ? `<div style="grid-column:1/-1;"><span style="color:var(--text-muted);">Note</span><br/>${po.note}</div>` : ''}
+      </div>
+
+      <!-- Items Table -->
+      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:1rem;">
+        <thead>
+          <tr style="background:var(--surface-2);">
+            <th style="padding:8px;text-align:left;font-size:12px;">Product</th>
+            <th style="padding:8px;text-align:center;font-size:12px;">Qty</th>
+            <th style="padding:8px;text-align:right;font-size:12px;">Unit Cost</th>
+            <th style="padding:8px;text-align:right;font-size:12px;">Subtotal</th>
+          </tr>
+        </thead>
+        <tbody>${itemsHtml}</tbody>
+        <tfoot>
+          <tr style="background:var(--surface-2);">
+            <td colspan="3" style="padding:8px;text-align:right;font-weight:700;">TOTAL</td>
+            <td style="padding:8px;text-align:right;font-weight:700;color:var(--g-400);font-size:15px;">${peso(total)}</td>
+          </tr>
+        </tfoot>
+      </table>
+
+      <!-- Footer -->
+      <div style="text-align:center;font-size:11px;color:var(--text-muted);padding-top:1rem;border-top:2px dashed var(--border);">
+        Generated by Triple E & Fiel Collins E-Commerce & POS System<br/>
+        ${dateStr} at ${timeStr}
+      </div>
+
+      <!-- Actions -->
+      <div style="display:flex;gap:8px;margin-top:1rem;">
+        <button onclick="printPOReceipt()" class="btn btn-cancel" style="flex:1;">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Print
+        </button>
+        <button onclick="closeModal()" class="btn btn-solid-green" style="flex:1;">Done</button>
+      </div>
+    </div>
+  `);
+}
+
+function printPOReceipt() {
+  const content = document.getElementById('poReceiptContent')?.innerHTML;
+  if (!content) return;
+  const win = window.open('', '_blank');
+  win.document.write(`
+    <html>
+      <head>
+        <title>PO Receipt</title>
+        <style>
+          body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
+          table { width: 100%; border-collapse: collapse; }
+          th, td { padding: 8px; border-bottom: 1px solid #ddd; }
+          @media print { button { display: none; } }
+        </style>
+      </head>
+      <body>${content}</body>
+    </html>
+  `);
+  win.document.close();
+  win.print();
 }
 
 // ─── PO Detail Modal ──────────────────────────────────
@@ -1973,8 +2369,19 @@ function openPODetail(poId) {
       <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
       <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
   } else if (po.status === 'ordered') {
+    const branchOptions = allBranches.map(b =>
+      `<option value="${b.branch_id}">${b.branch_name}</option>`
+    ).join('');
     footer.innerHTML += `
-      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'received')">Mark as Received ✓</button>`;
+      <select id="poReceiveBranch" class="filter-select" style="font-size:12px;">
+        <option value="">Select branch to receive stock</option>
+        ${branchOptions}
+      </select>
+      <button class="btn btn-solid-green" onclick="
+        const branchId = document.getElementById('poReceiveBranch').value;
+        if (!branchId) { showToast('Please select a branch.', 'error'); return; }
+        updatePOStatus('${poId}', 'received', branchId)
+      ">Mark as Received ✓</button>`;
   }
 
   document.getElementById('poDetailModalOverlay')?.classList.add('open');
@@ -1986,19 +2393,25 @@ function closePODetailModal() {
   document.getElementById('poDetailModal')?.classList.remove('open');
 }
 
-async function updatePOStatus(poId, status) {
+async function updatePOStatus(poId, status, branchId = null) {
   const po = allPOs.find(p => p.po_id === poId);
   try {
     const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, po_number: po?.po_number }),
+      body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId }),
     });
     if (res.ok) {
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
       loadPurchaseOrders();
       if (status === 'received') loadInventory();
+      // Show receipt when marked as ordered or received
+      if (status === 'ordered' || status === 'received') {
+        const items   = po?.po_item || [];
+        const total   = items.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0);
+        showPOReceipt({ ...po, status }, items, total);
+      }
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to update PO.', 'error');
@@ -2041,3 +2454,9 @@ window.addEventListener('beforeunload', function () {
   else
     localStorage.removeItem('admin-open-modal');
 });
+// ─── Add spin animation ───────────────────────────────
+(function() {
+  const style = document.createElement('style');
+  style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
+  document.head.appendChild(style);
+})();

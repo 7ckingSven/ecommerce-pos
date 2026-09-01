@@ -190,7 +190,7 @@
           </div>
 
           <!-- Checkout Button -->
-          <button class="btn btn-solid-green pos-checkout-btn" id="posCheckoutBtn" onclick="processOrder()" disabled>
+          <button class="btn btn-solid-green pos-checkout-btn" id="processOrderBtn" onclick="processOrder()" disabled>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><polyline points="20 6 9 17 4 12"/></svg>
             Process Order
           </button>
@@ -490,6 +490,12 @@
   </div>
 
   <div class="toast" id="toast"></div>
+
+  <!-- Generic Order Detail Modal -->
+  <div class="modal-overlay" id="genericModalOverlay" onclick="closeGenericModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;"></div>
+  <div class="modal" id="genericModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1001;width:90%;max-width:600px;max-height:85vh;overflow-y:auto;background:var(--card-bg);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div id="genericModalContent"></div>
+  </div>
 
   <script src="{{ url_for('static', filename='js/staff.js') }}"></script>
 </body>

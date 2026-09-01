@@ -19,6 +19,7 @@ import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 
 import { COLORS } from '../utils/constants';
+import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CartProvider } from '../utils/CartContext';
 
 const Tab   = createBottomTabNavigator();
@@ -47,6 +48,7 @@ function CartStack() {
 
 // ─── Main Tabs ────────────────────────────────────────
 function MainTabs() {
+  const insets = useSafeAreaInsets();
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -55,8 +57,8 @@ function MainTabs() {
           backgroundColor:  COLORS.white,
           borderTopWidth:   1,
           borderTopColor:   COLORS.grayBorder,
-          height:           65,
-          paddingBottom:    8,
+          height:           60 + insets.bottom,
+          paddingBottom:    insets.bottom + 4,
           paddingTop:       8,
         },
         tabBarShowLabel:      true,
@@ -85,6 +87,7 @@ function MainTabs() {
 // ─── Root Navigator ───────────────────────────────────
 export default function AppNavigator() {
   return (
+    <SafeAreaProvider>
     <CartProvider>
     <NavigationContainer>
       <Stack.Navigator
@@ -106,5 +109,6 @@ export default function AppNavigator() {
       </Stack.Navigator>
     </NavigationContainer>
     </CartProvider>
+    </SafeAreaProvider>
   );
 }

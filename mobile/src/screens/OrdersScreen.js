@@ -1,15 +1,19 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, Modal, ScrollView,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import { useFocusEffect } from '@react-navigation/native';
 import { getOrders } from '../services/orderService';
+import api from '../services/api';
+import { getCustomerId } from '../services/authService';
 import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
 // ─── Delivery Estimate Helper ────────────────────────
 function getDeliveryEstimate(order) {
+  if (!order) return { label: '—', zone: '', minDays: 0, maxDays: 0 };
   const addr     = order.address || '';
   const parts    = addr.split('|');
   const province = parts[3]?.trim().toLowerCase() || '';
@@ -40,15 +44,44 @@ export default function OrdersScreen({ navigation }) {
   const [orders,       setOrders]       = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [loggedIn,     setLoggedIn]     = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [selectedOrder,   setSelectedOrder]   = useState(null);
+  const [markingReceived, setMarkingReceived] = useState(false);
 
-  useEffect(() => {
-    isLoggedIn().then(logged => {
-      setLoggedIn(logged);
-      if (logged) loadOrders();
-      else setLoading(false);
-    });
-  }, []);
+  // Auto-refresh every 10 seconds when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      isLoggedIn().then(logged => {
+        setLoggedIn(logged);
+        if (logged) loadOrders();
+        else setLoading(false);
+      });
+
+      const timer = setInterval(() => {
+        isLoggedIn().then(logged => {
+          if (logged) loadOrders();
+        });
+      }, 10000); // 10 seconds
+
+      return () => clearInterval(timer); // cleanup on blur
+    }, [])
+  );
+
+  async function markAsReceived(orderId) {
+    setMarkingReceived(true);
+    try {
+      const customerId = await getCustomerId();
+      const res = await api.post(`/orders/${orderId}/received`, {}, {
+        headers: { 'X-Customer-ID': customerId }
+      });
+      Alert.alert('Thank you!', 'Your order has been marked as received! 🎉');
+      setSelectedOrder(prev => prev ? { ...prev, status: 'completed' } : null);
+      await loadOrders();
+    } catch (e) {
+      Alert.alert('Error', e.response?.data?.error || 'Failed to update order.');
+    } finally {
+      setMarkingReceived(false);
+    }
+  }
 
   async function loadOrders() {
     try {
@@ -113,7 +146,7 @@ export default function OrdersScreen({ navigation }) {
               <View style={styles.orderHeader}>
                 <View>
                   <Text style={styles.orderId}>Order #{item.order_id?.slice(0,8).toUpperCase()}</Text>
-                  <Text style={styles.orderDate}>{new Date(item.date).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' })}</Text>
+                  <Text style={styles.orderDate}>{item.date || item.created_at ? new Date(item.date || item.created_at).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—'}</Text>
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '20' }]}>
                   <Text style={[styles.statusText, { color: statusColor(item.status) }]}>
@@ -134,7 +167,7 @@ export default function OrdersScreen({ navigation }) {
                       </Text>
                     )}
                   </View>
-                  <Text style={styles.orderItemQtyPrice}>x{oi.quantity} · ₱{(Number(oi.price) * oi.quantity).toFixed(2)}</Text>
+                  <Text style={styles.orderItemQtyPrice}>x{oi.qty || oi.quantity || 0} · ₱{(Number(oi.price || 0) * Number(oi.qty || oi.quantity || 0)).toFixed(2)}</Text>
                 </View>
               ))}
               <View style={styles.divider}/>
@@ -148,13 +181,13 @@ export default function OrdersScreen({ navigation }) {
                 <View style={{ alignItems: 'flex-end' }}>
                   {item.shipping_fee != null && item.shipping_fee > 0 && (
                     <Text style={{ fontSize: 11, color: COLORS.textMuted }}>
-                      +₱{Number(item.shipping_fee).toFixed(2)} shipping
+                      +₱{Number(item.shipping_fee || 0).toFixed(2)} shipping
                     </Text>
                   )}
-                  {item.shipping_fee != null && item.shipping_fee === 0 && (
+                  {(item.shipping_fee === 0) && (
                     <Text style={{ fontSize: 11, color: COLORS.primary }}>FREE shipping</Text>
                   )}
-                  <Text style={styles.orderTotal}>₱{Number(item.total).toFixed(2)}</Text>
+                  <Text style={styles.orderTotal}>₱{Number(item.total || 0).toFixed(2)}</Text>
                 </View>
               </View>
               {/* Delivery Estimate */}
@@ -202,13 +235,35 @@ export default function OrdersScreen({ navigation }) {
 
             <ScrollView showsVerticalScrollIndicator={false}>
 
-              {/* Status */}
-              <View style={styles.detailSection}>
-                <View style={[styles.statusBadgeLarge, { backgroundColor: statusColor(selectedOrder?.status) + '20' }]}>
-                  <Text style={[styles.statusTextLarge, { color: statusColor(selectedOrder?.status) }]}>
-                    {selectedOrder?.status === 'out_for_delivery' ? 'Out for Delivery' : selectedOrder?.status?.replace(/_/g,' ').toUpperCase()}
-                  </Text>
-                </View>
+              {/* Shopee-Style Progress Tracker */}
+              <View style={styles.trackerWrap}>
+                {[
+                  { key:'pending',          label:'Pending',     icon:'clock'      },
+                  { key:'processing',       label:'Processing',  icon:'settings'   },
+                  { key:'out_for_delivery', label:'On the Way',  icon:'truck'      },
+                  { key:'completed',        label:'Completed',   icon:'check-circle'},
+                ].map((step, i, arr) => {
+                  const statuses   = ['pending','processing','out_for_delivery','completed'];
+                  const curIdx     = statuses.indexOf(selectedOrder?.status === 'cancelled' ? 'pending' : selectedOrder?.status);
+                  const stepIdx    = statuses.indexOf(step.key);
+                  const isDone     = curIdx >= stepIdx;
+                  const isCurrent  = curIdx === stepIdx;
+                  const isCancelled = selectedOrder?.status === 'cancelled';
+                  const color      = isCancelled ? '#ef4444' : isDone ? COLORS.primary : COLORS.grayBorder;
+                  return (
+                    <View key={step.key} style={styles.trackerStep}>
+                      {i > 0 && (
+                        <View style={[styles.trackerLine, { backgroundColor: isCancelled ? '#ef4444' : (curIdx >= stepIdx ? COLORS.primary : COLORS.grayBorder) }]}/>
+                      )}
+                      <View style={[styles.trackerDot, { backgroundColor: isDone || isCancelled ? color : COLORS.white, borderColor: color }]}>
+                        <Feather name={isCancelled && i === 0 ? 'x' : step.icon} size={12} color={isDone ? COLORS.white : color}/>
+                      </View>
+                      <Text style={[styles.trackerLabel, { color: isCurrent ? COLORS.primary : COLORS.textMuted, fontWeight: isCurrent ? '700' : '400' }]}>
+                        {isCancelled && i === 0 ? 'Cancelled' : step.label}
+                      </Text>
+                    </View>
+                  );
+                })}
               </View>
 
               {/* Order Info */}
@@ -248,7 +303,7 @@ export default function OrdersScreen({ navigation }) {
                         </View>
                       )}
                     </View>
-                    <Text style={styles.detailItemPrice}>₱{(Number(oi.price) * Number(oi.qty || oi.quantity)).toFixed(2)}</Text>
+                    <Text style={styles.detailItemPrice}>₱{(Number(oi.price || 0) * Number(oi.qty || oi.quantity || 0)).toFixed(2)}</Text>
                   </View>
                 ))}
                 {selectedOrder?.shipping_fee != null && (
@@ -259,7 +314,7 @@ export default function OrdersScreen({ navigation }) {
                     <Text style={[styles.detailItemPrice, { 
                       color: selectedOrder.shipping_fee === 0 ? COLORS.primary : COLORS.dark 
                     }]}>
-                      {selectedOrder.shipping_fee === 0 ? 'FREE' : `₱${Number(selectedOrder.shipping_fee).toFixed(2)}`}
+                      {Number(selectedOrder.shipping_fee || 0) === 0 ? 'FREE' : `₱${Number(selectedOrder.shipping_fee || 0).toFixed(2)}`}
                     </Text>
                   </View>
                 )}
@@ -346,6 +401,13 @@ const styles = StyleSheet.create({
   detailRow:            { flexDirection:'row', justifyContent:'space-between', marginBottom:6 },
   detailLabel:          { fontSize:13, color: COLORS.textMuted },
   detailValue:          { fontSize:13, color: COLORS.dark, fontWeight:'500', flex:1, textAlign:'right', textTransform:'capitalize' },
+  trackerWrap:       { flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start', paddingHorizontal:8, paddingVertical:16, marginBottom:8 },
+  trackerStep:       { alignItems:'center', flex:1, position:'relative' },
+  trackerLine:       { position:'absolute', top:12, right:'50%', left:'-50%', height:2, zIndex:0 },
+  trackerDot:        { width:26, height:26, borderRadius:13, borderWidth:2, alignItems:'center', justifyContent:'center', zIndex:1, marginBottom:6 },
+  trackerLabel:      { fontSize:9, textAlign:'center', lineHeight:12 },
+  receivedBtn:       { backgroundColor:COLORS.primary, borderRadius:RADIUS.sm, padding:14, alignItems:'center', flexDirection:'row', justifyContent:'center', gap:8, marginBottom:SPACING.sm },
+  receivedBtnText:   { color:COLORS.white, fontWeight:'700', fontSize:14 },
   optionChip:           { backgroundColor:'rgba(22,163,74,0.1)', borderRadius:4, paddingHorizontal:6, paddingVertical:2 },
   optionChipText:       { fontSize:10, color: COLORS.primary, fontWeight:'600' },
   orderItemOptions:     { fontSize:11, color: COLORS.primary, marginTop:2 },

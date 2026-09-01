@@ -30,8 +30,25 @@ export default function LoginScreen({ navigation }) {
       await login(loginInput.trim(), password);
       navigation.replace('Main');
     } catch (err) {
-      const msg = err.response?.data?.error || 'Invalid credentials. Please try again.';
-      Alert.alert('Login Failed', msg);
+      const status = err.response?.status;
+      const msg    = err.response?.data?.error || 'Something went wrong. Please try again.';
+
+      if (status === 401 && msg.includes('No account')) {
+        // User not found — clear password, keep username
+        Alert.alert('User Not Found', msg);
+        setPassword('');
+      } else if (status === 401 && msg.includes('Incorrect password')) {
+        // Wrong password — keep username, clear password
+        Alert.alert('Incorrect Password', msg);
+        setPassword('');
+      } else if (status === 403) {
+        Alert.alert('Account Inactive', msg);
+        setPassword('');
+      } else {
+        Alert.alert('Login Failed', msg);
+        setPassword('');
+      }
+      // Username is always retained ✅
     } finally {
       setLoading(false);
     }

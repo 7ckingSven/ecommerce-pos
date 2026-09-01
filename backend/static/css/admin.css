@@ -834,3 +834,49 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   .main { margin-left: 0 !important; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
 }
+/* ─── Branch Stock Summary ──────────────────────────── */
+.branch-stock-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 1.5rem;
+}
+
+.branch-stock-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--card-bg);
+}
+
+.branch-stock-header {
+  background: rgba(22, 163, 74, 0.08);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.branch-stock-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.branch-stock-count {
+  margin-left: auto;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border-radius: 999px;
+  padding: 2px 8px;
+}
+
+.branch-stock-qty {
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.branch-stock-qty.in-stock  { color: #16a34a; }
+.branch-stock-qty.low-stock { color: #f59e0b; }
+.branch-stock-qty.out-stock { color: #ef4444; }

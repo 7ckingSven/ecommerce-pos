@@ -13,7 +13,8 @@ export default function RegisterScreen({ navigation }) {
   const [loading,     setLoading]     = useState(false);
   const [showPass,    setShowPass]    = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
-  const [psgcAddress, setPsgcAddress] = useState({});
+  const [psgcAddress,        setPsgcAddress]       = useState({});
+  const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [form, setForm] = useState({
     fname: '', mi: '', lname: '',
     email: '', username: '', phone_number: '',
@@ -26,7 +27,7 @@ export default function RegisterScreen({ navigation }) {
     setForm(prev => ({ ...prev, [key]: val }));
   }
 
-  function nextStep() {
+  async function nextStep() {
     if (step === 1) {
       if (!form.fname || !form.lname)
         return Alert.alert('Required', 'Please enter your first and last name.');
@@ -36,6 +37,29 @@ export default function RegisterScreen({ navigation }) {
         return Alert.alert('Required', 'Please fill in all contact details.');
       if (form.phone_number.length !== 11 || !form.phone_number.startsWith('09'))
         return Alert.alert('Invalid', 'Phone number must be 11 digits starting with 09.');
+
+      // Check for duplicates before proceeding to password step
+      setCheckingDuplicate(true);
+      try {
+        const res  = await fetch(`https://ecommerce-pos-8rsf.onrender.com/api/auth/check-duplicate`, {
+          method:  'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body:    JSON.stringify({
+            email:        form.email,
+            username:     form.username,
+            phone_number: form.phone_number,
+          }),
+        });
+        const data = await res.json();
+        if (!res.ok) {
+          setCheckingDuplicate(false);
+          return Alert.alert('Already Taken', data.error || 'Please use different details.');
+        }
+      } catch (e) {
+        setCheckingDuplicate(false);
+        return Alert.alert('Error', 'Could not verify details. Please try again.');
+      }
+      setCheckingDuplicate(false);
     }
     setStep(step + 1);
   }
@@ -262,14 +286,14 @@ export default function RegisterScreen({ navigation }) {
           <TouchableOpacity
             style={styles.btn}
             onPress={step < 3 ? nextStep : handleRegister}
-            disabled={loading}
+            disabled={loading || checkingDuplicate}
             activeOpacity={0.85}
           >
-            {loading ? (
+            {(loading || checkingDuplicate) ? (
               <ActivityIndicator color={COLORS.white}/>
             ) : (
               <View style={styles.btnInner}>
-                <Text style={styles.btnText}>{step < 3 ? 'Continue' : 'Create Account'}</Text>
+                <Text style={styles.btnText}>{step < 3 ? (checkingDuplicate ? 'Checking...' : 'Continue') : 'Create Account'}</Text>
                 <Feather name={step < 3 ? 'arrow-right' : 'check'} size={16} color={COLORS.white}/>
               </View>
             )}

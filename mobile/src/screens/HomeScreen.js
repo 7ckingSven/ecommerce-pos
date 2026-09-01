@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, RefreshControl, Image, Alert,
@@ -8,6 +8,7 @@ import { getProducts, searchProducts } from '../services/productService';
 import { addToCart } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useFocusEffect } from '@react-navigation/native';
 import { useCart } from '../utils/CartContext';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
@@ -48,6 +49,11 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
             <Text style={styles.branchTagText}>🏪 {product.branch_name}</Text>
           </View>
         ) : null}
+
+        {/* Sold Count */}
+        <Text style={styles.soldCount}>
+          {Number(product.total_sold || 0).toLocaleString()} sold
+        </Text>
 
         {/* Price */}
         {discountedPrice ? (
@@ -104,10 +110,19 @@ export default function HomeScreen({ navigation }) {
   const { cartCount, refreshCartCount } = useCart();
   const [loggedIn,    setLoggedIn]    = useState(false);
 
-  useEffect(() => {
-    isLoggedIn().then(setLoggedIn);
-    loadProducts();
-  }, []);
+  // Auto-refresh every 10 seconds when screen is focused
+  useFocusEffect(
+    useCallback(() => {
+      isLoggedIn().then(setLoggedIn);
+      loadProducts();
+
+      const timer = setInterval(() => {
+        loadProducts();
+      }, 10000); // 10 seconds
+
+      return () => clearInterval(timer); // cleanup on blur
+    }, [])
+  );
 
   // ─── Auth Guard with redirect back ───────────────────
   async function requireLogin(action, params = {}) {
@@ -363,6 +378,7 @@ const styles = StyleSheet.create({
   priceRow:               { flexDirection: 'row', alignItems: 'center', gap: 4, marginBottom: 6 },
   productPriceOriginal:   { fontSize: 10, color: COLORS.textMuted, textDecorationLine: 'line-through' },
   productPriceDiscount:   { fontSize: 13, fontWeight: '700', color: '#ef4444' },
+  soldCount:              { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
   outOfStock:             { fontSize: 10, color: '#ef4444', fontWeight: '600', marginBottom: 4 },
 
   // Action Buttons

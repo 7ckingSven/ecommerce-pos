@@ -135,7 +135,7 @@ def login_post():
         user_res = supabase.table('user').select('*').eq('username', login_input).execute()
 
         if not user_res.data:
-            flash('Invalid credentials. Please try again.', 'error')
+            flash('No account found with that username.', 'error')
             return redirect(url_for('login'))
 
         user = user_res.data[0]
@@ -145,7 +145,7 @@ def login_post():
             return redirect(url_for('login'))
 
         if not check_password(password, user['password']):
-            flash('Invalid credentials. Please try again.', 'error')
+            flash('Incorrect password. Please try again.', 'error')
             return redirect(url_for('login'))
 
         # Web login is for admin and staff ONLY — customers use mobile app
@@ -380,15 +380,15 @@ def api_login():
                 user_res = supabase.table('user').select('*').eq('user_id', customer_res.data[0]['user_id']).execute()
 
         if not user_res.data:
-            return jsonify({'error': 'Invalid credentials.'}), 401
+            return jsonify({'error': 'No account found with that username, email or phone number.'}), 401
 
         user = user_res.data[0]
 
         if user['status'] != 'active':
-            return jsonify({'error': 'Account is inactive.'}), 403
+            return jsonify({'error': 'Account is inactive. Please contact support.'}), 403
 
         if not check_password(password, user['password']):
-            return jsonify({'error': 'Invalid credentials.'}), 401
+            return jsonify({'error': 'Incorrect password. Please try again.'}), 401
 
         if user['role'] not in ('customer',):
             return jsonify({'error': 'Access denied.'}), 403
@@ -416,6 +416,37 @@ def api_login():
     except Exception as e:
         print(f"API login error: {e}")
         return jsonify({'error': 'Something went wrong.'}), 500
+
+
+@app.route('/api/auth/check-duplicate', methods=['POST'])
+def api_check_duplicate():
+    try:
+        data         = request.get_json()
+        email        = data.get('email', '').strip().lower()
+        username     = data.get('username', '').strip()
+        phone_number = data.get('phone_number', '').strip()
+
+        # Check username
+        if username:
+            res = supabase.table('user').select('user_id').eq('username', username).execute()
+            if res.data:
+                return jsonify({'error': f'Username "{username}" is already taken. Please choose another.'}), 400
+
+        # Check email
+        if email:
+            res = supabase.table('customer').select('customer_id').eq('email', email).execute()
+            if res.data:
+                return jsonify({'error': f'Email "{email}" is already registered. Please use another.'}), 400
+
+        # Check phone number
+        if phone_number:
+            res = supabase.table('customer').select('customer_id').eq('phone_number', phone_number).execute()
+            if res.data:
+                return jsonify({'error': f'Phone number "{phone_number}" is already registered. Please use another.'}), 400
+
+        return jsonify({'message': 'All details are available.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/register', methods=['POST'])
 def api_register():
@@ -581,20 +612,43 @@ def api_products():
             res = res.eq('category', category)
         res = res.order('created_at', desc=True).execute()
 
-        # Expand products with branch stock — one entry per branch
+        # Get total sold per product from completed orders
+        sold_res  = supabase.table('order_item').select(
+            'product_id, qty'
+        ).execute()
+        order_ids_completed = supabase.table('order').select('order_id').eq('status', 'completed').execute()
+        completed_ids = {o['order_id'] for o in (order_ids_completed.data or [])}
+        sold_map = {}
+        for oi in (sold_res.data or []):
+            if oi.get('order_id') in completed_ids or True:  # count all for now
+                pid = oi['product_id']
+                sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
+
+        # Better approach — use a direct query
+        sold_res2 = supabase.rpc('get_total_sold').execute() if False else None
+        # Simple approach: fetch completed order items
+        completed_orders = supabase.table('order').select('order_id').eq('status', 'completed').execute()
+        completed_order_ids = [o['order_id'] for o in (completed_orders.data or [])]
+        sold_map = {}
+        if completed_order_ids:
+            items_res = supabase.table('order_item').select('product_id, qty').in_('order_id', completed_order_ids).execute()
+            for oi in (items_res.data or []):
+                pid = oi['product_id']
+                sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
+
+        # Expand products with branch stock — one card per branch with stock > 0
         expanded = []
         for p in res.data:
             branch_stocks = p.get('branch_stock', [])
             if not branch_stocks:
-                # No branch stock — show as single product
-                expanded.append(p)
-            else:
-                # available_at: both → 2 cards; single branch → 1 card
-                for bs in branch_stocks:
+                continue
+            for bs in branch_stocks:
+                if bs['quantity'] > 0:
                     entry = dict(p)
                     entry['branch_id']   = bs['branch_id']
                     entry['branch_name'] = bs.get('branch', {}).get('branch_name', '')
                     entry['quantity']    = bs['quantity']
+                    entry['total_sold']  = sold_map.get(p['product_id'], 0)
                     expanded.append(entry)
 
         return jsonify(expanded), 200
@@ -605,7 +659,9 @@ def api_products():
 @app.route('/api/products/<product_id>', methods=['GET'])
 def api_product_detail(product_id):
     try:
-        res = supabase.table('product').select('*, discount(discount_name, percentage)').eq('product_id', product_id).execute()
+        res = supabase.table('product').select(
+            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight, net_weight_unit'
+        ).eq('product_id', product_id).execute()
         if not res.data:
             return jsonify({'error': 'Product not found.'}), 404
         return jsonify(res.data[0]), 200
@@ -1073,25 +1129,41 @@ def admin_update_purchase_order(po_id):
         if data.get('note'):     updates['note']     = data['note']
         supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
 
-        # If received → add stock for each item
+        # If received → add stock for each item to branch_stock
         if status == 'received':
+            po_branch_id = data.get('branch_id')  # branch admin selected
             items_res = supabase.table('po_item').select(
                 '*, product(quantity)'
             ).eq('po_id', po_id).execute()
             for item in items_res.data:
                 product    = item.get('product') or {}
-                qty_before = product.get('quantity', 0)
                 qty_added  = item['quantity']
-                qty_after  = qty_before + qty_added
-                supabase.table('product').update({
-                    'quantity': qty_after, 'updated_at': 'now()'
-                }).eq('product_id', item['product_id']).execute()
+
+                if po_branch_id:
+                    # Update branch_stock for selected branch
+                    bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', item['product_id']).eq('branch_id', po_branch_id).execute()
+                    if bs_res.data:
+                        qty_before = bs_res.data[0]['quantity']
+                        qty_after  = qty_before + qty_added
+                        supabase.table('branch_stock').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', item['product_id']).eq('branch_id', po_branch_id).execute()
+                    else:
+                        qty_before = 0
+                        qty_after  = qty_added
+                        supabase.table('branch_stock').insert({'product_id': item['product_id'], 'branch_id': po_branch_id, 'quantity': qty_added}).execute()
+                else:
+                    qty_before = product.get('quantity', 0)
+                    qty_after  = qty_before + qty_added
+                    # Update product quantity as fallback
+                    supabase.table('product').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', item['product_id']).execute()
+
+                # Log to inventory — to_branch_id is optional
                 supabase.table('inventory').insert({
                     'product_id':      item['product_id'],
                     'staff_id':        session.get('staff_id'),
                     'quantity_added':  qty_added,
                     'quantity_before': qty_before,
                     'quantity_after':  qty_after,
+                    'to_branch_id':    po_branch_id,
                     'note':            f'PO received — {data.get("po_number", po_id)}',
                 }).execute()
 
@@ -1361,9 +1433,14 @@ def admin_add_discount():
         if not (0 < float(percentage) <= 100):
             return jsonify({'error': 'Percentage must be between 0 and 100.'}), 400
 
+        starts_at = data.get('starts_at') or None
+        ends_at   = data.get('ends_at')   or None
+
         res = supabase.table('discount').insert({
             'discount_name': discount_name,
-            'percentage':    float(percentage)
+            'percentage':    float(percentage),
+            'starts_at':     starts_at,
+            'ends_at':       ends_at,
         }).execute()
 
         return jsonify(res.data[0]), 201
@@ -1381,6 +1458,8 @@ def admin_update_discount(discount_id):
             if not (0 < float(data['percentage']) <= 100):
                 return jsonify({'error': 'Percentage must be between 0 and 100.'}), 400
             updates['percentage'] = float(data['percentage'])
+        if 'starts_at' in data: updates['starts_at'] = data.get('starts_at') or None
+        if 'ends_at'   in data: updates['ends_at']   = data.get('ends_at')   or None
 
         res = supabase.table('discount').update(updates).eq('discount_id', discount_id).execute()
         return jsonify(res.data[0]), 200
@@ -1489,7 +1568,6 @@ def admin_add_product():
 
         image_url = image_urls[0] if image_urls else None
 
-        available_at = request.form.get('available_at', 'both')
         variants_raw = request.form.get('variants', '[]')
         try:
             variants = json.loads(variants_raw) if variants_raw else []
@@ -1517,7 +1595,6 @@ def admin_add_product():
             'description':   description,
             'image_url':     image_url,
             'image_urls':    image_urls,
-            'available_at':  available_at,
             'variants':      variants,
             'option_groups': option_groups,
             'net_weight':      net_weight,
@@ -1557,7 +1634,6 @@ def admin_update_product(product_id):
             'status':       request.form.get('status'),
             'description':  request.form.get('description'),
             'discount_id':  discount_id,
-            'available_at':  request.form.get('available_at', 'both'),
             'option_groups': option_groups,
             'net_weight':      net_weight,
             'net_weight_unit': net_weight_unit,
@@ -1721,16 +1797,22 @@ def admin_get_orders():
             limit = 500
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method, total, status, ref_no)'
+            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, customer(fname, lname, email), staff(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no)'
         ).order('created_at', desc=True).limit(limit).execute()
 
-        # Flatten payment array → single object
+        # Get branch lookup
+        branches_res = supabase.table('branch').select('branch_id, branch_name').execute()
+        branch_map   = {b['branch_id']: b['branch_name'] for b in (branches_res.data or [])}
+
+        # Flatten payment + add branch_name
         for o in res.data:
             if isinstance(o.get('payment'), list):
                 o['payment'] = o['payment'][0] if o['payment'] else None
+            o['branch_name'] = branch_map.get(o.get('branch_id'), '')
 
         return jsonify(res.data), 200
     except Exception as e:
+        print(f'Admin orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<order_id>', methods=['PUT'])

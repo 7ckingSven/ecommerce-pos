@@ -109,6 +109,7 @@
               id="loginInput"
               class="form-input"
               placeholder="Username"
+              value="{{ request.form.get('login_input', '') }}"
               required
               autocomplete="username"
             />
@@ -207,6 +208,28 @@
   </footer>
 
   <script src="{{ url_for('static', filename='js/login.js') }}"></script>
+  <script>
+    // Disable login button on form submit
+    document.querySelector('form').addEventListener('submit', function() {
+      const btn = document.getElementById('loginSubmitBtn');
+      if (btn) {
+        btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;animation:spin 1s linear infinite;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Logging in...';
+        btn.style.opacity = '0.7';
+        // Don't disable — let form submit first
+        setTimeout(() => { btn.disabled = true; }, 100);
+      }
+    });
+    // Flash message color fix
+    document.querySelectorAll('.flash-msg.error').forEach(el => {
+      el.style.background = 'rgba(239,68,68,0.1)';
+      el.style.color = '#ef4444';
+      el.style.border = '1px solid rgba(239,68,68,0.3)';
+      el.style.borderRadius = '8px';
+      el.style.padding = '10px 14px';
+      el.style.marginBottom = '1rem';
+      el.style.fontSize = '13px';
+    });
+  </script>
 
 </body>
 </html>
