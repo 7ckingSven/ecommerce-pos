@@ -190,25 +190,59 @@ function populateBranchSelects(...selectIds) {
 // ─── OVERVIEW ─────────────────────────────────────────
 async function loadOverview() {
   try {
-    const [products, orders, payments] = await Promise.all([
+    const [products, orders, payments, stockRequests, discounts] = await Promise.all([
       fetch('/api/admin/products').then(r => r.json()),
-      fetch('/api/admin/orders?limit=20').then(r => r.json()),
+      fetch('/api/admin/orders?limit=80').then(r => r.json()),
       fetch('/api/admin/payments').then(r => r.json()),
+      fetch('/api/admin/stock-requests').then(r => r.json()),
+      fetch('/api/admin/discounts').then(r => r.json()),
     ]);
 
-    document.getElementById('statProducts').textContent = products.filter(p => p.status === 'active').length;
+    // ── Existing stats ──────────────────────────────────
+    const activeProducts = products.filter(p => p.status === 'active');
+    document.getElementById('statProducts').textContent = activeProducts.length;
     document.getElementById('statOrders').textContent   = orders.length;
 
     const totalSales = payments.reduce((s, p) => s + Number(p.total || 0), 0);
-    document.getElementById('statSales').textContent    = peso(totalSales);
+    document.getElementById('statSales').textContent = peso(totalSales);
 
     const getTotal = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
       : Number(p.quantity);
-    const lowStock = products.filter(p => getTotal(p) <= 10);
-    document.getElementById('statLowStock').textContent = lowStock.length;
+    const lowStock    = activeProducts.filter(p => { const t = getTotal(p); return t > 0 && t <= 10; });
+    const outOfStock  = activeProducts.filter(p => getTotal(p) === 0);
+    document.getElementById('statLowStock').textContent    = lowStock.length;
 
-    // Recent Orders
+    // ── New stats ───────────────────────────────────────
+    // Pending orders
+    const pendingOrders = orders.filter(o => o.status === 'pending' && o.order_type === 'online');
+    document.getElementById('statPending').textContent = pendingOrders.length;
+
+    // Today's revenue
+    const today       = new Date().toISOString().split('T')[0];
+    const todayOrders = orders.filter(o => (o.created_at || o.date || '').startsWith(today));
+    const todayRev    = todayOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+    document.getElementById('statTodayRevenue').textContent = peso(todayRev);
+
+    // Out of stock
+    document.getElementById('statOutOfStock').textContent = outOfStock.length;
+
+    // Active discounts
+    const now             = new Date();
+    const activeDiscounts = discounts.filter(d => {
+      const end   = d.ends_at   ? new Date(d.ends_at)   : null;
+      const start = d.starts_at ? new Date(d.starts_at) : null;
+      if (end && now > end) return false;
+      if (start && now < start) return false;
+      return true;
+    });
+    document.getElementById('statActiveDiscounts').textContent = activeDiscounts.length;
+
+    // Pending stock requests
+    const pendingReqs = (stockRequests || []).filter(r => r.status === 'pending');
+    document.getElementById('statPendingRequests').textContent = pendingReqs.length;
+
+    // ── Recent Orders table ─────────────────────────────
     document.getElementById('recentOrdersBody').innerHTML = orders.slice(0, 5).length
       ? orders.slice(0, 5).map(o => `
           <tr>
@@ -220,21 +254,41 @@ async function loadOverview() {
           </tr>`).join('')
       : '<tr><td colspan="5" class="table-empty">No orders yet</td></tr>';
 
-    // Low Stock Alert
+    // ── Low Stock Alert table ───────────────────────────
     document.getElementById('lowStockBody').innerHTML = lowStock.length
       ? lowStock.map(p => {
-          const total = getTotal(p);
           const branchBreakdown = p.branch_stock?.length
             ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' / ')
-            : `${total}`;
-          return `
-          <tr>
+            : `${getTotal(p)}`;
+          return `<tr>
             <td>${p.product_name}</td>
             <td>${p.category}</td>
             <td><span style="color:#ef4444;font-weight:600;">${branchBreakdown}</span></td>
           </tr>`;
         }).join('')
       : '<tr><td colspan="3" class="table-empty">All products have sufficient stock ✓</td></tr>';
+
+    // ── Top Selling Products table ──────────────────────
+    const sorted = [...activeProducts].sort((a, b) => Number(b.total_sold || 0) - Number(a.total_sold || 0));
+    document.getElementById('topSellingBody').innerHTML = sorted.slice(0, 5).length
+      ? sorted.slice(0, 5).map(p => `
+          <tr>
+            <td><strong>${p.product_name}</strong></td>
+            <td>${p.category || '—'}</td>
+            <td><span style="font-weight:700;color:var(--g-400);">${Number(p.total_sold || 0).toLocaleString()} sold</span></td>
+          </tr>`).join('')
+      : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
+
+    // ── Pending Stock Requests table ────────────────────
+    document.getElementById('pendingRequestsBody').innerHTML = pendingReqs.length
+      ? pendingReqs.slice(0, 5).map(r => `
+          <tr>
+            <td><strong>${r.product?.product_name || '—'}</strong></td>
+            <td>${r.branch?.branch_name || '—'}</td>
+            <td>${r.quantity_requested}</td>
+            <td>${r.staff ? `${r.staff.fname} ${r.staff.lname}` : '—'}</td>
+          </tr>`).join('')
+      : '<tr><td colspan="4" class="table-empty">No pending requests ✓</td></tr>';
 
   } catch (e) { console.error('Overview error:', e); }
 }
