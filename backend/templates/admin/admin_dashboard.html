@@ -346,6 +346,45 @@
     </section>
 
     <!-- ─── SALES REPORTS SECTION ─────────────────── -->
+    <section class="section" id="section-purchase_orders">
+
+      <!-- Stock Requests from Staff -->
+      <div class="card" style="margin-bottom:1.5rem;">
+        <div class="card-header">
+          <h3 class="card-title">Staff Stock Requests</h3>
+          <span style="font-size:12px;color:var(--text-muted);">Review and approve/reject requests from staff</span>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Product</th><th>Current Stock</th><th>Qty Needed</th><th>Staff</th><th>Branch</th><th>Status</th><th>Note</th><th>Date</th><th>Action</th></tr>
+            </thead>
+            <tbody id="stockRequestsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Purchase Orders -->
+      <div class="section-toolbar" style="margin-bottom:1rem;">
+        <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);">Purchase Orders</h3>
+        <button class="btn btn-solid-green" onclick="openCreatePOModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Create PO
+        </button>
+      </div>
+      <div class="card">
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total Cost</th><th>Status</th><th>Created</th><th>Action</th></tr>
+            </thead>
+            <tbody id="poBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── PURCHASE ORDERS SECTION ─────────────── -->
     <section class="section" id="section-sales">
 
       <!-- Sales Filter Toolbar -->
@@ -486,45 +525,6 @@
               <tbody id="topProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- ─── PURCHASE ORDERS SECTION ─────────────── -->
-    <section class="section" id="section-purchase_orders">
-
-      <!-- Stock Requests from Staff -->
-      <div class="card" style="margin-bottom:1.5rem;">
-        <div class="card-header">
-          <h3 class="card-title">Staff Stock Requests</h3>
-          <span style="font-size:12px;color:var(--text-muted);">Review and approve/reject requests from staff</span>
-        </div>
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>Product</th><th>Current Stock</th><th>Qty Needed</th><th>Staff</th><th>Branch</th><th>Status</th><th>Note</th><th>Date</th><th>Action</th></tr>
-            </thead>
-            <tbody id="stockRequestsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
-          </table>
-        </div>
-      </div>
-
-      <!-- Purchase Orders -->
-      <div class="section-toolbar" style="margin-bottom:1rem;">
-        <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);">Purchase Orders</h3>
-        <button class="btn btn-solid-green" onclick="openCreatePOModal()">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
-          Create PO
-        </button>
-      </div>
-      <div class="card">
-        <div class="table-wrap">
-          <table class="data-table">
-            <thead>
-              <tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total Cost</th><th>Status</th><th>Created</th><th>Action</th></tr>
-            </thead>
-            <tbody id="poBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
-          </table>
         </div>
       </div>
     </section>
