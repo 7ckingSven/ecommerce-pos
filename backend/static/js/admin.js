@@ -213,6 +213,14 @@ async function loadOverview() {
     const outOfStock  = activeProducts.filter(p => getTotal(p) === 0);
     document.getElementById('statLowStock').textContent    = lowStock.length;
 
+    // Update inventory nav badge (low stock warning)
+    const invBadge = document.getElementById('invLowStockBadge');
+    if (invBadge) {
+      const totalLow = lowStock.length + outOfStock.length;
+      invBadge.textContent   = totalLow > 99 ? '99+' : totalLow;
+      invBadge.style.display = totalLow > 0 ? 'inline-block' : 'none';
+    }
+
     // ── New stats ───────────────────────────────────────
     // Pending orders
     const pendingOrders = orders.filter(o => o.status === 'pending' && o.order_type === 'online');
@@ -241,6 +249,20 @@ async function loadOverview() {
     // Pending stock requests
     const pendingReqs = (stockRequests || []).filter(r => r.status === 'pending');
     document.getElementById('statPendingRequests').textContent = pendingReqs.length;
+
+    // Update orders nav badge
+    const ordersBadge = document.getElementById('adminOrdersBadge');
+    if (ordersBadge) {
+      ordersBadge.textContent   = pendingOrders.length > 99 ? '99+' : pendingOrders.length;
+      ordersBadge.style.display = pendingOrders.length > 0 ? 'inline-block' : 'none';
+    }
+
+    // Update PO nav badge
+    const poBadge = document.getElementById('poRequestBadge');
+    if (poBadge) {
+      poBadge.textContent   = pendingReqs.length;
+      poBadge.style.display = pendingReqs.length > 0 ? 'inline' : 'none';
+    }
 
     // ── Recent Orders table ─────────────────────────────
     document.getElementById('recentOrdersBody').innerHTML = orders.slice(0, 5).length
