@@ -591,6 +591,14 @@ async function loadInventory() {
       banner.style.display = 'none';
     }
 
+    // Update inventory nav badge (low stock + out of stock)
+    const invBadge = document.getElementById('invLowStockBadge');
+    if (invBadge) {
+      const totalAlert = invProducts.filter(p => p.quantity <= 10).length;
+      invBadge.textContent   = totalAlert > 99 ? '99+' : totalAlert;
+      invBadge.style.display = totalAlert > 0 ? 'inline-block' : 'none';
+    }
+
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     document.getElementById('invRecentRestocks').textContent = invData.filter(i => new Date(i.date) >= oneWeekAgo).length;
