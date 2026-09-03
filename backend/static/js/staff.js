@@ -131,7 +131,7 @@ function showSection(name, el) {
   startAutoRefresh(name);
 }
 
-const loaders = {
+var loaders = {
   pos:       loadPosProducts,
   inventory: loadInventory,
   orders:    loadOrders,
@@ -691,13 +691,9 @@ function renderInvProducts(products) {
               ? '<span class="badge badge--yellow">Low Stock</span>'
               : '<span class="badge badge--green">In Stock</span>'
           }</td>
-          <td>
-            <button class="btn-icon" onclick="quickAddStock('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', ${p.quantity})" title="Add Stock">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x="12" y="5" x2="12" y2="19"/><line x="5" y="12" x2="19" y2="12"/></svg>
-            </button>
-          </td>
+
         </tr>`).join('')
-    : '<tr><td colspan="7" class="table-empty">No products found</td></tr>';
+    : '<tr><td colspan="6" class="table-empty">No products found</td></tr>';
   renderPager('staffInvPagination', products.length, staffInvPage, 'changeStaffInvPage');
 }
 
@@ -719,65 +715,160 @@ function filterStaffInventoryType(type) {
   }
 }
 
-function openStockModal(productId = '') {
-  const sel = document.getElementById('stockProduct');
-  sel.innerHTML = '<option value="">Select product</option>' +
-    invProducts.map(p =>
-      `<option value="${p.product_id}" ${p.product_id === productId ? 'selected' : ''}>${p.product_name} (Stock: ${p.quantity})</option>`
-    ).join('');
-
-  // Re-populate branch selects in case they weren't loaded yet
-  populateBranchSelects();
-
-  document.getElementById('stockModalOverlay').classList.add('open');
-  document.getElementById('stockModal').classList.add('open');
+function updateOrdersBadge(orders) {
+  const badge   = document.getElementById('ordersBadge');
+  if (!badge) return;
+  // Count pending online orders from customers
+  const pending = orders.filter(o =>
+    o.status === 'pending' && o.order_type === 'online'
+  ).length;
+  if (pending > 0) {
+    badge.textContent    = pending > 99 ? '99+' : pending;
+    badge.style.display  = 'inline-block';
+  } else {
+    badge.style.display  = 'none';
+  }
 }
 
-function quickAddStock(productId) {
-  openStockModal(productId);
+function renderStaffOrders(orders) {
+  const paged = paginate(orders, staffOrdersPage);
+  document.getElementById('staffOrdersBody').innerHTML = paged.length
+    ? paged.map(o => `
+        <tr>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+          <td>${badge(o.order_type)}</td>
+          <td>${o.order_item?.length || 0} item(s)</td>
+          <td>${peso(o.total)}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
+          <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
+          <td>${badge(o.status)}</td>
+          <td style="display:flex;gap:6px;align-items:center;">
+            <select class="filter-select" style="font-size:11px;padding:4px 8px;"
+              onchange="updateOrderStatus('${o.order_id}', this.value)">
+              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
+              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
+              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
+              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
+              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
+            </select>
+            <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </td>
+        </tr>`).join('')
+    : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
+  renderPager('staffOrdersPagination', orders.length, staffOrdersPage, 'changeStaffOrdersPage');
 }
 
-function closeStockModal() {
-  document.getElementById('stockModalOverlay').classList.remove('open');
-  document.getElementById('stockModal').classList.remove('open');
-  document.getElementById('stockForm').reset();
+// ─── View Staff Order Items Modal ─────────────────────
+
+// ─── Generic Modal ────────────────────────────────────
+function showGenericModal(html) {
+  const overlay = document.getElementById('genericModalOverlay');
+  const modal   = document.getElementById('genericModal');
+  const cont    = document.getElementById('genericModalContent');
+  if (!overlay || !modal || !cont) return;
+  cont.innerHTML        = html;
+  overlay.style.display = 'block';
+  modal.style.display   = 'block';
+  document.body.style.overflow = 'hidden';
 }
 
-async function submitStock(e) {
-  e.preventDefault();
-  const stockBtn = e.submitter || document.querySelector('#stockForm button[type="submit"]');
-  setButtonLoading(stockBtn, true);
-  const fromBranch = document.getElementById('stockFromBranch').value;
-  const toBranch   = document.getElementById('stockToBranch').value;
-  if (!toBranch) { showToast('Please select a destination branch.', 'error'); return; }
-  const data = {
-    product_id:     document.getElementById('stockProduct').value,
-    quantity:       parseInt(document.getElementById('stockQty').value),
-    from_branch_id: fromBranch || null,  // null if restock (no source branch)
-    to_branch_id:   toBranch,
-    note:           document.getElementById('stockNote').value,
-  };
-  try {
-    const res = await fetch('/api/staff/inventory', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      showToast('Stock updated!');
-      closeStockModal();
-      loadInventory();
-      loadPosProducts();
-    } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to update stock.', 'error');
-    }
-  } catch (e) { showToast('Error updating stock.', 'error'); }
+function closeGenericModal() {
+  const overlay = document.getElementById('genericModalOverlay');
+  const modal   = document.getElementById('genericModal');
+  if (overlay) overlay.style.display = 'none';
+  if (modal)   modal.style.display   = 'none';
+  document.body.style.overflow = '';
 }
 
-// ══════════════════════════════════════════════════════
-// ORDERS
-// ══════════════════════════════════════════════════════
+function viewStaffOrderItems(order) {
+  const items    = order.order_item || [];
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const branch   = order.branch_name || order.branch?.branch_name || staffBranchName || '—';
+
+  // Parse delivery address
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : order.address || '';
+
+  const itemsHtml = items.length
+    ? items.map(i => {
+        const opts = i.selected_options && Object.keys(i.selected_options).length > 0
+          ? Object.entries(i.selected_options).map(([k,v]) =>
+              '<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">' + k + ': ' + v + '</span>'
+            ).join(' ')
+          : '';
+        const imgUrl = i.product?.image_url;
+        const imgHtml = imgUrl
+          ? '<img src="' + imgUrl + '" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="' + (i.product?.product_name || '') + '"/>'
+          : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
+        const optsHtml = opts
+          ? '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' + opts + '</div>'
+          : '';
+        return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
+          + '<div style="display:flex;gap:10px;align-items:flex-start;">'
+          + imgHtml
+          + '<div style="flex:1;">'
+          + '<div style="font-size:13px;font-weight:600;">' + (i.product?.product_name || '—') + '</div>'
+          + optsHtml
+          + '</div>'
+          + '<div style="text-align:right;flex-shrink:0;">'
+          + '<div style="font-size:13px;font-weight:700;">₱' + Number(i.price * i.qty).toFixed(2) + '</div>'
+          + '<div style="font-size:11px;color:var(--text-muted);">x' + i.qty + ' @ ₱' + Number(i.price).toFixed(2) + '</div>'
+          + '</div></div></div>';
+      }).join('')
+    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
+
+  const shippingHtml = order.shipping_fee != null
+    ? '<span style="margin-left:8px;color:var(--text-muted);">· Shipping: ' + (Number(order.shipping_fee) === 0 ? 'FREE' : peso(order.shipping_fee)) + '</span>'
+    : '';
+
+  const addrHtml = (order.order_type === 'online')
+    ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
+      + '<div style="color:var(--text-muted);margin-bottom:2px;">📍 Delivery Address</div>'
+      + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
+      + shippingHtml
+      + '</div>'
+    : '';
+
+  showGenericModal(
+    '<div style="padding:1.5rem;">'
+    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">'
+    + '<div><h3 style="margin:0;font-size:16px;">Order Details</h3>'
+    + '<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#' + shortId(order.order_id) + '</p></div>'
+    + '<button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>'
+    + '</div>'
+    + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
+    + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ' + branch + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
+    + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
+    + '</div>'
+    + (order.payment && order.payment.payment_method === 'gcash'
+      ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
+        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">Ref No: <strong>' + order.payment.ref_no + '</strong></div>' : '')
+        + (order.payment.sender_number ? '<div style="margin-bottom:4px;">Sender: <strong>' + order.payment.sender_number + '</strong></div>' : '')
+        + (order.payment.receipt_image_url ? '<div><a href="' + order.payment.receipt_image_url + '" target="_blank" style="color:#3b82f6;font-size:12px;">View Receipt</a></div>' : '')
+        + '</div>'
+      : '')
+    + addrHtml
+    + '<div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>'
+    + itemsHtml
+    + '<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">'
+    + '<span style="font-weight:700;">Grand Total</span>'
+    + '<span style="font-weight:700;color:#16a34a;font-size:16px;">₱' + Number(order.total).toFixed(2) + '</span>'
+    + '</div></div>'
+  );
+}
+
+
+function filterStaffOrders(status) {
+  renderStaffOrders(status ? staffOrders.filter(o => o.status === status) : staffOrders);
+}
+
 async function loadOrders() {
   try {
     const res  = await fetch('/api/staff/orders?limit=50');
@@ -1154,7 +1245,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   const openModal = localStorage.getItem('staff-open-modal');
   if (openModal) {
     localStorage.removeItem('staff-open-modal');
-    if (openModal === 'stock') openStockModal();
   }
 });
 
