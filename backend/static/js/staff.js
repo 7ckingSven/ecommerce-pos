@@ -1,10 +1,6 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-let allInvHistory   = [];
-let allRequests     = [];
-let staffHistoryPage = 1;
-let staffReqPage     = 1;
-let staffOrdersPage  = 1;
+let staffOrdersPage = 1;
 let staffInvPage    = 1;
 
 function paginate(arr, page) {
@@ -142,6 +138,22 @@ const loaders = {
   summary:   loadSummary,
   requests:  loadRequests,
 };
+
+
+// ─── Button Loading Helper ────────────────────────────
+function setButtonLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn._originalText = btn.innerHTML;
+    btn.disabled      = true;
+    btn.style.opacity = '0.7';
+    btn.innerHTML     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;animation:spin 1s linear infinite;vertical-align:middle;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Processing...';
+  } else {
+    btn.disabled      = false;
+    btn.style.opacity = '1';
+    btn.innerHTML     = btn._originalText || 'Submit';
+  }
+}
 
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {
@@ -602,14 +614,12 @@ async function loadInventory() {
       fetch('/api/products'),
       fetch('/api/staff/inventory'),
     ]);
-    const allInvProdsRaw = await prodRes.json();
-    const allInvProds = Array.isArray(allInvProdsRaw) ? allInvProdsRaw : [];
+    const allInvProds = await prodRes.json();
     // Filter to this branch only
     invProducts = allInvProds.filter(p =>
       !p.branch_id || p.branch_id === staffBranchId
     );
-    const invDataRaw = await invRes.json();
-    const invData = Array.isArray(invDataRaw) ? invDataRaw : [];
+    const invData = await invRes.json();
 
     // Stats
     document.getElementById('invTotalProducts').textContent = invProducts.length;
@@ -642,15 +652,8 @@ async function loadInventory() {
     renderInvProducts(invProducts);
 
     // History — read nested branch names from FK join
-    allInvHistory = invData; renderInvHistory(invData);
-
-  } catch (e) { console.error('Inventory error:', e); }
-}
-
-function renderInvHistory(data) {
-  const paged = paginate(data, staffHistoryPage);
-  document.getElementById('invHistoryBody').innerHTML = paged.length
-      ? paged.map(i => `
+    document.getElementById('invHistoryBody').innerHTML = invData.length
+      ? invData.map(i => `
           <tr>
             <td>${i.product?.product_name || '—'}</td>
             <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
@@ -662,13 +665,9 @@ function renderInvHistory(data) {
             <td>${i.note || '—'}</td>
           </tr>`).join('')
       : '<tr><td colspan="8" class="table-empty">No inventory records yet</td></tr>';
-  renderPager('staffHistoryPagination', data.length, staffHistoryPage, 'changeStaffHistoryPage');
-}
 
-function changeStaffHistoryPage(p) { staffHistoryPage = p; renderInvHistory(allInvHistory); }
-function changeStaffReqPage(p)     { staffReqPage = p;     loadRequests(); }
-window.changeStaffHistoryPage = changeStaffHistoryPage;
-window.changeStaffReqPage     = changeStaffReqPage;
+  } catch (e) { console.error('Inventory error:', e); }
+}
 
 function renderInvProducts(products) {
   const paged = paginate(products, staffInvPage);
@@ -1046,10 +1045,8 @@ async function loadRequests() {
       badge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
-    allRequests = data;
-    const reqPaged = paginate(data, staffReqPage);
-    document.getElementById('requestsBody').innerHTML = reqPaged.length
-      ? reqPaged.map(r => {
+    document.getElementById('requestsBody').innerHTML = data.length
+      ? data.map(r => {
           const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
           const statusColor  = statusColors[r.status] || 'gray';
           return `
@@ -1064,7 +1061,6 @@ async function loadRequests() {
           </tr>`;
         }).join('')
       : '<tr><td colspan="7" class="table-empty">No stock requests yet</td></tr>';
-    renderPager('staffReqPagination', data.length, staffReqPage, 'changeStaffReqPage');
 
   } catch (e) { console.error('Requests error:', e); }
 }
@@ -1126,6 +1122,7 @@ async function submitRequest(e) {
       showToast(err.error || 'Failed to submit request.', 'error');
     }
   } catch (e) { showToast('Error submitting request.', 'error'); }
+  finally { setButtonLoading(reqBtn, false); }
 }
 
 

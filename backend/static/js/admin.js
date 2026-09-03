@@ -136,6 +136,22 @@ function showSection(name, el) {
   startAutoRefresh(name);
 }
 
+
+// ─── Button Loading Helper ────────────────────────────
+function setButtonLoading(btn, loading) {
+  if (!btn) return;
+  if (loading) {
+    btn._originalText = btn.innerHTML;
+    btn.disabled      = true;
+    btn.style.opacity = '0.7';
+    btn.innerHTML     = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;animation:spin 1s linear infinite;vertical-align:middle;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Processing...';
+  } else {
+    btn.disabled      = false;
+    btn.style.opacity = '1';
+    btn.innerHTML     = btn._originalText || 'Save';
+  }
+}
+
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
@@ -673,6 +689,7 @@ async function submitProduct(e) {
       showToast(data.error || 'Failed to save product.', 'error');
     }
   } catch (e) { showToast('Error saving product.', 'error'); }
+  finally { setButtonLoading(submitBtn, false); }
 }
 
 // Image preview
@@ -1040,6 +1057,7 @@ async function submitAddStock(e) {
       showToast(err.error || 'Failed to add stock.', 'error');
     }
   } catch (e) { showToast('Error adding stock.', 'error'); }
+  finally { setButtonLoading(addStockBtn, false); }
 }
 
 // ─── STOCK TRANSFER Modal ─────────────────────────────
@@ -1859,6 +1877,7 @@ async function submitDiscount(e) {
       showToast(err.error || 'Failed to save discount.', 'error');
     }
   } catch (e) { showToast('Error saving discount.', 'error'); }
+  finally { setButtonLoading(discBtn, false); }
 }
 
 // Assign Discount Modal
