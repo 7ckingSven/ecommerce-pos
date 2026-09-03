@@ -2075,10 +2075,12 @@ def staff_place_order():
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
             'staff_id':   session.get('staff_id'),
+            'branch_id':  branch_id,
             'order_type': order_type,
             'quantity':   quantity,
             'total':      total,
             'status':     'completed',
+            'date':       'now()',
         }).execute()
 
         order_id = order_res.data[0]['order_id']
@@ -2103,14 +2105,17 @@ def staff_place_order():
         payment_id = payment_res.data[0]['payment_id']
 
         # ── Create sales transaction ──────────────────
-        supabase.table('sales_transaction').insert({
-            'order_id':        order_id,
-            'staff_id':        session.get('staff_id'),
-            'branch_id':       branch_id,
-            'payment_id':      payment_id,
-            'total_amount':    total,
-            'transaction_date': 'now()',
-        }).execute()
+        try:
+            supabase.table('sales_transaction').insert({
+                'order_id':         order_id,
+                'staff_id':         session.get('staff_id'),
+                'branch_id':        branch_id,
+                'payment_id':       payment_id,
+                'total_amount':     total,
+                'transaction_date': 'now()',
+            }).execute()
+        except Exception as tx_err:
+            print(f'Sales transaction insert warning: {tx_err}')  # non-critical
 
         # ── Deduct stock ──────────────────────────────
         for item in cart_items:
@@ -2135,6 +2140,7 @@ def staff_place_order():
                     'updated_at': 'now()'
                 }).eq('product_id', product_id).execute()
 
+        print(f'Walk-in order created: order_id={order_id}, branch_id={branch_id}, total={total}')
         return jsonify({
             'message':  'Order processed successfully.',
             'order_id': order_id,

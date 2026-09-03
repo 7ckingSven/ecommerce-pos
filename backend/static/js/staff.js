@@ -375,7 +375,8 @@ function renderOrderItems() {
         <p>No items added yet</p>
         <span>Search and click a product to add</span>
       </div>`;
-    document.getElementById('posCheckoutBtn').disabled = true;
+    const checkBtn = document.getElementById('processOrderBtn');
+    if (checkBtn) checkBtn.disabled = true;
     return;
   }
   wrap.innerHTML = orderItems.map(item => `
@@ -391,7 +392,8 @@ function renderOrderItems() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>`).join('');
-  document.getElementById('posCheckoutBtn').disabled = false;
+  const checkBtn2 = document.getElementById('processOrderBtn');
+  if (checkBtn2) checkBtn2.disabled = false;
 }
 
 function updateTotal() {
@@ -960,8 +962,8 @@ async function loadSummary() {
     const res    = await fetch('/api/staff/orders?limit=500');
     allSummaryOrders = await res.json();
 
-    // Set today's date in picker and render
-    const today = new Date().toISOString().split('T')[0];
+    // Set today's date in picker — use PH timezone
+    const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
     const picker = document.getElementById('summaryDatePicker');
     if (picker && !picker.value) picker.value = today;
 
@@ -982,18 +984,22 @@ function renderSummaryForDate(dateStr) {
   const labelEl = document.getElementById('summaryDateLabel');
   if (labelEl) labelEl.textContent = isToday ? '📅 Today' : `📅 ${label}`;
 
-  // Filter orders by date
+  // Filter orders by date — PH timezone
   const filtered = allSummaryOrders.filter(o => {
-    const d = new Date(o.created_at || o.date || 0);
-    return d.toISOString().split('T')[0] === dateStr;
+    const raw = o.created_at || o.date || null;
+    if (!raw) return false;
+    const localDate = new Date(raw).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+    return localDate === dateStr;
   });
 
-  const total  = filtered.filter(o => o.status === 'completed').reduce((s,o) => s + Number(o.total || 0), 0);
+  const allValid = filtered.filter(o => o.status !== 'cancelled');
+  const total    = allValid.reduce((s, o) => s + Number(o.total || 0), 0);
+  console.log('Summary:', dateStr, 'filtered:', filtered.length, 'total:', total);
 
   document.getElementById('summaryToday').textContent  = peso(total);
-  document.getElementById('summaryOrders').textContent = filtered.length;
-  document.getElementById('summaryWalkin').textContent = filtered.filter(o => o.order_type === 'walk_in').length;
-  document.getElementById('summaryOnline').textContent = filtered.filter(o => o.order_type === 'online').length;
+  document.getElementById('summaryOrders').textContent = allValid.length;
+  document.getElementById('summaryWalkin').textContent = allValid.filter(o => o.order_type === 'walk_in').length;
+  document.getElementById('summaryOnline').textContent = allValid.filter(o => o.order_type === 'online').length;
 
   document.getElementById('summaryTodayBody').innerHTML = filtered.length
     ? filtered.map(o => `
