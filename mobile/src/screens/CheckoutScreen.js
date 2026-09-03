@@ -2,12 +2,13 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform,
+  TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Image
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { placeOrder, getProfile, updateProfile } from '../services/orderService';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 import { getCustomerId, getCustomer } from '../services/authService';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 
 const PAYMENT_METHODS = [
@@ -20,6 +21,11 @@ export default function CheckoutScreen({ route, navigation }) {
 
   const [payment,       setPayment]       = useState('cash_on_delivery');
   const [refNo,         setRefNo]         = useState('');
+  const [senderNo,      setSenderNo]      = useState('');
+  const [gcashMethod,   setGcashMethod]   = useState('details'); // 'details' | 'image'
+  const [receiptImage,  setReceiptImage]  = useState(null);  // { uri, base64 }
+  const [refNoError,    setRefNoError]    = useState('');
+  const [senderError,   setSenderError]   = useState('');
   const [loading,       setLoading]       = useState(false);
   const [shippingFee,   setShippingFee]   = useState(0);
   const [orderLoading,  setOrderLoading]  = useState(false);
@@ -238,9 +244,27 @@ export default function CheckoutScreen({ route, navigation }) {
       return;
     }
 
-    if (payment === 'gcash' && !refNo.trim()) {
-      Alert.alert('Required', 'Please enter the GCash reference number.');
-      return;
+    // GCash validation
+    if (payment === 'gcash') {
+      if (gcashMethod === 'details') {
+        const refClean    = refNo.trim().replace(/\D/g, '');
+        const senderClean = senderNo.trim().replace(/\D/g, '');
+        let hasError = false;
+        if (refClean.length !== 13) {
+          setRefNoError('Reference number must be exactly 13 digits.');
+          hasError = true;
+        } else { setRefNoError(''); }
+        if (senderClean.length !== 11 || !senderClean.startsWith('09')) {
+          setSenderError('Sender number must be 11 digits starting with 09.');
+          hasError = true;
+        } else { setSenderError(''); }
+        if (hasError) return;
+      } else {
+        if (!receiptImage) {
+          Alert.alert('Required', 'Please upload your GCash receipt image.');
+          return;
+        }
+      }
     }
 
     Alert.alert(
@@ -265,7 +289,16 @@ export default function CheckoutScreen({ route, navigation }) {
                   selected_options: i.selected_options || {},
                 };
               });
-              const res = await placeOrder(items, payment, refNo.trim(), branchId || cartItems[0]?.branch_id || null, shippingFee);
+              const res = await placeOrder(
+                items,
+                payment,
+                gcashMethod === 'details' ? refNo.trim() : '',
+                branchId || cartItems[0]?.branch_id || null,
+                shippingFee,
+                address,
+                gcashMethod === 'details' ? senderNo.trim() : '',
+                gcashMethod === 'image'   ? receiptImage   : null
+              );
               Alert.alert(
                 '🎉 Order Placed!',
                 `Your order has been placed successfully!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
@@ -357,6 +390,10 @@ export default function CheckoutScreen({ route, navigation }) {
             const finalSubtotal = finalPrice * item.quantity;
             return (
               <View key={idx} style={styles.orderItem}>
+                {item.product?.image_url
+                  ? <Image source={{ uri: item.product.image_url }} style={styles.checkoutItemImg}/>
+                  : <View style={styles.checkoutItemImgPlaceholder}/>
+                }
                 <View style={styles.orderItemLeft}>
                   <Text style={styles.orderItemName} numberOfLines={1}>
                     {item.product?.product_name || '—'}
@@ -440,7 +477,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
           {payment === 'gcash' && (
             <View style={styles.refWrap}>
-              {/* GCash number to send payment to */}
+              {/* GCash Store Number */}
               <View style={styles.gcashNumberBox}>
                 <Feather name="smartphone" size={20} color="#1d4ed8"/>
                 <View style={{ flex:1 }}>
@@ -449,19 +486,97 @@ export default function CheckoutScreen({ route, navigation }) {
                   <Text style={styles.gcashName}>Triple E & Fiel Collins GM</Text>
                 </View>
               </View>
-              <Text style={styles.refLabel}>GCash Reference Number *</Text>
-              <View style={styles.inputRow}>
-                <Feather name="hash" size={16} color={COLORS.textMuted} style={{ marginRight: 8 }}/>
-                <TextInput
-                  style={styles.refInput}
-                  placeholder="Enter reference number"
-                  placeholderTextColor={COLORS.textMuted}
-                  value={refNo}
-                  onChangeText={setRefNo}
-                  keyboardType="number-pad"
-                />
+
+              {/* Method Toggle */}
+              <View style={styles.gcashToggleRow}>
+                <TouchableOpacity
+                  style={[styles.gcashToggleBtn, gcashMethod === 'details' && styles.gcashToggleActive]}
+                  onPress={() => setGcashMethod('details')}
+                >
+                  <Feather name="edit-2" size={14} color={gcashMethod === 'details' ? '#fff' : COLORS.textMuted}/>
+                  <Text style={[styles.gcashToggleText, gcashMethod === 'details' && { color:'#fff' }]}>Enter Details</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.gcashToggleBtn, gcashMethod === 'image' && styles.gcashToggleActive]}
+                  onPress={() => setGcashMethod('image')}
+                >
+                  <Feather name="image" size={14} color={gcashMethod === 'image' ? '#fff' : COLORS.textMuted}/>
+                  <Text style={[styles.gcashToggleText, gcashMethod === 'image' && { color:'#fff' }]}>Upload Receipt</Text>
+                </TouchableOpacity>
               </View>
-              <Text style={styles.refHint}>Complete GCash payment first, then enter the reference number.</Text>
+
+              {/* Option A — Enter Details */}
+              {gcashMethod === 'details' && (
+                <View>
+                  <Text style={styles.refLabel}>Sender's GCash Number *</Text>
+                  <View style={[styles.inputRow, senderError ? styles.inputError : null]}>
+                    <Feather name="phone" size={16} color={COLORS.textMuted} style={{ marginRight:8 }}/>
+                    <TextInput
+                      style={styles.refInput}
+                      placeholder="09XXXXXXXXX (11 digits)"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={senderNo}
+                      onChangeText={t => {
+                        const clean = t.replace(/\D/g,'').slice(0,11);
+                        setSenderNo(clean);
+                        setSenderError(clean.length === 11 && clean.startsWith('09') ? '' : '');
+                      }}
+                      keyboardType="number-pad"
+                      maxLength={11}
+                    />
+                  </View>
+                  {senderError ? <Text style={styles.inputErrText}>{senderError}</Text> : null}
+
+                  <Text style={[styles.refLabel, { marginTop:12 }]}>Reference Number *</Text>
+                  <View style={[styles.inputRow, refNoError ? styles.inputError : null]}>
+                    <Feather name="hash" size={16} color={COLORS.textMuted} style={{ marginRight:8 }}/>
+                    <TextInput
+                      style={styles.refInput}
+                      placeholder="13-digit reference number"
+                      placeholderTextColor={COLORS.textMuted}
+                      value={refNo}
+                      onChangeText={t => {
+                        const clean = t.replace(/\D/g,'').slice(0,13);
+                        setRefNo(clean);
+                        setRefNoError(clean.length === 13 ? '' : '');
+                      }}
+                      keyboardType="number-pad"
+                      maxLength={13}
+                    />
+                  </View>
+                  {refNoError ? <Text style={styles.inputErrText}>{refNoError}</Text> : null}
+                  <Text style={styles.refHint}>Complete GCash payment first, then enter the details.</Text>
+                </View>
+              )}
+
+              {/* Option B — Upload Receipt */}
+              {gcashMethod === 'image' && (
+                <View>
+                  <TouchableOpacity
+                    style={styles.uploadBtn}
+                    onPress={() => {
+                      launchImageLibrary({ mediaType:'photo', quality:0.8, includeBase64:true }, res => {
+                        if (res.assets && res.assets[0]) {
+                          setReceiptImage(res.assets[0]);
+                        }
+                      });
+                    }}
+                  >
+                    <Feather name="upload" size={18} color={COLORS.primary}/>
+                    <Text style={styles.uploadBtnText}>
+                      {receiptImage ? 'Change Receipt Image' : 'Upload GCash Receipt'}
+                    </Text>
+                  </TouchableOpacity>
+                  {receiptImage && (
+                    <Image
+                      source={{ uri: receiptImage.uri }}
+                      style={styles.receiptPreview}
+                      resizeMode="contain"
+                    />
+                  )}
+                  <Text style={styles.refHint}>Upload a screenshot of your GCash payment receipt.</Text>
+                </View>
+              )}
             </View>
           )}
         </View>
@@ -573,6 +688,8 @@ const styles = StyleSheet.create({
   addAddressText:     { fontSize: 13, fontWeight: '600', color: COLORS.primary },
 
   // Order Items
+  checkoutItemImg:            { width:50, height:50, borderRadius:10, marginRight:12, backgroundColor:'#f0f0f0' },
+  checkoutItemImgPlaceholder: { width:50, height:50, borderRadius:10, marginRight:12, backgroundColor:'#f0f0f0' },
   orderItem:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   orderItemLeft:      { flex: 1, flexDirection: 'row', alignItems: 'center', gap: 8 },
   orderItemOptions:    { fontSize: 11, color: COLORS.primary, marginTop: 2 },
@@ -597,6 +714,15 @@ const styles = StyleSheet.create({
   payRadio:           { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: COLORS.grayBorder, alignItems: 'center', justifyContent: 'center' },
   payRadioActive:     { borderColor: COLORS.primary },
   payRadioDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.primary },
+  gcashToggleRow:    { flexDirection:'row', gap:8, marginBottom:16, marginTop:8 },
+  gcashToggleBtn:    { flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:6, padding:10, borderRadius:8, borderWidth:1.5, borderColor:COLORS.border, backgroundColor:COLORS.surface },
+  gcashToggleActive: { backgroundColor:COLORS.primary, borderColor:COLORS.primary },
+  gcashToggleText:   { fontSize:13, fontWeight:'600', color:COLORS.textMuted },
+  inputError:        { borderColor:'#ef4444' },
+  inputErrText:      { fontSize:11, color:'#ef4444', marginTop:4, marginLeft:4 },
+  uploadBtn:         { flexDirection:'row', alignItems:'center', gap:8, padding:14, borderRadius:10, borderWidth:1.5, borderColor:COLORS.primary, backgroundColor:'rgba(22,163,74,0.05)', justifyContent:'center', marginBottom:12 },
+  uploadBtnText:     { fontSize:14, fontWeight:'600', color:COLORS.primary },
+  receiptPreview:    { width:'100%', height:200, borderRadius:10, marginBottom:8, backgroundColor:COLORS.surface },
   refWrap:            { gap: 6, marginTop: SPACING.sm },
   refLabel:           { fontSize: 12, fontWeight: '600', color: COLORS.dark },
   inputRow:           { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg, paddingHorizontal: SPACING.sm },

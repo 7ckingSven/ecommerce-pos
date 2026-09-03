@@ -788,6 +788,53 @@ def api_get_orders():
         print(f"API get orders error: {e}")
         return jsonify({'error': 'Failed to fetch orders.'}), 500
 
+
+@app.route('/api/orders/<order_id>/received', methods=['POST'])
+def api_mark_order_received(order_id):
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        # Verify order belongs to customer and is out_for_delivery
+        order_res = supabase.table('order').select('order_id, status, customer_id').eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+        order = order_res.data[0]
+        if str(order.get('customer_id')) != str(customer_id):
+            return jsonify({'error': 'Unauthorized.'}), 403
+        if order.get('status') != 'out_for_delivery':
+            return jsonify({'error': 'Order is not out for delivery.'}), 400
+
+        supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
+        return jsonify({'message': 'Order marked as received!'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/upload/gcash-receipt', methods=['POST'])
+def upload_gcash_receipt():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        import base64
+        data         = request.get_json()
+        image_base64 = data.get('image_base64', '')
+        file_name    = data.get('file_name', 'receipt.jpg')
+        content_type = data.get('content_type', 'image/jpeg')
+
+        image_bytes  = base64.b64decode(image_base64)
+        storage_path = f'receipts/{customer_id}_{file_name}'
+
+        supabase.storage.from_('gcash-receipts').upload(
+            storage_path, image_bytes, {'content-type': content_type}
+        )
+        url = supabase.storage.from_('gcash-receipts').get_public_url(storage_path)
+        return jsonify({'url': url}), 200
+    except Exception as e:
+        print(f'Receipt upload error: {e}')
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/orders', methods=['POST'])
 def api_place_order():
     customer_id = request.headers.get('X-Customer-ID')
@@ -811,6 +858,9 @@ def api_place_order():
 
         branch_id    = data.get('branch_id')
         shipping_fee = float(data.get('shipping_fee', 0) or 0)
+        address           = data.get('address', '')
+        sender_number     = data.get('sender_number', '')
+        receipt_image_url = data.get('receipt_image_url', '')
         order_res = supabase.table('order').insert({
             'customer_id':  customer_id,
             'order_type':   'online',
@@ -819,6 +869,8 @@ def api_place_order():
             'status':       'pending',
             'branch_id':    branch_id,
             'shipping_fee': shipping_fee,
+            'address':      address,
+            'date':         'now()',
         }).execute()
 
         order_id    = order_res.data[0]['order_id']
@@ -832,12 +884,14 @@ def api_place_order():
         supabase.table('order_item').insert(order_items).execute()
 
         payment_res = supabase.table('payment').insert({
-            'order_id':       order_id,
-            'customer_id':    customer_id,
-            'payment_method': payment_method,
-            'total':          total,
-            'ref_no':         ref_no if ref_no else None,  # ref_no lives on payment
-            'status':         'paid' if payment_method == 'gcash' else 'pending'
+            'order_id':          order_id,
+            'customer_id':       customer_id,
+            'payment_method':    payment_method,
+            'total':             total,
+            'ref_no':            ref_no            if ref_no            else None,
+            'sender_number':     sender_number     if sender_number     else None,
+            'receipt_image_url': receipt_image_url if receipt_image_url else None,
+            'status':            'paid' if payment_method == 'gcash' else 'pending'
         }).execute()
 
         for item in cart_items:
@@ -1780,6 +1834,16 @@ def admin_add_inventory():
             'note':            note,
         }).execute()
 
+        # Auto-activate product if total branch stock >= 1
+        try:
+            all_bs = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).execute()
+            total_stock = sum(bs['quantity'] for bs in (all_bs.data or []))
+            if total_stock >= 1:
+                supabase.table('product').update({'status': 'active'}).eq('product_id', product_id).execute()
+                print(f'Product {product_id} auto-activated after stock update.')
+        except Exception as act_err:
+            print(f'Auto-activate warning: {act_err}')
+
         return jsonify({'message': 'Stock updated.'}), 201
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1797,7 +1861,7 @@ def admin_get_orders():
             limit = 500
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, customer(fname, lname, email), staff(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no)'
+            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, customer(fname, lname, email), staff(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).execute()
 
         # Get branch lookup
@@ -2031,8 +2095,8 @@ def staff_get_orders():
         limit = request.args.get('limit', default=50, type=int)
         if limit <= 0:
             limit = 50
-        if limit > 200:
-            limit = 200
+        if limit > 100:
+            limit = 100
 
         staff_id = session.get('staff_id')
 
@@ -2041,16 +2105,37 @@ def staff_get_orders():
         branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
 
         query = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, customer(fname, lname), staff(fname, lname), order_item(order_item_id, product_id, qty, price, product(product_name)), payment(payment_method)'
+            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, customer(fname, lname, email), staff(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit)
 
         # Filter to this branch's orders only
         if branch_id:
             query = query.eq('branch_id', branch_id)
 
-        res = query.execute()
+        import time
+        # Retry on Windows socket error
+        for attempt in range(3):
+            try:
+                res = query.execute()
+                break
+            except Exception as sock_err:
+                if attempt < 2:
+                    time.sleep(0.5)
+                    continue
+                raise sock_err
+
+        # Add branch_name + flatten payment (sequential to avoid WinError 10035)
+        time.sleep(0.1)
+        branches_res = supabase.table('branch').select('branch_id, branch_name').execute()
+        branch_map   = {b['branch_id']: b['branch_name'] for b in (branches_res.data or [])}
+        for o in res.data:
+            o['branch_name'] = branch_map.get(o.get('branch_id'), '')
+            if isinstance(o.get('payment'), list):
+                o['payment'] = o['payment'][0] if o['payment'] else None
+
         return jsonify(res.data), 200
     except Exception as e:
+        print(f'Staff orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/staff/orders', methods=['POST'])
@@ -2075,12 +2160,10 @@ def staff_place_order():
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
             'staff_id':   session.get('staff_id'),
-            'branch_id':  branch_id,
             'order_type': order_type,
             'quantity':   quantity,
             'total':      total,
             'status':     'completed',
-            'date':       'now()',
         }).execute()
 
         order_id = order_res.data[0]['order_id']
@@ -2105,17 +2188,14 @@ def staff_place_order():
         payment_id = payment_res.data[0]['payment_id']
 
         # ── Create sales transaction ──────────────────
-        try:
-            supabase.table('sales_transaction').insert({
-                'order_id':         order_id,
-                'staff_id':         session.get('staff_id'),
-                'branch_id':        branch_id,
-                'payment_id':       payment_id,
-                'total_amount':     total,
-                'transaction_date': 'now()',
-            }).execute()
-        except Exception as tx_err:
-            print(f'Sales transaction insert warning: {tx_err}')  # non-critical
+        supabase.table('sales_transaction').insert({
+            'order_id':        order_id,
+            'staff_id':        session.get('staff_id'),
+            'branch_id':       branch_id,
+            'payment_id':      payment_id,
+            'total_amount':    total,
+            'transaction_date': 'now()',
+        }).execute()
 
         # ── Deduct stock ──────────────────────────────
         for item in cart_items:
@@ -2140,7 +2220,6 @@ def staff_place_order():
                     'updated_at': 'now()'
                 }).eq('product_id', product_id).execute()
 
-        print(f'Walk-in order created: order_id={order_id}, branch_id={branch_id}, total={total}')
         return jsonify({
             'message':  'Order processed successfully.',
             'order_id': order_id,

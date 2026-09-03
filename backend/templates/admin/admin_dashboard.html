@@ -744,10 +744,15 @@
         </div>
         <div class="form-group">
           <label class="form-label">Status</label>
-          <select id="pStatus" class="form-input form-select">
-            <option value="active">Active</option>
-            <option value="inactive">Inactive</option>
-          </select>
+          <!-- Hidden input — controlled by stock level -->
+          <input type="hidden" id="pStatus" value="inactive"/>
+          <div id="pStatusDisplay" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);">
+            <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;" id="pStatusDot"></span>
+            <span id="pStatusText" style="font-size:13px;font-weight:600;color:#ef4444;">Inactive</span>
+          </div>
+          <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+            Product becomes <strong>Active</strong> automatically when stock is added via Purchase Order.
+          </p>
         </div>
         <div class="form-group">
           <label class="form-label">Description</label>

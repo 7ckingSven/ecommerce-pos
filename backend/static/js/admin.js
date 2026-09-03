@@ -465,7 +465,20 @@ function openProductModal(product = null) {
   document.getElementById('pCategory').value    = product?.category || '';
   document.getElementById('pPrice').value       = product?.price || '';
   // Stock managed via Inventory — not set in product modal
-  document.getElementById('pStatus').value      = product?.status || 'active';
+  const status = product?.status || 'inactive';
+  document.getElementById('pStatus').value = status;
+  // Update status badge display
+  const dot  = document.getElementById('pStatusDot');
+  const txt  = document.getElementById('pStatusText');
+  const disp = document.getElementById('pStatusDisplay');
+  if (dot && txt && disp) {
+    const isActive = status === 'active';
+    dot.style.background     = isActive ? 'var(--g-400)' : '#ef4444';
+    txt.style.color          = isActive ? 'var(--g-400)' : '#ef4444';
+    txt.textContent          = isActive ? 'Active' : 'Inactive';
+    disp.style.background    = isActive ? 'rgba(22,163,74,0.1)' : 'rgba(239,68,68,0.1)';
+    disp.style.borderColor   = isActive ? 'rgba(22,163,74,0.2)' : 'rgba(239,68,68,0.2)';
+  }
   document.getElementById('pDescription').value = product?.description || '';
 
   // Populate discount dropdown
@@ -1304,6 +1317,14 @@ function viewOrderItems(order) {
         <div><span style="color:var(--text-muted);">Type</span><br/>${badge(order.order_type)}</div>
         <div><span style="color:var(--text-muted);">Status</span><br/>${badge(order.status)}</div>
         <div><span style="color:var(--text-muted);">Payment</span><br/>${order.payment?.payment_method ? badge(order.payment.payment_method) : '—'}</div>
+        ${order.payment?.payment_method === 'gcash' ? `
+        <div style="grid-column:1/-1;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-top:4px;">
+          <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">💳 GCASH PAYMENT DETAILS</div>
+          ${order.payment.ref_no ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);"># Ref No:</span> <strong>${order.payment.ref_no}</strong></div>` : ''}
+          ${order.payment.sender_number ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">📱 Sender No:</span> <strong>${order.payment.sender_number}</strong></div>` : ''}
+          ${order.payment.receipt_image_url ? `<div style="margin-top:8px;"><a href="${order.payment.receipt_image_url}" target="_blank" style="color:#3b82f6;font-size:12px;font-weight:600;">🖼️ View Receipt Image</a></div>` : ''}
+          ${!order.payment.ref_no && !order.payment.sender_number && !order.payment.receipt_image_url ? '<div style="font-size:12px;color:var(--text-muted);">No GCash details provided</div>' : ''}
+        </div>` : ''}
         <div><span style="color:var(--text-muted);">Date</span><br/><strong>${order.date || order.created_at ? new Date(order.date || order.created_at).toLocaleDateString('en-PH') : '—'}</strong></div>
       </div>
 

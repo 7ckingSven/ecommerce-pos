@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  FlatList, ActivityIndicator, Modal, ScrollView,
+  FlatList, ActivityIndicator, Modal, ScrollView, Image, Alert
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
@@ -159,6 +159,10 @@ export default function OrdersScreen({ navigation }) {
               <View style={styles.divider}/>
               {(item.order_item || []).map((oi, idx) => (
                 <View key={idx} style={styles.orderItem}>
+                  {oi.product?.image_url
+                    ? <Image source={{ uri: oi.product.image_url }} style={styles.orderItemImg}/>
+                    : <View style={styles.orderItemImgPlaceholder}><Feather name="image" size={14} color={COLORS.textMuted}/></View>
+                  }
                   <View style={{ flex:1 }}>
                     <Text style={styles.orderItemName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
                     {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
@@ -290,6 +294,10 @@ export default function OrdersScreen({ navigation }) {
                 <Text style={styles.detailSectionTitle}>Items Ordered</Text>
                 {(selectedOrder?.order_item || []).map((oi, idx) => (
                   <View key={idx} style={styles.detailItemRow}>
+                    {oi.product?.image_url
+                      ? <Image source={{ uri: oi.product.image_url }} style={styles.detailItemImg}/>
+                      : <View style={styles.detailItemImgPlaceholder}><Feather name="image" size={16} color={COLORS.textMuted}/></View>
+                    }
                     <View style={{ flex:1 }}>
                       <Text style={styles.detailItemName}>{oi.product?.product_name || '—'}</Text>
                       <Text style={styles.detailItemQty}>x{oi.qty || oi.quantity}</Text>
@@ -347,6 +355,24 @@ export default function OrdersScreen({ navigation }) {
 
             </ScrollView>
 
+            {/* Mark as Order Received Button */}
+            {selectedOrder?.status === 'out_for_delivery' && (
+              <TouchableOpacity
+                style={[styles.receivedBtn, markingReceived && { opacity: 0.7 }]}
+                onPress={() => markAsReceived(selectedOrder.order_id)}
+                disabled={markingReceived}
+                activeOpacity={0.85}
+              >
+                {markingReceived
+                  ? <ActivityIndicator color={COLORS.white} />
+                  : <>
+                      <Feather name="check-circle" size={18} color={COLORS.white} />
+                      <Text style={styles.receivedBtnText}>Mark as Order Received</Text>
+                    </>
+                }
+              </TouchableOpacity>
+            )}
+
             <TouchableOpacity style={styles.closeBtn} onPress={() => setSelectedOrder(null)}>
               <Text style={styles.closeBtnText}>Close</Text>
             </TouchableOpacity>
@@ -371,6 +397,10 @@ const styles = StyleSheet.create({
   statusBadge:      { borderRadius: RADIUS.full, paddingHorizontal:10, paddingVertical:4 },
   statusText:       { fontSize:10, fontWeight:'700' },
   divider:          { height:1, backgroundColor: COLORS.grayBorder },
+  orderItemImg:            { width:40, height:40, borderRadius:8, marginRight:10, backgroundColor:COLORS.border },
+  orderItemImgPlaceholder:  { width:40, height:40, borderRadius:8, marginRight:10, backgroundColor:COLORS.surface, alignItems:'center', justifyContent:'center', borderWidth:1, borderColor:COLORS.border },
+  detailItemImg:            { width:50, height:50, borderRadius:10, marginRight:12, backgroundColor:COLORS.border },
+  detailItemImgPlaceholder: { width:50, height:50, borderRadius:10, marginRight:12, backgroundColor:COLORS.surface, alignItems:'center', justifyContent:'center', borderWidth:1, borderColor:COLORS.border },
   orderItem:        { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
   orderItemName:    { fontSize:12, color: COLORS.dark, flex:1 },
   orderItemQtyPrice:{ fontSize:12, color: COLORS.textMuted, fontWeight:'500' },

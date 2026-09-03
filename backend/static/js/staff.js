@@ -925,6 +925,13 @@ function viewStaffOrderItems(order) {
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
     + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
     + '</div>'
+    + (order.payment && order.payment.payment_method === 'gcash'
+      ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
+        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">Ref No: <strong>' + order.payment.ref_no + '</strong></div>' : '')
+        + (order.payment.sender_number ? '<div style="margin-bottom:4px;">Sender: <strong>' + order.payment.sender_number + '</strong></div>' : '')
+        + (order.payment.receipt_image_url ? '<div><a href="' + order.payment.receipt_image_url + '" target="_blank" style="color:#3b82f6;font-size:12px;">View Receipt</a></div>' : '')
+        + '</div>'
+      : '')
     + addrHtml
     + '<div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>'
     + itemsHtml
@@ -959,7 +966,7 @@ let allSummaryOrders = []; // store all orders for date filtering
 
 async function loadSummary() {
   try {
-    const res    = await fetch('/api/staff/orders?limit=500');
+    const res    = await fetch('/api/staff/orders?limit=100');
     allSummaryOrders = await res.json();
 
     // Set today's date in picker — use PH timezone
