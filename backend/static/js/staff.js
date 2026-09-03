@@ -1,3 +1,61 @@
+// ─── Pagination Helper ────────────────────────────────
+const ITEMS_PER_PAGE = 10;
+
+function paginate(data, page) {
+  const start = (page - 1) * ITEMS_PER_PAGE;
+  return data.slice(start, start + ITEMS_PER_PAGE);
+}
+
+function renderPagination(containerId, total, currentPage, onPageChange) {
+  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  if (totalPages <= 1) {
+    const el = document.getElementById(containerId);
+    if (el) el.innerHTML = '';
+    return;
+  }
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  const start = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const end   = Math.min(currentPage * ITEMS_PER_PAGE, total);
+
+  let pages = '';
+  for (let i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || (i >= currentPage - 1 && i <= currentPage + 1)) {
+      pages += `<button onclick="(${onPageChange})(${i})"
+        style="min-width:32px;height:32px;border-radius:6px;border:1.5px solid ${i === currentPage ? 'var(--g-400)' : 'var(--border)'};
+        background:${i === currentPage ? 'var(--g-400)' : 'var(--surface)'};
+        color:${i === currentPage ? '#fff' : 'var(--text-primary)'};
+        font-size:12px;font-weight:${i === currentPage ? '700' : '400'};
+        cursor:pointer;padding:0 8px;">${i}</button>`;
+    } else if (i === currentPage - 2 || i === currentPage + 2) {
+      pages += `<span style="color:var(--text-muted);padding:0 2px;">…</span>`;
+    }
+  }
+
+  el.innerHTML = `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;flex-wrap:wrap;gap:8px;">
+      <span style="font-size:12px;color:var(--text-muted);">Showing ${start}–${end} of ${total} records</span>
+      <div style="display:flex;align-items:center;gap:4px;">
+        <button onclick="(${onPageChange})(${currentPage - 1})"
+          ${currentPage === 1 ? 'disabled' : ''}
+          style="height:32px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);
+          background:var(--surface);color:var(--text-primary);font-size:12px;
+          cursor:${currentPage === 1 ? 'not-allowed' : 'pointer'};opacity:${currentPage === 1 ? '0.4' : '1'};">
+          ← Prev
+        </button>
+        ${pages}
+        <button onclick="(${onPageChange})(${currentPage + 1})"
+          ${currentPage === totalPages ? 'disabled' : ''}
+          style="height:32px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);
+          background:var(--surface);color:var(--text-primary);font-size:12px;
+          cursor:${currentPage === totalPages ? 'not-allowed' : 'pointer'};opacity:${currentPage === totalPages ? '0.4' : '1'};">
+          Next →
+        </button>
+      </div>
+    </div>`;
+}
+
 // ─── Button Loading Helper ───────────────────────────
 function setButtonLoading(btn, loading) {
   if (!btn) return;
@@ -623,9 +681,11 @@ async function loadInventory() {
   } catch (e) { console.error('Inventory error:', e); }
 }
 
-function renderInvProducts(products) {
-  document.getElementById('invProductsBody').innerHTML = products.length
-    ? products.map(p => `
+function renderInvProducts(products, page = 1) {
+  staffInvPage = page;
+  const paged = paginate(products, page);
+  document.getElementById('invProductsBody').innerHTML = paged.length
+    ? paged.map(p => `
         <tr>
           <td><strong>${p.product_name}</strong></td>
           <td>${p.brand || '—'}</td>
@@ -758,9 +818,11 @@ function updateOrdersBadge(orders) {
   }
 }
 
-function renderStaffOrders(orders) {
-  document.getElementById('staffOrdersBody').innerHTML = orders.length
-    ? orders.map(o => `
+function renderStaffOrders(orders, page = 1) {
+  staffOrdersPage = page;
+  const paged = paginate(orders, page);
+  document.getElementById('staffOrdersBody').innerHTML = paged.length
+    ? paged.map(o => `
         <tr>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
@@ -785,6 +847,7 @@ function renderStaffOrders(orders) {
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
+  renderPagination('staffOrdersPagination', orders.length, page, `(p) => renderStaffOrders(staffOrders, p)`);
 }
 
 // ─── View Staff Order Items Modal ─────────────────────
