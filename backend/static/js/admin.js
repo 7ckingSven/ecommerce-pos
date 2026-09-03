@@ -209,8 +209,13 @@ async function loadOverview() {
     const getTotal = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
       : Number(p.quantity);
-    const lowStock    = activeProducts.filter(p => { const t = getTotal(p); return t > 0 && t <= 10; });
-    const outOfStock  = activeProducts.filter(p => getTotal(p) === 0);
+
+    // Per-branch stock checks — detect issues in ANY branch
+    const hasAnyBranchLow  = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+    const hasAnyBranchZero = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0);
+
+    const lowStock   = activeProducts.filter(p => hasAnyBranchLow(p));
+    const outOfStock = activeProducts.filter(p => hasAnyBranchZero(p));
     document.getElementById('statLowStock').textContent    = lowStock.length;
 
     // Update inventory nav badge (low stock warning)
@@ -819,10 +824,12 @@ async function loadInventory() {
     // Update branch stock summary with products that have branch_stock
     updateBranchStockSummary(products);
 
-    // Check low stock products — use sum of branch_stock quantities as the real total
+    // Check low stock per branch — flag if ANY branch has low/zero stock
     const getBranchTotal = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
       : Number(p.quantity);
+    const hasLowBranch  = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+    const hasZeroBranch = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0);
     const lowStock = products.filter(p => p.status === 'active' && getBranchTotal(p) <= 10);
     const banner   = document.getElementById('lowStockBanner');
     const bannerText = document.getElementById('lowStockBannerText');
