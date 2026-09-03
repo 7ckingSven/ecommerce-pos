@@ -1,124 +1,36 @@
-// ─── Pagination Helper ────────────────────────────────
+// ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
+let invPage    = 1;
+let ordersPage = 1;
 
-function paginate(data, page) {
-  const start = (page - 1) * ITEMS_PER_PAGE;
-  return data.slice(start, start + ITEMS_PER_PAGE);
+function paginate(arr, page) {
+  return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 }
 
-function renderPagination(containerId, total, currentPage, onPageChange) {
-  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
-  if (totalPages <= 1) {
-    const el = document.getElementById(containerId);
-    if (el) el.innerHTML = '';
-    return;
-  }
+function renderPager(containerId, total, currentPage, fnName) {
   const el = document.getElementById(containerId);
   if (!el) return;
-
-  const start = (currentPage - 1) * ITEMS_PER_PAGE + 1;
-  const end   = Math.min(currentPage * ITEMS_PER_PAGE, total);
-
-  let pages = '';
+  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  const s = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  const e = Math.min(currentPage * ITEMS_PER_PAGE, total);
+  let btns = '';
   for (let i = 1; i <= totalPages; i++) {
-    if (
-      i === 1 || i === totalPages ||
-      (i >= currentPage - 1 && i <= currentPage + 1)
-    ) {
-      pages += `<button onclick="(${onPageChange})(${i})"
-        style="min-width:32px;height:32px;border-radius:6px;border:1.5px solid ${i === currentPage ? 'var(--g-400)' : 'var(--border)'};
-        background:${i === currentPage ? 'var(--g-400)' : 'var(--surface)'};
-        color:${i === currentPage ? '#fff' : 'var(--text-primary)'};
-        font-size:12px;font-weight:${i === currentPage ? '700' : '400'};
-        cursor:pointer;padding:0 8px;">${i}</button>`;
-    } else if (i === currentPage - 2 || i === currentPage + 2) {
-      pages += `<span style="color:var(--text-muted);padding:0 2px;">…</span>`;
+    if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
+      const a = i === currentPage;
+      btns += '<button onclick="' + fnName + '(' + i + ')" style="min-width:30px;height:30px;border-radius:6px;border:1.5px solid ' + (a?'var(--g-400)':'var(--border)') + ';background:' + (a?'var(--g-400)':'var(--surface)') + ';color:' + (a?'#fff':'var(--text-primary)') + ';font-size:12px;font-weight:' + (a?700:400) + ';cursor:pointer;padding:0 6px;">' + i + '</button>';
+    } else if (Math.abs(i - currentPage) === 2) {
+      btns += '<span style="color:var(--text-muted)">…</span>';
     }
   }
-
-  el.innerHTML = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 0;flex-wrap:wrap;gap:8px;">
-      <span style="font-size:12px;color:var(--text-muted);">Showing ${start}–${end} of ${total} records</span>
-      <div style="display:flex;align-items:center;gap:4px;">
-        <button onclick="(${onPageChange})(${currentPage - 1})"
-          ${currentPage === 1 ? 'disabled' : ''}
-          style="height:32px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);
-          background:var(--surface);color:var(--text-primary);font-size:12px;
-          cursor:${currentPage === 1 ? 'not-allowed' : 'pointer'};opacity:${currentPage === 1 ? '0.4' : '1'};">
-          ← Prev
-        </button>
-        ${pages}
-        <button onclick="(${onPageChange})(${currentPage + 1})"
-          ${currentPage === totalPages ? 'disabled' : ''}
-          style="height:32px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);
-          background:var(--surface);color:var(--text-primary);font-size:12px;
-          cursor:${currentPage === totalPages ? 'not-allowed' : 'pointer'};opacity:${currentPage === totalPages ? '0.4' : '1'};">
-          Next →
-        </button>
-      </div>
-    </div>`;
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;"><span style="font-size:12px;color:var(--text-muted);">Showing ' + s + '–' + e + ' of ' + total + '</span><div style="display:flex;align-items:center;gap:4px;"><button onclick="' + fnName + '(' + (currentPage-1) + ')" ' + (currentPage===1?'disabled':'') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage===1?'0.4':'1') + ';">← Prev</button>' + btns + '<button onclick="' + fnName + '(' + (currentPage+1) + ')" ' + (currentPage===totalPages?'disabled':'') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage===totalPages?'0.4':'1') + ';">Next →</button></div></div>';
 }
 
-// ─── Button Loading Helper ───────────────────────────
-function setButtonLoading(btn, loading, originalText = null) {
-  if (!btn) return;
-  if (loading) {
-    btn._originalText   = btn.innerHTML;
-    btn._originalDisabled = btn.disabled;
-    btn.disabled        = true;
-    btn.style.opacity   = '0.7';
-    btn.style.cursor    = 'not-allowed';
-    btn.innerHTML       = '<span style="display:inline-flex;align-items:center;gap:6px;"><svg style="width:14px;height:14px;animation:spin 1s linear infinite;" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Processing...</span>';
-  } else {
-    btn.disabled        = btn._originalDisabled || false;
-    btn.style.opacity   = '1';
-    btn.style.cursor    = '';
-    btn.innerHTML       = originalText || btn._originalText || btn.innerHTML;
-  }
-}
+function changeInvPage(p)    { invPage = p;    renderInventory(allInventory); }
+function changeOrdersPage(p) { ordersPage = p; renderOrders(allOrders); }
 
-// ══════════════════════════════════════════════════════
-// ADMIN DASHBOARD — Triple E & Fiel Collins
-// ══════════════════════════════════════════════════════
+// ─── Pagination Helper ────────────────────────────────
 
-// ─── Theme Toggle ─────────────────────────────────────
-function toggleTheme() {
-  const html  = document.documentElement;
-  const theme = html.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
-  html.setAttribute('data-theme', theme);
-  localStorage.setItem('admin-theme', theme);
-}
-
-(function () {
-  const saved = localStorage.getItem('admin-theme') || 'dark';
-  document.documentElement.setAttribute('data-theme', saved);
-})();
-
-// ─── Sidebar Toggle ───────────────────────────────────
-function toggleSidebar() {
-  document.getElementById('sidebar').classList.toggle('collapsed');
-}
-
-// ─── Date Display ─────────────────────────────────────
-function updateDate() {
-  const now = new Date();
-  document.getElementById('topbarDate').textContent = now.toLocaleDateString('en-PH', {
-    weekday: 'short', year: 'numeric', month: 'short', day: 'numeric'
-  });
-}
-updateDate();
-
-// ─── Section Navigation ───────────────────────────────
-const pageTitles = {
-  purchase_orders: ['Purchase Orders', 'Manage stock requests and purchase orders'],
-  overview:  ['Overview',          'Welcome back'],
-  products:  ['Products',          'Manage your product catalog'],
-  inventory: ['Inventory',         'Track and manage stock levels'],
-  orders:    ['Orders',            'View and manage all orders'],
-  sales:     ['Sales Reports',     'View sales analytics and reports'],
-  discounts: ['Discounts',         'Manage discounts and assign them to products'],
-  users:     ['User Management',   'Manage staff and customer accounts'],
-};
 
 
 // ─── Auto Refresh (5 seconds) ─────────────────────────
@@ -797,8 +709,6 @@ function removeExistingImage(idx) {
 // ─── INVENTORY ────────────────────────────────────────
 // Store all inventory records globally for filtering
 let allInventory = [];
-let invPage = 1;
-let ordersPage = 1;
 
 
 // ─── Branch Stock Summary in Inventory ───────────────
