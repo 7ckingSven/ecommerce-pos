@@ -8,29 +8,34 @@ function paginate(arr, page) {
 }
 
 function renderPager(containerId, total, currentPage, fnName) {
-  const el = document.getElementById(containerId);
+  var el = document.getElementById(containerId);
   if (!el) return;
-  const totalPages = Math.ceil(total / ITEMS_PER_PAGE);
+  var totalPages = Math.ceil(total / ITEMS_PER_PAGE);
   if (totalPages <= 1) { el.innerHTML = ''; return; }
-  const s = (currentPage - 1) * ITEMS_PER_PAGE + 1;
-  const e = Math.min(currentPage * ITEMS_PER_PAGE, total);
-  let btns = '';
-  for (let i = 1; i <= totalPages; i++) {
+  var s = (currentPage - 1) * ITEMS_PER_PAGE + 1;
+  var e = Math.min(currentPage * ITEMS_PER_PAGE, total);
+  var btns = '';
+  for (var i = 1; i <= totalPages; i++) {
     if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
-      const a = i === currentPage;
-      btns += '<button onclick="' + fnName + '(' + i + ')" style="min-width:30px;height:30px;border-radius:6px;border:1.5px solid ' + (a?'var(--g-400)':'var(--border)') + ';background:' + (a?'var(--g-400)':'var(--surface)') + ';color:' + (a?'#fff':'var(--text-primary)') + ';font-size:12px;font-weight:' + (a?700:400) + ';cursor:pointer;padding:0 6px;">' + i + '</button>';
+      var active = i === currentPage;
+      btns += '<button onclick="' + fnName + '(' + i + ')" style="min-width:30px;height:30px;border-radius:6px;border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';color:' + (active ? '#fff' : 'var(--text-primary)') + ';font-size:12px;font-weight:' + (active ? 700 : 400) + ';cursor:pointer;padding:0 6px;">' + i + '</button>';
     } else if (Math.abs(i - currentPage) === 2) {
-      btns += '<span style="color:var(--text-muted)">…</span>';
+      btns += '<span style="color:var(--text-muted)">...</span>';
     }
   }
-  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;"><span style="font-size:12px;color:var(--text-muted);">Showing ' + s + '–' + e + ' of ' + total + '</span><div style="display:flex;align-items:center;gap:4px;"><button onclick="' + fnName + '(' + (currentPage-1) + ')" ' + (currentPage===1?'disabled':'') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage===1?'0.4':'1') + ';">← Prev</button>' + btns + '<button onclick="' + fnName + '(' + (currentPage+1) + ')" ' + (currentPage===totalPages?'disabled':'') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage===totalPages?'0.4':'1') + ';">Next →</button></div></div>';
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;"><span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span><div style="display:flex;align-items:center;gap:4px;"><button onclick="' + fnName + '(' + (currentPage - 1) + ')" ' + (currentPage === 1 ? 'disabled' : '') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage === 1 ? 0.4 : 1) + ';">Prev</button>' + btns + '<button onclick="' + fnName + '(' + (currentPage + 1) + ')" ' + (currentPage === totalPages ? 'disabled' : '') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage === totalPages ? 0.4 : 1) + ';">Next</button></div></div>';
 }
 
 function changeStaffOrdersPage(p) { staffOrdersPage = p; renderStaffOrders(staffOrders); }
 function changeStaffInvPage(p)    { staffInvPage = p;    renderInvProducts(invProducts); }
 
-// ─── Pagination Helper ────────────────────────────────
-
+const pageTitles = {
+  pos:       ['Point of Sale',    'Process walk-in customer orders'],
+  inventory: ['Inventory',        'View branch stock levels'],
+  orders:    ['Orders',           'View and manage customer orders'],
+  requests:  ['Stock Requests',   'Request stock from admin'],
+  summary:   ['Sales Summary',    'View your sales performance'],
+};
 
 
 // ─── Auto Refresh (5 seconds) ─────────────────────────
@@ -770,7 +775,7 @@ function renderStaffOrders(orders, page = 1) {
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
-  renderPagination('staffOrdersPagination', orders.length, page, `(p) => renderStaffOrders(staffOrders, p)`);
+  renderPager('staffOrdersPagination', orders.length, staffOrdersPage, 'changeStaffOrdersPage');
 }
 
 // ─── View Staff Order Items Modal ─────────────────────
