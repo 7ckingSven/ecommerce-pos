@@ -1,6 +1,10 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-let staffOrdersPage = 1;
+let allInvHistory   = [];
+let allRequests     = [];
+let staffHistoryPage = 1;
+let staffReqPage     = 1;
+let staffOrdersPage  = 1;
 let staffInvPage    = 1;
 
 function paginate(arr, page) {
@@ -14,20 +18,65 @@ function renderPager(containerId, total, currentPage, fnName) {
   if (totalPages <= 1) { el.innerHTML = ''; return; }
   var s = (currentPage - 1) * ITEMS_PER_PAGE + 1;
   var e = Math.min(currentPage * ITEMS_PER_PAGE, total);
+
+  function btn(page, label, disabled) {
+    return '<button '
+      + (disabled ? 'disabled ' : '')
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="height:30px;padding:0 10px;border-radius:6px;'
+      + 'border:1.5px solid var(--border);background:var(--surface);'
+      + 'color:var(--text-primary);font-size:12px;cursor:pointer;'
+      + 'opacity:' + (disabled ? '0.4' : '1') + ';">'
+      + label + '</button>';
+  }
+
+  function pageBtn(page, active) {
+    return '<button '
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="min-width:30px;height:30px;border-radius:6px;'
+      + 'border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';'
+      + 'background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';'
+      + 'color:' + (active ? '#fff' : 'var(--text-primary)') + ';'
+      + 'font-size:12px;font-weight:' + (active ? '700' : '400') + ';'
+      + 'cursor:pointer;padding:0 6px;">'
+      + page + '</button>';
+  }
+
   var btns = '';
   for (var i = 1; i <= totalPages; i++) {
     if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
-      var active = i === currentPage;
-      btns += '<button onclick="' + fnName + '(' + i + ')" style="min-width:30px;height:30px;border-radius:6px;border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';color:' + (active ? '#fff' : 'var(--text-primary)') + ';font-size:12px;font-weight:' + (active ? 700 : 400) + ';cursor:pointer;padding:0 6px;">' + i + '</button>';
+      btns += pageBtn(i, i === currentPage);
     } else if (Math.abs(i - currentPage) === 2) {
-      btns += '<span style="color:var(--text-muted)">...</span>';
+      btns += '<span style="color:var(--text-muted);padding:0 2px;">...</span>';
     }
   }
-  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;"><span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span><div style="display:flex;align-items:center;gap:4px;"><button onclick="' + fnName + '(' + (currentPage - 1) + ')" ' + (currentPage === 1 ? 'disabled' : '') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage === 1 ? 0.4 : 1) + ';">Prev</button>' + btns + '<button onclick="' + fnName + '(' + (currentPage + 1) + ')" ' + (currentPage === totalPages ? 'disabled' : '') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage === totalPages ? 0.4 : 1) + ';">Next</button></div></div>';
+
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;">'
+    + '<span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span>'
+    + '<div style="display:flex;align-items:center;gap:4px;">'
+    + btn(currentPage - 1, 'Prev', currentPage === 1)
+    + btns
+    + btn(currentPage + 1, 'Next', currentPage === totalPages)
+    + '</div></div>';
+
+  // Attach click handlers directly to buttons
+  el.querySelectorAll('button[data-fn]').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var fn   = this.getAttribute('data-fn');
+      var page = parseInt(this.getAttribute('data-page'));
+      if (fn === 'changeInvPage')          { changeInvPage(page); }
+      else if (fn === 'changeOrdersPage')  { changeOrdersPage(page); }
+      else if (fn === 'changeStaffOrdersPage') { changeStaffOrdersPage(page); }
+      else if (fn === 'changeStaffInvPage')    { changeStaffInvPage(page); }
+      else if (window[fn]) { window[fn](page); }
+    });
+  });
 }
 
 function changeStaffOrdersPage(p) { staffOrdersPage = p; renderStaffOrders(staffOrders); }
 function changeStaffInvPage(p)    { staffInvPage = p;    renderInvProducts(invProducts); }
+window.changeStaffOrdersPage = changeStaffOrdersPage;
+window.changeStaffInvPage    = changeStaffInvPage;
 
 const pageTitles = {
   pos:       ['Point of Sale',    'Process walk-in customer orders'],
@@ -553,12 +602,14 @@ async function loadInventory() {
       fetch('/api/products'),
       fetch('/api/staff/inventory'),
     ]);
-    const allInvProds = await prodRes.json();
+    const allInvProdsRaw = await prodRes.json();
+    const allInvProds = Array.isArray(allInvProdsRaw) ? allInvProdsRaw : [];
     // Filter to this branch only
     invProducts = allInvProds.filter(p =>
       !p.branch_id || p.branch_id === staffBranchId
     );
-    const invData = await invRes.json();
+    const invDataRaw = await invRes.json();
+    const invData = Array.isArray(invDataRaw) ? invDataRaw : [];
 
     // Stats
     document.getElementById('invTotalProducts').textContent = invProducts.length;
@@ -591,8 +642,15 @@ async function loadInventory() {
     renderInvProducts(invProducts);
 
     // History — read nested branch names from FK join
-    document.getElementById('invHistoryBody').innerHTML = invData.length
-      ? invData.map(i => `
+    allInvHistory = invData; renderInvHistory(invData);
+
+  } catch (e) { console.error('Inventory error:', e); }
+}
+
+function renderInvHistory(data) {
+  const paged = paginate(data, staffHistoryPage);
+  document.getElementById('invHistoryBody').innerHTML = paged.length
+      ? paged.map(i => `
           <tr>
             <td>${i.product?.product_name || '—'}</td>
             <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
@@ -604,13 +662,16 @@ async function loadInventory() {
             <td>${i.note || '—'}</td>
           </tr>`).join('')
       : '<tr><td colspan="8" class="table-empty">No inventory records yet</td></tr>';
-
-  } catch (e) { console.error('Inventory error:', e); }
+  renderPager('staffHistoryPagination', data.length, staffHistoryPage, 'changeStaffHistoryPage');
 }
 
-function renderInvProducts(products, page = 1) {
-  staffInvPage = page;
-  const paged = paginate(products, page);
+function changeStaffHistoryPage(p) { staffHistoryPage = p; renderInvHistory(allInvHistory); }
+function changeStaffReqPage(p)     { staffReqPage = p;     loadRequests(); }
+window.changeStaffHistoryPage = changeStaffHistoryPage;
+window.changeStaffReqPage     = changeStaffReqPage;
+
+function renderInvProducts(products) {
+  const paged = paginate(products, staffInvPage);
   document.getElementById('invProductsBody').innerHTML = paged.length
     ? paged.map(p => `
         <tr>
@@ -746,9 +807,8 @@ function updateOrdersBadge(orders) {
   }
 }
 
-function renderStaffOrders(orders, page = 1) {
-  staffOrdersPage = page;
-  const paged = paginate(orders, page);
+function renderStaffOrders(orders) {
+  const paged = paginate(orders, staffOrdersPage);
   document.getElementById('staffOrdersBody').innerHTML = paged.length
     ? paged.map(o => `
         <tr>
@@ -986,8 +1046,10 @@ async function loadRequests() {
       badge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
-    document.getElementById('requestsBody').innerHTML = data.length
-      ? data.map(r => {
+    allRequests = data;
+    const reqPaged = paginate(data, staffReqPage);
+    document.getElementById('requestsBody').innerHTML = reqPaged.length
+      ? reqPaged.map(r => {
           const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
           const statusColor  = statusColors[r.status] || 'gray';
           return `
@@ -1002,6 +1064,7 @@ async function loadRequests() {
           </tr>`;
         }).join('')
       : '<tr><td colspan="7" class="table-empty">No stock requests yet</td></tr>';
+    renderPager('staffReqPagination', data.length, staffReqPage, 'changeStaffReqPage');
 
   } catch (e) { console.error('Requests error:', e); }
 }

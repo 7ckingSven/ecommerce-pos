@@ -14,20 +14,65 @@ function renderPager(containerId, total, currentPage, fnName) {
   if (totalPages <= 1) { el.innerHTML = ''; return; }
   var s = (currentPage - 1) * ITEMS_PER_PAGE + 1;
   var e = Math.min(currentPage * ITEMS_PER_PAGE, total);
+
+  function btn(page, label, disabled) {
+    return '<button '
+      + (disabled ? 'disabled ' : '')
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="height:30px;padding:0 10px;border-radius:6px;'
+      + 'border:1.5px solid var(--border);background:var(--surface);'
+      + 'color:var(--text-primary);font-size:12px;cursor:pointer;'
+      + 'opacity:' + (disabled ? '0.4' : '1') + ';">'
+      + label + '</button>';
+  }
+
+  function pageBtn(page, active) {
+    return '<button '
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="min-width:30px;height:30px;border-radius:6px;'
+      + 'border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';'
+      + 'background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';'
+      + 'color:' + (active ? '#fff' : 'var(--text-primary)') + ';'
+      + 'font-size:12px;font-weight:' + (active ? '700' : '400') + ';'
+      + 'cursor:pointer;padding:0 6px;">'
+      + page + '</button>';
+  }
+
   var btns = '';
   for (var i = 1; i <= totalPages; i++) {
     if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
-      var active = i === currentPage;
-      btns += '<button onclick="' + fnName + '(' + i + ')" style="min-width:30px;height:30px;border-radius:6px;border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';color:' + (active ? '#fff' : 'var(--text-primary)') + ';font-size:12px;font-weight:' + (active ? 700 : 400) + ';cursor:pointer;padding:0 6px;">' + i + '</button>';
+      btns += pageBtn(i, i === currentPage);
     } else if (Math.abs(i - currentPage) === 2) {
-      btns += '<span style="color:var(--text-muted)">...</span>';
+      btns += '<span style="color:var(--text-muted);padding:0 2px;">...</span>';
     }
   }
-  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;"><span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span><div style="display:flex;align-items:center;gap:4px;"><button onclick="' + fnName + '(' + (currentPage - 1) + ')" ' + (currentPage === 1 ? 'disabled' : '') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage === 1 ? 0.4 : 1) + ';">Prev</button>' + btns + '<button onclick="' + fnName + '(' + (currentPage + 1) + ')" ' + (currentPage === totalPages ? 'disabled' : '') + ' style="height:30px;padding:0 10px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;opacity:' + (currentPage === totalPages ? 0.4 : 1) + ';">Next</button></div></div>';
+
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;">'
+    + '<span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span>'
+    + '<div style="display:flex;align-items:center;gap:4px;">'
+    + btn(currentPage - 1, 'Prev', currentPage === 1)
+    + btns
+    + btn(currentPage + 1, 'Next', currentPage === totalPages)
+    + '</div></div>';
+
+  // Attach click handlers directly to buttons
+  el.querySelectorAll('button[data-fn]').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var fn   = this.getAttribute('data-fn');
+      var page = parseInt(this.getAttribute('data-page'));
+      if (fn === 'changeInvPage')          { changeInvPage(page); }
+      else if (fn === 'changeOrdersPage')  { changeOrdersPage(page); }
+      else if (fn === 'changeStaffOrdersPage') { changeStaffOrdersPage(page); }
+      else if (fn === 'changeStaffInvPage')    { changeStaffInvPage(page); }
+      else if (window[fn]) { window[fn](page); }
+    });
+  });
 }
 
 function changeInvPage(p)    { invPage = p;    renderInventory(allInventory); }
 function changeOrdersPage(p) { ordersPage = p; renderOrders(allOrders); }
+window.changeInvPage    = changeInvPage;
+window.changeOrdersPage = changeOrdersPage;
 
 const pageTitles = {
   overview:        ['Overview',          'Dashboard summary & recent activity'],
@@ -851,9 +896,8 @@ function getMovementType(i) {
   return { label: 'Other', color: '#9ca3af', icon: '•', bg: 'rgba(107,114,128,0.1)' };
 }
 
-function renderInventory(data, page = 1) {
-  invPage = page;
-  const paged = paginate(data, page);
+function renderInventory(data) {
+  const paged = paginate(data, invPage);
   // Update stats
   const restocks    = data.filter(i => getMovementType(i).label === 'Restock');
   const transfers   = data.filter(i => getMovementType(i).label === 'Transfer');
@@ -1266,9 +1310,8 @@ function viewOrderItems(order) {
   `);
 }
 
-function renderOrders(orders, page = 1) {
-  ordersPage = page;
-  const paged = paginate(orders, page);
+function renderOrders(orders) {
+  const paged = paginate(orders, ordersPage);
   document.getElementById('ordersBody').innerHTML = paged.length
     ? paged.map(o => `
         <tr>
