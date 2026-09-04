@@ -875,10 +875,11 @@ def api_place_order():
 
         order_id    = order_res.data[0]['order_id']
         order_items = [{
-            'order_id':   order_id,
-            'product_id': item['product_id'],
-            'qty':        item['quantity'],   # schema uses qty not quantity
-            'price':      item['price']
+            'order_id':        order_id,
+            'product_id':      item['product_id'],
+            'qty':             item['quantity'],
+            'price':           item['price'],
+            'selected_options': item.get('selected_options', {})
         } for item in cart_items]
 
         supabase.table('order_item').insert(order_items).execute()
