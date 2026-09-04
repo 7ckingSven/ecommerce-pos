@@ -1710,7 +1710,7 @@ def admin_update_product(product_id):
             file_bytes   = img.read()
             file_name    = f"products/{product_id}_{img.filename}"
             content_type = img.content_type or 'image/jpeg'
-            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': str(content_type), 'upsert': True})
+            supabase.storage.from_('product-images').upload(file_name, file_bytes, {'content-type': str(content_type), 'upsert': 'true'})
             url = supabase.storage.from_('product-images').get_public_url(file_name)
             new_urls.append(url)
 
