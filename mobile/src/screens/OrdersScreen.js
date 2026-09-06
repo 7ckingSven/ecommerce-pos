@@ -45,6 +45,7 @@ export default function OrdersScreen({ navigation }) {
   const [loading,      setLoading]      = useState(true);
   const [loggedIn,     setLoggedIn]     = useState(false);
   const [selectedOrder,   setSelectedOrder]   = useState(null);
+  const [activeTab,       setActiveTab]       = useState('all');
   const [markingReceived, setMarkingReceived] = useState(false);
 
   // Auto-refresh every 10 seconds when screen is focused
@@ -65,6 +66,13 @@ export default function OrdersScreen({ navigation }) {
       return () => clearInterval(timer); // cleanup on blur
     }, [])
   );
+
+  const TABS = [
+    { key: 'all', label: 'All' }, { key: 'pending', label: 'Pending' },
+    { key: 'processing', label: 'Processing' }, { key: 'out_for_delivery', label: 'Delivery' },
+    { key: 'completed', label: 'Completed' }, { key: 'cancelled', label: 'Cancelled' },
+  ];
+  const filteredOrders = activeTab === 'all' ? orders : orders.filter(o => o.status === activeTab);
 
   async function markAsReceived(orderId) {
     setMarkingReceived(true);
@@ -120,21 +128,49 @@ export default function OrdersScreen({ navigation }) {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Orders</Text>
-        <Text style={styles.headerSub}>{orders.length} order(s)</Text>
+        <Text style={styles.headerSub}>{filteredOrders.length} order(s)</Text>
       </View>
 
-      {orders.length === 0 ? (
-        <View style={styles.emptyWrap}>
+      {/* Tab Bar - always stays at top */}
+      <ScrollView
+        horizontal
+        showsHorizontalScrollIndicator={false}
+        contentContainerStyle={{ paddingHorizontal:16, gap:8, alignItems:'center', paddingVertical:6 }}
+        style={{ maxHeight:46, minHeight:46 }}
+      >
+        {TABS.map(tab => {
+          const count = tab.key==='all' ? orders.length : orders.filter(o=>o.status===tab.key).length;
+          return (
+            <TouchableOpacity
+              key={tab.key}
+              onPress={() => setActiveTab(tab.key)}
+              style={{ paddingHorizontal:14, paddingVertical:6, borderRadius:999, height:34,
+                justifyContent:'center', borderWidth:1.5,
+                backgroundColor: activeTab===tab.key ? COLORS.primary : COLORS.white,
+                borderColor: activeTab===tab.key ? COLORS.primary : COLORS.grayBorder }}
+            >
+              <Text numberOfLines={1} style={{ fontSize:12, fontWeight:'600',
+                color: activeTab===tab.key ? '#fff' : COLORS.textSecondary }}>
+                {tab.label}{count>0 ? ` (${count})` : ''}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </ScrollView>
+
+      {/* Content - fills remaining space */}
+      {filteredOrders.length === 0 ? (
+        <View style={{ alignItems:'center', paddingTop:60, padding:24, gap:12 }}>
           <Feather name="package" size={56} color={COLORS.grayLight}/>
-          <Text style={styles.emptyTitle}>No orders yet</Text>
-          <Text style={styles.emptyText}>Your order history will appear here.</Text>
+          <Text style={styles.emptyTitle}>{activeTab==='all' ? 'No orders yet' : `No ${activeTab.replace(/_/g,' ')} orders`}</Text>
+          <Text style={styles.emptyText}>{activeTab==='all' ? 'Your order history will appear here.' : 'Nothing to show here.'}</Text>
           <TouchableOpacity style={styles.shopBtn} onPress={() => navigation.navigate('Home')}>
             <Text style={styles.shopBtnText}>Start Shopping</Text>
           </TouchableOpacity>
         </View>
       ) : (
         <FlatList
-          data={orders}
+          data={filteredOrders}
           keyExtractor={item => item.order_id}
           contentContainerStyle={styles.list}
           showsVerticalScrollIndicator={false}
