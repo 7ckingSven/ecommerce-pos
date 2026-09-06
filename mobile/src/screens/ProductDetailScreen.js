@@ -24,6 +24,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [loadingBuy,  setLoadingBuy]  = useState(false);
   const [activeIdx,       setActiveIdx]       = useState(0);
   const [selectedOptions, setSelectedOptions] = useState({});
+  const [variantStock,    setVariantStock]    = useState(null); // null=unchecked, number=qty
   const { width } = Dimensions.get('window');
   const images = product.image_urls?.length
     ? product.image_urls
@@ -36,7 +37,10 @@ export default function ProductDetailScreen({ route, navigation }) {
   console.log('Discounted price:', discountedPrice, 'Original:', product.price);
   const effectivePrice  = hasDiscount ? discountedPrice : product.price;
   const disc            = product.discount;
-  const inStock         = product.quantity > 0;
+  const inStock          = product.quantity > 0;
+  const hasVariants      = (product.option_groups || []).length > 0;
+  const allOptsSelected  = hasVariants && Object.keys(selectedOptions).length === (product.option_groups || []).length;
+  const variantOutOfStock = allOptsSelected && variantStock === 0;
 
   function increment() {
     if (quantity >= product.quantity) {
@@ -138,6 +142,26 @@ export default function ProductDetailScreen({ route, navigation }) {
       isBuyNow:  true,
       branchId:  branchId || product.branch_id || null,
     });
+  }
+
+
+  async function checkVariantStock(options) {
+    if (!product.option_groups?.length) return;
+    // Only check if all options selected
+    if (Object.keys(options).length < product.option_groups.length) {
+      setVariantStock(null);
+      return;
+    }
+    try {
+      const res = await api.post('/variant-stock/check', {
+        product_id: product.product_id,
+        branch_id:  product.branch_id || null,
+        options,
+      });
+      setVariantStock(res.data.quantity ?? 0);
+    } catch (e) {
+      setVariantStock(null);
+    }
   }
 
   return (
@@ -329,6 +353,16 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       </ScrollView>
 
+      {/* Variant Stock Indicator */}
+      {allOptsSelected && variantStock !== null && (
+        <View style={{ flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:SPACING.md, paddingBottom:8 }}>
+          <Feather name={variantStock > 0 ? 'check-circle' : 'x-circle'} size={14} color={variantStock > 0 ? COLORS.primary : COLORS.error}/>
+          <Text style={{ fontSize:12, fontWeight:'600', color: variantStock > 0 ? COLORS.primary : COLORS.error }}>
+            {variantStock > 0 ? `${variantStock} units available for this variant` : 'Out of stock for this variant'}
+          </Text>
+        </View>
+      )}
+
       {/* Action Buttons */}
       <View style={styles.footer}>
         <View style={styles.buttonRow}>
@@ -336,7 +370,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           <TouchableOpacity
             style={[styles.btn, styles.btnCart, !inStock && styles.btnDisabled]}
             onPress={handleAddToCart}
-            disabled={!inStock || loadingCart || loadingBuy}
+            disabled={!inStock || loadingCart || loadingBuy || variantOutOfStock}
             activeOpacity={0.85}
           >
             {loadingCart ? (
@@ -353,7 +387,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           <TouchableOpacity
             style={[styles.btn, styles.btnBuy, !inStock && styles.btnDisabled]}
             onPress={handleBuyNow}
-            disabled={!inStock || loadingCart || loadingBuy}
+            disabled={!inStock || loadingCart || loadingBuy || variantOutOfStock}
             activeOpacity={0.85}
           >
             {loadingBuy ? (

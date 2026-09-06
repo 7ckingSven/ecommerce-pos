@@ -32,6 +32,24 @@ export default function CartScreen({ navigation }) {
     }, [])
   );
 
+
+  async function checkAllVariantStocks(items) {
+    const warnings = {};
+    for (const item of items) {
+      const opts = item.selected_options;
+      if (!opts || Object.keys(opts).length === 0) continue;
+      try {
+        const res = await api.post('/variant-stock/check', {
+          product_id: item.product_id,
+          branch_id:  item.branch_id || null,
+          options:    opts,
+        });
+        warnings[item.cart_item_id] = res.data.quantity ?? 0;
+      } catch (e) {}
+    }
+    setVariantWarnings(warnings);
+  }
+
   async function loadCart() {
     try {
       const data = await getCart();
@@ -268,6 +286,9 @@ export default function CartScreen({ navigation }) {
                             ? Object.entries(item.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')
                             : 'Select options'}
                         </Text>
+                        {variantWarnings[item.cart_item_id] === 0 && (
+                          <Text style={{ fontSize:10, color:'#ef4444', fontWeight:'600' }}>⚠️ Out of stock</Text>
+                        )}
                         <Feather name="chevron-down" size={11} color={COLORS.primary}/>
                       </TouchableOpacity>
                     )}
