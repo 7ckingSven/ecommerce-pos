@@ -397,9 +397,16 @@
       <form id="requestForm" onsubmit="submitRequest(event)">
         <div class="form-group">
           <label class="form-label">Product <span class="req">*</span></label>
-          <select id="reqProduct" class="form-input form-select" required onchange="updateCurrentStock(this)">
+          <select id="reqProduct" class="form-input form-select" required onchange="updateCurrentStock(this); loadReqVariants(this.value)">
             <option value="">Select product</option>
           </select>
+        </div>
+        <!-- Variant Options -->
+        <div id="reqVariantWrap" style="display:none;">
+          <div class="form-group">
+            <label class="form-label">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
+            <div id="reqVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+          </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">

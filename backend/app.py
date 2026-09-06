@@ -835,6 +835,88 @@ def upload_gcash_receipt():
         print(f'Receipt upload error: {e}')
         return jsonify({'error': str(e)}), 500
 
+
+# ─── VARIANT STOCK ────────────────────────────────────
+
+@app.route('/api/variant-stock/<product_id>', methods=['GET'])
+def get_variant_stock(product_id):
+    """Get all variant stocks for a product (optionally filtered by branch)"""
+    try:
+        branch_id = request.args.get('branch_id')
+        query = supabase.table('variant_stock').select('*').eq('product_id', product_id)
+        if branch_id:
+            query = query.eq('branch_id', branch_id)
+        res = query.execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/variant-stock', methods=['POST'])
+def set_variant_stock():
+    """Set/update variant stock (admin) """
+    try:
+        data       = request.get_json()
+        product_id = data.get('product_id')
+        branch_id  = data.get('branch_id')
+        options    = data.get('options', {})
+        quantity   = int(data.get('quantity', 0))
+
+        if not product_id or not branch_id or not options:
+            return jsonify({'error': 'product_id, branch_id and options are required'}), 400
+
+        # Upsert variant stock
+        existing = supabase.table('variant_stock').select('id, quantity').eq('product_id', product_id).eq('branch_id', branch_id).eq('options', options).execute()
+        if existing.data:
+            supabase.table('variant_stock').update({
+                'quantity':   quantity,
+                'updated_at': 'now()'
+            }).eq('id', existing.data[0]['id']).execute()
+        else:
+            supabase.table('variant_stock').insert({
+                'product_id': product_id,
+                'branch_id':  branch_id,
+                'options':    options,
+                'quantity':   quantity,
+            }).execute()
+
+        # Auto-activate product if total branch_stock >= 1
+        try:
+            all_vs = supabase.table('variant_stock').select('quantity').eq('product_id', product_id).execute()
+            total = sum(v['quantity'] for v in (all_vs.data or []))
+            if total >= 1:
+                supabase.table('product').update({'status': 'active'}).eq('product_id', product_id).execute()
+        except: pass
+
+        return jsonify({'message': 'Variant stock updated.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/variant-stock/check', methods=['POST'])
+def check_variant_stock():
+    """Check stock for a specific variant combo (mobile)"""
+    try:
+        data       = request.get_json()
+        product_id = data.get('product_id')
+        branch_id  = data.get('branch_id')
+        options    = data.get('options', {})
+
+        if not product_id or not options:
+            return jsonify({'quantity': 0}), 200
+
+        query = supabase.table('variant_stock').select('quantity').eq('product_id', product_id).eq('options', options)
+        if branch_id:
+            query = query.eq('branch_id', branch_id)
+        res = query.execute()
+
+        total = sum(v['quantity'] for v in (res.data or []))
+        return jsonify({'quantity': total}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ─── VARIANT STOCK ────────────────────────────────────
+
+
 @app.route('/api/orders', methods=['POST'])
 def api_place_order():
     customer_id = request.headers.get('X-Customer-ID')
@@ -881,6 +963,30 @@ def api_place_order():
             'price':           item['price'],
             'selected_options': item.get('selected_options', {})
         } for item in cart_items]
+
+        # Deduct variant stock if selected_options present
+        for item in cart_items:
+            opts = item.get('selected_options', {})
+            if opts and branch_id:
+                try:
+                    vs_res = supabase.table('variant_stock').select('id, quantity').eq('product_id', item['product_id']).eq('branch_id', branch_id).eq('options', opts).execute()
+                    if vs_res.data:
+                        new_qty = max(0, vs_res.data[0]['quantity'] - item['quantity'])
+                        supabase.table('variant_stock').update({'quantity': new_qty, 'updated_at': 'now()'}).eq('id', vs_res.data[0]['id']).execute()
+                except Exception as vs_err:
+                    print(f'Variant stock deduct warning: {vs_err}')
+
+        # Deduct variant stock if selected_options present
+        for item in cart_items:
+            opts = item.get('selected_options', {})
+            if opts and branch_id:
+                try:
+                    vs_res = supabase.table('variant_stock').select('id, quantity').eq('product_id', item['product_id']).eq('branch_id', branch_id).eq('options', opts).execute()
+                    if vs_res.data:
+                        new_qty = max(0, vs_res.data[0]['quantity'] - item['quantity'])
+                        supabase.table('variant_stock').update({'quantity': new_qty, 'updated_at': 'now()'}).eq('id', vs_res.data[0]['id']).execute()
+                except Exception as vs_err:
+                    print(f'Variant stock deduct warning: {vs_err}')
 
         supabase.table('order_item').insert(order_items).execute()
 
@@ -1163,10 +1269,11 @@ def admin_create_purchase_order():
         # Insert PO items
         for item in items:
             supabase.table('po_item').insert({
-                'po_id':      po_id,
-                'product_id': item['product_id'],
-                'quantity':   int(item['quantity']),
-                'unit_cost':  float(item.get('unit_cost', 0)),
+                'po_id':           po_id,
+                'product_id':      item['product_id'],
+                'quantity':        int(item['quantity']),
+                'unit_cost':       float(item.get('unit_cost', 0)),
+                'variant_options': item.get('variant_options') or None,
             }).execute()
 
         return jsonify({'message': 'Purchase order created.', 'po_id': po_id, 'po_number': po_num}), 201
@@ -1221,6 +1328,28 @@ def admin_update_purchase_order(po_id):
                     'to_branch_id':    po_branch_id,
                     'note':            f'PO received — {data.get("po_number", po_id)}',
                 }).execute()
+
+                # Update variant_stock if item has variant_options
+                variant_options = item.get('variant_options')
+                if variant_options and po_branch_id:
+                    try:
+                        existing_vs = supabase.table('variant_stock').select('id, quantity').eq('product_id', item['product_id']).eq('branch_id', po_branch_id).eq('options', variant_options).execute()
+                        if existing_vs.data:
+                            new_vs_qty = existing_vs.data[0]['quantity'] + qty_added
+                            supabase.table('variant_stock').update({'quantity': new_vs_qty, 'updated_at': 'now()'}).eq('id', existing_vs.data[0]['id']).execute()
+                        else:
+                            supabase.table('variant_stock').insert({'product_id': item['product_id'], 'branch_id': po_branch_id, 'options': variant_options, 'quantity': qty_added}).execute()
+                    except Exception as vs_err:
+                        print(f'Variant stock PO update warning: {vs_err}')
+
+                # Auto-activate product if total branch stock >= 1
+                try:
+                    all_bs = supabase.table('branch_stock').select('quantity').eq('product_id', item['product_id']).execute()
+                    total_stock = sum(bs['quantity'] for bs in (all_bs.data or []))
+                    if total_stock >= 1:
+                        supabase.table('product').update({'status': 'active'}).eq('product_id', item['product_id']).execute()
+                except Exception as act_err:
+                    print(f'Auto-activate warning: {act_err}')
 
         return jsonify({'message': f'PO status updated to {status}.'}), 200
     except Exception as e:
@@ -1844,6 +1973,19 @@ def admin_add_inventory():
                 print(f'Product {product_id} auto-activated after stock update.')
         except Exception as act_err:
             print(f'Auto-activate warning: {act_err}')
+
+        # Update variant_stock if variant_options provided
+        variant_options = data.get('variant_options', {})
+        if variant_options and to_branch_id:
+            try:
+                existing = supabase.table('variant_stock').select('id, quantity').eq('product_id', product_id).eq('branch_id', to_branch_id).eq('options', variant_options).execute()
+                if existing.data:
+                    new_qty = existing.data[0]['quantity'] + quantity
+                    supabase.table('variant_stock').update({'quantity': new_qty, 'updated_at': 'now()'}).eq('id', existing.data[0]['id']).execute()
+                else:
+                    supabase.table('variant_stock').insert({'product_id': product_id, 'branch_id': to_branch_id, 'options': variant_options, 'quantity': quantity}).execute()
+            except Exception as vs_err:
+                print(f'Variant stock update warning: {vs_err}')
 
         return jsonify({'message': 'Stock updated.'}), 201
     except Exception as e:

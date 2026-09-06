@@ -317,7 +317,7 @@ function renderPosProducts(products) {
 
     return `
       <div class="pos-product-card${p.quantity <= 0 ? ' out-of-stock' : ''}"
-           onclick="${p.quantity > 0 ? `addToOrder('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', ${effectivePrice}, ${p.quantity})` : ''}">
+           onclick="${p.quantity > 0 ? `selectPosProduct('${p.product_id}')` : ''}">
         ${p.image_url
           ? `<img src="${p.image_url}" class="pos-product-img" alt="${p.product_name}"/>`
           : `<div class="pos-product-img-placeholder">
@@ -331,8 +331,9 @@ function renderPosProducts(products) {
   }).join('');
 }
 
-function addToOrder(productId, name, price, maxStock) {
-  const existing = orderItems.find(i => i.product_id === productId);
+function addToOrder(productId, name, price, maxStock, selectedOptions = {}) {
+  const keyId   = productId + JSON.stringify(selectedOptions);
+  const existing = orderItems.find(i => i.product_id === productId && JSON.stringify(i.selected_options||{}) === JSON.stringify(selectedOptions));
   if (existing) {
     if (existing.quantity >= maxStock) {
       showToast(`Only ${maxStock} units available.`, 'error');
@@ -340,7 +341,7 @@ function addToOrder(productId, name, price, maxStock) {
     }
     existing.quantity++;
   } else {
-    orderItems.push({ product_id: productId, name, price, quantity: 1, max: maxStock });
+    orderItems.push({ product_id: productId, name, price, quantity: 1, max: maxStock, selected_options: selectedOptions });
   }
   renderOrderItems();
   updateTotal();
@@ -395,6 +396,141 @@ function renderOrderItems() {
   const checkBtn2 = document.getElementById('processOrderBtn');
   if (checkBtn2) checkBtn2.disabled = false;
 }
+
+
+// ─── POS Variant Modal ─────────────────────────────────
+let posCurrentProduct = null;
+let posSelectedVariants = {};
+
+function selectPosProduct(productId) {
+  const p = posProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+  const disc          = p.discount;
+  const effectivePrice = disc ? p.price * (1 - disc.percentage / 100) : p.price;
+  posCurrentProduct   = { ...p, effectivePrice };
+  posSelectedVariants = {};
+
+  const groups = p.option_groups || [];
+  if (!groups.length) {
+    addToOrder(p.product_id, p.product_name, effectivePrice, p.quantity, {});
+    return;
+  }
+
+  const modalHtml = `
+    <div style="margin-bottom:1rem;">
+      <strong style="font-size:14px;">${p.product_name}</strong>
+      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Select variant to add to order</div>
+    </div>
+    ${groups.map(g => `
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;" id="posVarGroup_${g.label.replace(/\s/g,'_')}">
+          ${(g.choices || []).map(c => `
+            <button type="button"
+              onclick="selectPosVariantOpt('${g.label}', '${c}', this)"
+              style="padding:6px 12px;border-radius:6px;border:1.5px solid var(--border);
+                     background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;">
+              ${c}
+            </button>
+          `).join('')}
+        </div>
+      </div>
+    `).join('')}
+    <div id="posVarStock" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;min-height:18px;"></div>
+    <button onclick="confirmPosVariant()" class="btn btn-solid-green" style="width:100%;">Add to Order</button>
+  `;
+  showGenericModal(modalHtml);
+}
+
+function selectPosVariantOpt(label, value, btn) {
+  posSelectedVariants[label] = value;
+  const group = document.getElementById('posVarGroup_' + label.replace(/\s/g, '_'));
+  if (group) {
+    group.querySelectorAll('button').forEach(b => {
+      b.style.background  = 'var(--surface)';
+      b.style.borderColor = 'var(--border)';
+      b.style.color       = 'var(--text-primary)';
+      b.style.fontWeight  = '400';
+    });
+    btn.style.background  = 'var(--g-400)';
+    btn.style.borderColor = 'var(--g-400)';
+    btn.style.color       = '#fff';
+    btn.style.fontWeight  = '700';
+  }
+  checkPosVariantStock();
+}
+
+async function checkPosVariantStock() {
+  if (!posCurrentProduct) return;
+  const groups = posCurrentProduct.option_groups || [];
+  if (Object.keys(posSelectedVariants).length < groups.length) return;
+
+  const stockEl = document.getElementById('posVarStock');
+  if (!stockEl) return;
+  stockEl.textContent = 'Checking stock...';
+
+  try {
+    const res  = await fetch('/api/variant-stock/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: posCurrentProduct.product_id,
+        branch_id:  staffBranchId,
+        options:    posSelectedVariants,
+      }),
+    });
+    const data = await res.json();
+    const qty  = data.quantity || 0;
+    stockEl.textContent = qty > 0 ? `✅ ${qty} units available` : '❌ Out of stock for this variant';
+    stockEl.style.color = qty > 0 ? 'var(--g-400)' : '#ef4444';
+  } catch (e) {
+    stockEl.textContent = '';
+  }
+}
+
+async function confirmPosVariant() {
+  if (!posCurrentProduct) return;
+  const groups = posCurrentProduct.option_groups || [];
+
+  for (const g of groups) {
+    if (!posSelectedVariants[g.label]) {
+      showToast(`Please select a ${g.label}.`, 'error');
+      return;
+    }
+  }
+
+  try {
+    const res  = await fetch('/api/variant-stock/check', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: posCurrentProduct.product_id,
+        branch_id:  staffBranchId,
+        options:    posSelectedVariants,
+      }),
+    });
+    const data = await res.json();
+    if ((data.quantity || 0) <= 0) {
+      showToast('This variant is out of stock!', 'error');
+      return;
+    }
+  } catch (e) {}
+
+  const variantLabel = Object.entries(posSelectedVariants).map(([k,v]) => `${k}: ${v}`).join(', ');
+  addToOrder(
+    posCurrentProduct.product_id,
+    `${posCurrentProduct.product_name} (${variantLabel})`,
+    posCurrentProduct.effectivePrice,
+    posCurrentProduct.quantity,
+    { ...posSelectedVariants }
+  );
+  posSelectedVariants = {};
+  closeGenericModal();
+}
+
+window.selectPosProduct      = selectPosProduct;
+window.selectPosVariantOpt   = selectPosVariantOpt;
+window.confirmPosVariant     = confirmPosVariant;
 
 function updateTotal() {
   const total = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -480,9 +616,10 @@ async function processOrder() {
         payment_method: selectedPayment,
         branch_id:      branchId,             // ← sent to create Sales_Transaction
         cart_items:     orderItems.map(i => ({
-          product_id: i.product_id,
-          quantity:   i.quantity,
-          price:      i.price,
+          product_id:       i.product_id,
+          quantity:         i.quantity,
+          price:            i.price,
+          selected_options: i.selected_options || {},
         })),
         customer_name: document.getElementById('posCustomer').value.trim(),
       }),
@@ -671,12 +808,66 @@ async function loadInventory() {
   } catch (e) { console.error('Inventory error:', e); }
 }
 
+
+// ─── Variant Stock Expandable Rows (Staff) ─────────────
+let expandedStaffProductIds = new Set();
+
+async function toggleStaffVariantRow(productId, btnEl) {
+  const expandRow = document.getElementById('staffVarRow_' + productId);
+  if (!expandRow) return;
+
+  if (expandedStaffProductIds.has(productId)) {
+    expandedStaffProductIds.delete(productId);
+    expandRow.style.display = 'none';
+    if (btnEl) btnEl.textContent = '▶';
+    return;
+  }
+
+  expandedStaffProductIds.add(productId);
+  if (btnEl) btnEl.textContent = '▼';
+  expandRow.style.display = '';
+  expandRow.querySelector('.staff-variant-content').innerHTML =
+    '<tr><td colspan="6" style="padding:8px 16px;font-size:12px;color:var(--text-muted);">Loading variants...</td></tr>';
+
+  try {
+    var url = '/api/variant-stock/' + productId;
+    if (staffBranchId) url += '?branch_id=' + staffBranchId;
+    const res  = await fetch(url);
+    const data = await res.json();
+
+    if (!data.length) {
+      expandRow.querySelector('.staff-variant-content').innerHTML =
+        '<tr><td colspan="6" style="padding:8px 16px;font-size:12px;color:var(--text-muted);">No variant stock recorded yet.</td></tr>';
+      return;
+    }
+
+    var chips = data.map(function(vs) {
+      var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
+      var qty   = vs.quantity || 0;
+      var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
+      var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+      return '<div style="padding:6px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
+        + '<span style="color:var(--text-primary);font-weight:500;">' + opts + '</span>'
+        + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
+        + (qty === 0 ? ' ⚠️' : '')
+        + '</div>';
+    }).join('');
+
+    expandRow.querySelector('.staff-variant-content').innerHTML =
+      '<tr><td colspan="6" style="padding:8px 16px;">' + chips + '</td></tr>';
+  } catch (e) {
+    expandRow.querySelector('.staff-variant-content').innerHTML =
+      '<tr><td colspan="6" style="padding:8px 16px;color:#ef4444;font-size:12px;">Failed to load variant stock.</td></tr>';
+  }
+}
+window.toggleStaffVariantRow = toggleStaffVariantRow;
+
 function renderInvProducts(products) {
   const paged = paginate(products, staffInvPage);
   document.getElementById('invProductsBody').innerHTML = paged.length
     ? paged.map(p => `
         <tr>
-          <td><strong>${p.product_name}</strong></td>
+          <td style='cursor:pointer;' onclick="toggleStaffVariantRow('${p.product_id}', this.querySelector('.staff-expand-btn'))"><span class='staff-expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
           <td>${p.brand || '—'}</td>
           <td>${p.category}</td>
           <td>${peso(p.price)}</td>
@@ -694,6 +885,20 @@ function renderInvProducts(products) {
 
         </tr>`).join('')
     : '<tr><td colspan="6" class="table-empty">No products found</td></tr>';
+  // Add variant rows
+  document.querySelectorAll('[id^="staffVarRow_"]').forEach(function(r) { r.remove(); });
+  paged.forEach(function(p) {
+    var tr = document.getElementById('staffVarRow_' + p.product_id);
+    if (!tr) {
+      var row = document.createElement('tr');
+      row.id = 'staffVarRow_' + p.product_id;
+      row.style.display = 'none';
+      row.style.background = 'var(--surface)';
+      row.innerHTML = '<td colspan="6" style="padding:0;"><table style="width:100%;"><tbody class="staff-variant-content"></tbody></table></td>';
+      var refRow = document.querySelector('#invProductsBody tr:last-child');
+      if (refRow) refRow.after(row);
+    }
+  });
   renderPager('staffInvPagination', products.length, staffInvPage, 'changeStaffInvPage');
 }
 
@@ -1169,6 +1374,40 @@ async function loadRequests() {
   } catch (e) { console.error('Requests error:', e); }
 }
 
+
+function loadReqVariants(productId) {
+  const wrap = document.getElementById('reqVariantWrap');
+  const cont = document.getElementById('reqVariantSelects');
+  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+
+  const product = invProducts.find(p => p.product_id === productId);
+  const groups  = product?.option_groups || [];
+
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:120px;">
+      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="reqVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
+        <option value="">All (no specific variant)</option>
+        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
+function getReqVariantOptions() {
+  const cont = document.getElementById('reqVariantSelects');
+  if (!cont) return {};
+  const opts = {};
+  cont.querySelectorAll('select').forEach(sel => {
+    const label = sel.id.replace('reqVariantOpt_', '').replace(/_/g, ' ');
+    if (sel.value) opts[label] = sel.value;
+  });
+  return Object.keys(opts).length > 0 ? opts : {};
+}
+
 async function openRequestModal() {
   if (!invProducts.length) await loadInventory();
   const sel = document.getElementById('reqProduct');
@@ -1190,6 +1429,8 @@ function closeRequestModal() {
   document.getElementById('requestModal')?.classList.remove('open');
   document.getElementById('requestForm')?.reset();
   document.getElementById('reqCurrentStock').value = '';
+  const reqVarWrap = document.getElementById('reqVariantWrap');
+  if (reqVarWrap) reqVarWrap.style.display = 'none';
 }
 
 function updateCurrentStock(sel) {
@@ -1211,10 +1452,11 @@ async function submitRequest(e) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        product_id:     productId,
+        product_id:      productId,
         quantity_needed: qty,
-        note:           note,
-        branch_id:      staffBranchId,
+        note:            note,
+        branch_id:       staffBranchId,
+        variant_options: getReqVariantOptions(),
       }),
     });
     if (res.ok) {

@@ -887,9 +887,16 @@
       <form id="addStockForm" onsubmit="submitAddStock(event)">
         <div class="form-group">
           <label class="form-label">Product <span class="req">*</span></label>
-          <select id="addStockProduct" class="form-input form-select" required>
+          <select id="addStockProduct" class="form-input form-select" required onchange="loadAddStockVariants(this.value)">
             <option value="">Select product</option>
           </select>
+        </div>
+        <!-- Variant Options (shown only if product has option_groups) -->
+        <div id="addStockVariantWrap" style="display:none;">
+          <div class="form-group">
+            <label class="form-label">Variant <span style="font-size:11px;color:var(--text-muted);">(optional — leave blank for total stock)</span></label>
+            <div id="addStockVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+          </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">

@@ -342,7 +342,7 @@ async function loadOverview() {
     document.getElementById('topSellingBody').innerHTML = sorted.slice(0, 5).length
       ? sorted.slice(0, 5).map(p => `
           <tr>
-            <td><strong>${p.product_name}</strong></td>
+            <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
             <td>${p.category || '—'}</td>
             <td><span style="font-weight:700;color:var(--g-400);">${Number(p.total_sold || 0).toLocaleString()} sold</span></td>
           </tr>`).join('')
@@ -352,7 +352,12 @@ async function loadOverview() {
     document.getElementById('pendingRequestsBody').innerHTML = pendingReqs.length
       ? pendingReqs.slice(0, 5).map(r => `
           <tr>
-            <td><strong>${r.product?.product_name || '—'}</strong></td>
+            <td>
+            <strong>${r.product?.product_name || '—'}</strong>
+            ${r.variant_options && Object.keys(r.variant_options).length > 0
+              ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(r.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>`
+              : ''}
+          </td>
             <td>${r.branch?.branch_name || '—'}</td>
             <td>${r.quantity_requested}</td>
             <td>${r.staff ? `${r.staff.fname} ${r.staff.lname}` : '—'}</td>
@@ -399,18 +404,84 @@ async function loadProducts() {
   } catch (e) { console.error('Products error:', e); }
 }
 
+
+// ─── Variant Stock Expandable Rows ────────────────────
+let expandedProductIds = new Set();
+
+async function toggleVariantRow(productId, btnEl) {
+  const expandRow = document.getElementById('variantRow_' + productId);
+  if (!expandRow) return;
+
+  if (expandedProductIds.has(productId)) {
+    expandedProductIds.delete(productId);
+    expandRow.style.display = 'none';
+    if (btnEl) btnEl.textContent = '▶';
+    return;
+  }
+
+  expandedProductIds.add(productId);
+  if (btnEl) btnEl.textContent = '▼';
+  expandRow.style.display = '';
+  expandRow.querySelector('.variant-stock-content').innerHTML =
+    '<tr><td colspan="7" style="padding:8px 16px;font-size:12px;color:var(--text-muted);">Loading variants...</td></tr>';
+
+  try {
+    const res  = await fetch('/api/variant-stock/' + productId);
+    const data = await res.json();
+
+    if (!data.length) {
+      expandRow.querySelector('.variant-stock-content').innerHTML =
+        '<tr><td colspan="7" style="padding:8px 16px;font-size:12px;color:var(--text-muted);">No variant stock recorded yet.</td></tr>';
+      return;
+    }
+
+    // Group by branch
+    const byBranch = {};
+    data.forEach(function(vs) {
+      const b = allBranches.find(function(b) { return b.branch_id === vs.branch_id; });
+      const bName = b ? b.branch_name : vs.branch_id;
+      if (!byBranch[bName]) byBranch[bName] = [];
+      byBranch[bName].push(vs);
+    });
+
+    var html = '';
+    Object.keys(byBranch).forEach(function(branch) {
+      var items = byBranch[branch];
+      var chips = items.map(function(vs) {
+        var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
+        var qty   = vs.quantity || 0;
+        var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
+        var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+        return '<div style="padding:6px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
+          + '<span style="color:var(--text-primary);font-weight:500;">' + opts + '</span>'
+          + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
+          + (qty === 0 ? ' ⚠️' : '')
+          + '</div>';
+      }).join('');
+      html += '<tr><td colspan="7" style="padding:4px 16px 2px;font-size:11px;font-weight:700;color:var(--text-muted);">📦 ' + branch + '</td></tr>'
+            + '<tr><td colspan="7" style="padding:4px 16px 12px;">' + chips + '</td></tr>';
+    });
+
+    expandRow.querySelector('.variant-stock-content').innerHTML = html;
+  } catch (e) {
+    expandRow.querySelector('.variant-stock-content').innerHTML =
+      '<tr><td colspan="7" style="padding:8px 16px;color:#ef4444;font-size:12px;">Failed to load variant stock.</td></tr>';
+  }
+}
+window.toggleVariantRow = toggleVariantRow;
+
 function renderProducts(products) {
   document.getElementById('productsBody').innerHTML = products.length
     ? products.map(p => {
         return `
-          <tr>
+          <tr style='cursor:pointer;' onclick="toggleVariantRow('${p.product_id}', this.querySelector('.expand-btn'))">
             <td>
               ${p.image_url
                 ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" class="product-img-cell" alt="${p.product_name}"/>`
                 : `<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`
               }
             </td>
-            <td><strong>${p.product_name}</strong></td>
+            <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
             <td>${p.brand || '—'}</td>
             <td>${p.category}</td>
             <td>${peso(p.price)}</td>
@@ -425,7 +496,8 @@ function renderProducts(products) {
                 </button>
               </div>
             </td>
-          </tr>`;
+          </tr>
+          <tr id="variantRow_${p.product_id}" style="display:none;background:var(--surface);"><td colspan="7" style="padding:0;"><table style="width:100%;"><tbody class="variant-stock-content"></tbody></table></td></tr>`;
       }).join('')
     : '<tr><td colspan="7" class="table-empty">No products found</td></tr>';
 }
@@ -997,7 +1069,7 @@ async function filterInventoryType(type, el) {
               : `${total} units`;
             return `
             <tr style="background:rgba(239,68,68,0.05);">
-              <td><strong>${p.product_name}</strong></td>
+              <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
               <td>—</td>
               <td colspan="2"><span style="color:#ef4444;font-weight:700;">${branchBreakdown} remaining</span></td>
               <td>${p.category}</td>
@@ -1045,16 +1117,53 @@ function closeAddStockModal() {
   document.getElementById('addStockForm')?.reset();
 }
 
+
+function loadAddStockVariants(productId) {
+  const wrap = document.getElementById('addStockVariantWrap');
+  const cont = document.getElementById('addStockVariantSelects');
+  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+
+  const product = allProducts?.find(p => p.product_id === productId);
+  const groups  = product?.option_groups || [];
+
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:120px;">
+      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="variantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
+        <option value="">All (no variant)</option>
+        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
+function getSelectedVariantOptions() {
+  const cont   = document.getElementById('addStockVariantSelects');
+  if (!cont) return {};
+  const selects = cont.querySelectorAll('select');
+  const opts    = {};
+  selects.forEach(sel => {
+    const label = sel.id.replace('variantOpt_', '').replace(/_/g, ' ');
+    if (sel.value) opts[label] = sel.value;
+  });
+  return Object.keys(opts).length > 0 ? opts : {};
+}
+
 async function submitAddStock(e) {
   e.preventDefault();
   const addStockBtn = e.submitter || document.querySelector('#addStockForm button[type="submit"]');
   setButtonLoading(addStockBtn, true);
+  const variantOpts = getSelectedVariantOptions();
   const data = {
-    product_id:   document.getElementById('addStockProduct').value,
-    quantity:     parseInt(document.getElementById('addStockQty').value),
-    to_branch_id: document.getElementById('addStockBranch').value,
-    note:         document.getElementById('addStockNote').value || 'Stock added',
-    type:         'restock',
+    product_id:      document.getElementById('addStockProduct').value,
+    quantity:        parseInt(document.getElementById('addStockQty').value),
+    to_branch_id:    document.getElementById('addStockBranch').value,
+    note:            document.getElementById('addStockNote').value || 'Stock added',
+    type:            'restock',
+    variant_options: variantOpts,
   };
   try {
     const res = await fetch('/api/admin/inventory', {
@@ -2184,7 +2293,12 @@ function renderStockRequests(requests) {
   document.getElementById('stockRequestsBody').innerHTML = requests.length
     ? requests.map(r => `
         <tr>
-          <td><strong>${r.product?.product_name || '—'}</strong></td>
+          <td>
+            <strong>${r.product?.product_name || '—'}</strong>
+            ${r.variant_options && Object.keys(r.variant_options).length > 0
+              ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(r.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>`
+              : ''}
+          </td>
           <td>${(() => {
             const bs = r.product?.branch_stock || [];
             const branchBs = bs.find(b => b.branch_id === r.branch_id);
@@ -2290,6 +2404,28 @@ function closeCreatePOModal() {
   document.getElementById('createPOModal')?.classList.remove('open');
 }
 
+
+function loadPORowVariants(sel) {
+  const row      = sel.closest('div[style*="grid"]') || sel.parentElement.parentElement;
+  const wrap     = row.querySelector('.po-variant-wrap');
+  if (!wrap) return;
+  const opt      = sel.options[sel.selectedIndex];
+  const groups   = JSON.parse(opt?.dataset?.groups || '[]');
+
+  if (!groups.length) { wrap.style.display = 'none'; wrap.innerHTML = ''; return; }
+
+  wrap.style.display = 'flex';
+  wrap.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:100px;">
+      <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select po-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
+        <option value="">Any</option>
+        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
 function addPOItemRow() {
   const wrap = document.getElementById('poItemsWrap');
   const idx  = wrap.children.length;
@@ -2297,16 +2433,17 @@ function addPOItemRow() {
   row.style.cssText = 'display:grid;grid-template-columns:1fr 80px 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();">
+      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);">
         <option value="">Select product</option>
         ${allProducts.map(p => {
           const bs = p.branch_stock || [];
           const totalStock = bs.length
             ? bs.reduce((s, b) => s + Number(b.quantity), 0)
             : Number(p.quantity || 0);
-          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}'>${p.product_name}</option>`;
+          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}' data-groups='${JSON.stringify(p.option_groups||[])}'>${p.product_name}</option>`;
         }).join('')}
       </select>
+      <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
       <span class="po-stock-info" style="font-size:11px;color:var(--text-muted);padding-left:4px;"></span>
     </div>
     <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="updatePOTotal()"/>
@@ -2357,7 +2494,15 @@ async function submitCreatePO() {
     const productId = row.querySelector('.po-product')?.value;
     const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
     const unitCost  = parseFloat(row.querySelector('.po-cost')?.value || 0);
-    if (productId && qty > 0) items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost });
+    if (productId && qty > 0) {
+      // Get variant options for this row
+      const variantSelects = row.querySelectorAll('.po-variant-opt');
+      const variantOpts = {};
+      variantSelects.forEach(vs => {
+        if (vs.value) variantOpts[vs.dataset.label] = vs.value;
+      });
+      items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost, variant_options: Object.keys(variantOpts).length ? variantOpts : null });
+    }
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
 
@@ -2396,7 +2541,10 @@ function showPOReceipt(po, items, total) {
 
   const itemsHtml = items.map(i => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);">${i.product?.product_name || i.product_name || '—'}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);">
+        ${i.product?.product_name || i.product_name || '—'}
+        ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}</div>` : ''}
+      </td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>
@@ -2502,7 +2650,10 @@ function openPODetail(poId) {
       <tbody>
         ${items.map(i => `
           <tr>
-            <td>${i.product?.product_name || '—'}</td>
+            <td>
+              ${i.product?.product_name || '—'}
+              ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>` : ''}
+            </td>
             <td>${i.quantity}</td>
             <td>${peso(i.unit_cost)}</td>
             <td>${peso(Number(i.unit_cost) * Number(i.quantity))}</td>
