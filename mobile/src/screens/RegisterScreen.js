@@ -166,7 +166,12 @@ export default function RegisterScreen({ navigation }) {
                       placeholder={f.placeholder}
                       placeholderTextColor={COLORS.textMuted}
                       value={form[f.key]}
-                      onChangeText={v => update(f.key, v)}
+                      onChangeText={v => {
+                        // Allow letters, spaces, hyphens and dots (for middle initial like "S.")
+                        const cleaned = v.replace(/[^a-zA-ZÀ-ÿ\s.\-]/g, '');
+                        update(f.key, cleaned);
+                      }}
+                      autoCapitalize="words"
                     />
                   </View>
                 </View>
