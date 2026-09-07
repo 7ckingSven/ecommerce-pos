@@ -1,7 +1,9 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-let invPage    = 1;
-let ordersPage = 1;
+let invPage           = 1;
+let ordersPage        = 1;
+let branchStockPage   = 1;
+let allBranchProducts = [];
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -69,12 +71,19 @@ function renderPager(containerId, total, currentPage, fnName) {
   });
 }
 
-function changeInvPage(p)    { invPage = p;    renderInventory(allInventory); }
-function changeOrdersPage(p) { ordersPage = p; renderOrders(allOrders); }
+function changeInvPage(p)         { invPage = p;         renderInventory(allInventory); }
+function changeOrdersPage(p)      { ordersPage = p;      renderOrders(allOrders); }
+function changeBranchStockPage(p) {
+  branchStockPage = p;
+  const wrap = document.getElementById('branchStockSummary');
+  if (wrap) wrap.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:13px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;animation:spin 1s linear infinite;flex-shrink:0;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg>Loading...</div>';
+  setTimeout(function() { updateBranchStockSummary(allBranchProducts); }, 50);
+}
+window.changeBranchStockPage = changeBranchStockPage;
 window.changeInvPage    = changeInvPage;
 window.changeOrdersPage = changeOrdersPage;
 
-const pageTitles = {
+var pageTitles = {
   overview:        ['Overview',          'Dashboard summary & recent activity'],
   products:        ['Products',          'Manage your product catalog'],
   inventory:       ['Inventory',         'Track stock levels and movements'],
@@ -152,6 +161,22 @@ function setButtonLoading(btn, loading) {
   }
 }
 
+
+// ─── Theme Toggle ─────────────────────────────────────
+function toggleTheme() {
+  const html     = document.documentElement;
+  const current  = html.getAttribute('data-theme') || 'dark';
+  const next     = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+}
+
+// Apply saved theme on load
+(function() {
+  const saved = localStorage.getItem('theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+})();
+
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {
   const t = document.getElementById('toast');
@@ -195,7 +220,7 @@ let allBranches  = [];
 // ══════════════════════════════════════════════════════
 // DATA LOADERS
 // ══════════════════════════════════════════════════════
-const loaders = {
+var loaders = {
   overview:  loadOverview,
   products:  loadProducts,
   inventory: loadInventory,
@@ -868,6 +893,7 @@ let allInventory = [];
 
 // ─── Branch Stock Summary in Inventory ───────────────
 function updateBranchStockSummary(products) {
+  allBranchProducts = products; // store for pagination
   const wrap = document.getElementById('branchStockSummary');
   if (!wrap) return;
 
@@ -890,14 +916,19 @@ function updateBranchStockSummary(products) {
   });
 
   if (!Object.keys(branchMap).length) {
-    wrap.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">No branch stock data found.</p>';
+    if (allBranchProducts.length > 0) {
+      wrap.innerHTML = '<div style="display:flex;align-items:center;gap:10px;padding:16px;color:var(--text-muted);font-size:13px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;animation:spin 1s linear infinite;flex-shrink:0;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg>Loading branch stock...</div>';
+    } else {
+      wrap.innerHTML = '<p style="color:var(--text-muted);font-size:13px;">No branch stock data found.</p>';
+    }
     return;
   }
 
   var html = '<div class="branch-stock-grid">';
   Object.keys(branchMap).forEach(function(branch) {
-    var branchId = branchMap[branch].branch_id;
-    var items    = branchMap[branch].items;
+    var branchId  = branchMap[branch].branch_id;
+    var allItems  = branchMap[branch].items;
+    var items     = allItems.slice((branchStockPage - 1) * ITEMS_PER_PAGE, branchStockPage * ITEMS_PER_PAGE);
     var rows     = items.map(function(i) {
       var imgHtml = i.image_url
         ? '<img src="' + (i.image_urls?.length ? i.image_urls[0] : i.image_url) + '" class="product-img-cell" style="width:32px;height:32px;" alt="' + i.product_name + '"/>'
@@ -929,7 +960,7 @@ function updateBranchStockSummary(products) {
     html += '<div class="branch-stock-card">'
       + '<div class="branch-stock-header"><span>🏪</span>'
       + '<span class="branch-stock-name">' + branch + '</span>'
-      + '<span class="branch-stock-count">' + items.length + ' items</span></div>'
+      + '<span class="branch-stock-count">' + allItems.length + ' items</span></div>'
       + '<table class="data-table" style="margin:0;">'
       + '<thead><tr><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th></tr></thead>'
       + '<tbody>' + rows + '</tbody>'
@@ -937,6 +968,20 @@ function updateBranchStockSummary(products) {
   });
   html += '</div>';
   wrap.innerHTML = html;
+
+  // Pagination
+  var maxItems = 0;
+  Object.keys(branchMap).forEach(function(b) {
+    if (branchMap[b].items.length > maxItems) maxItems = branchMap[b].items.length;
+  });
+  var pagerEl = document.getElementById('branchStockPagination');
+  if (!pagerEl) {
+    pagerEl = document.createElement('div');
+    pagerEl.id = 'branchStockPagination';
+    pagerEl.style.cssText = 'padding:0 1rem;margin-top:8px;';
+    wrap.after(pagerEl);
+  }
+  renderPager('branchStockPagination', maxItems, branchStockPage, 'changeBranchStockPage');
 }
 
 async function toggleInvVariantRow(productId, branchId, btnEl) {

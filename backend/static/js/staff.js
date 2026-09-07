@@ -1,7 +1,9 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-let staffOrdersPage = 1;
-let staffInvPage    = 1;
+let staffOrdersPage  = 1;
+let staffInvPage     = 1;
+let staffHistoryPage = 1;
+let allInvHistory    = [];
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -70,7 +72,9 @@ function renderPager(containerId, total, currentPage, fnName) {
 }
 
 function changeStaffOrdersPage(p) { staffOrdersPage = p; renderStaffOrders(staffOrders); }
-function changeStaffInvPage(p)    { staffInvPage = p;    renderInvProducts(invProducts); }
+function changeStaffInvPage(p)     { staffInvPage = p;     renderInvProducts(invProducts); }
+function changeStaffHistoryPage(p) { staffHistoryPage = p; renderInvHistory(allInvHistory); }
+window.changeStaffHistoryPage = changeStaffHistoryPage;
 window.changeStaffOrdersPage = changeStaffOrdersPage;
 window.changeStaffInvPage    = changeStaffInvPage;
 
@@ -154,6 +158,22 @@ function setButtonLoading(btn, loading) {
     btn.innerHTML     = btn._originalText || 'Submit';
   }
 }
+
+
+// ─── Theme Toggle ─────────────────────────────────────
+function toggleTheme() {
+  const html     = document.documentElement;
+  const current  = html.getAttribute('data-theme') || 'dark';
+  const next     = current === 'dark' ? 'light' : 'dark';
+  html.setAttribute('data-theme', next);
+  localStorage.setItem('theme', next);
+}
+
+// Apply saved theme on load
+(function() {
+  const saved = localStorage.getItem('theme');
+  if (saved) document.documentElement.setAttribute('data-theme', saved);
+})();
 
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {
@@ -747,18 +767,39 @@ function printReceipt() {
 // ══════════════════════════════════════════════════════
 // INVENTORY
 // ══════════════════════════════════════════════════════
+
+function renderInvHistory(data) {
+  allInvHistory = data;
+  const paged = paginate(data, staffHistoryPage);
+  document.getElementById('invHistoryBody').innerHTML = paged.length
+    ? paged.map(i => `
+          <tr>
+            <td>${i.product?.product_name || '—'}</td>
+            <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
+            <td>${i.quantity_before}</td>
+            <td>${i.quantity_after}</td>
+            <td>${i.from_branch?.branch_name || '—'}</td>
+            <td>${i.to_branch?.branch_name   || '—'}</td>
+            <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
+            <td style="max-width:200px;font-size:12px;">${i.note || '—'}</td>
+          </tr>`).join('')
+    : '<tr><td colspan="8" class="table-empty">No inventory records yet</td></tr>';
+  renderPager('staffHistoryPagination', data.length, staffHistoryPage, 'changeStaffHistoryPage');
+}
+
 async function loadInventory() {
   try {
-    const [prodRes, invRes] = await Promise.all([
-      fetch('/api/products'),
-      fetch('/api/staff/inventory'),
-    ]);
-    const allInvProds = await prodRes.json();
+    // Sequential requests to avoid WinError 10035
+    const prodRes        = await fetch('/api/products');
+    const allInvProdsRaw = await prodRes.json();
+    const allInvProds    = Array.isArray(allInvProdsRaw) ? allInvProdsRaw : [];
     // Filter to this branch only
     invProducts = allInvProds.filter(p =>
       !p.branch_id || p.branch_id === staffBranchId
     );
-    const invData = await invRes.json();
+    const invRes    = await fetch('/api/staff/inventory');
+    const invDataRaw = await invRes.json();
+    const invData   = Array.isArray(invDataRaw) ? invDataRaw : [];
 
     // Stats
     document.getElementById('invTotalProducts').textContent = invProducts.length;
@@ -791,19 +832,7 @@ async function loadInventory() {
     renderInvProducts(invProducts);
 
     // History — read nested branch names from FK join
-    document.getElementById('invHistoryBody').innerHTML = invData.length
-      ? invData.map(i => `
-          <tr>
-            <td>${i.product?.product_name || '—'}</td>
-            <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
-            <td>${i.quantity_before}</td>
-            <td>${i.quantity_after}</td>
-            <td>${i.from_branch?.branch_name || '—'}</td>
-            <td>${i.to_branch?.branch_name   || '—'}</td>
-            <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
-            <td>${i.note || '—'}</td>
-          </tr>`).join('')
-      : '<tr><td colspan="8" class="table-empty">No inventory records yet</td></tr>';
+    renderInvHistory(invData);
 
   } catch (e) { console.error('Inventory error:', e); }
 }
@@ -1287,7 +1316,6 @@ function renderSummaryForDate(dateStr) {
 
   const allValid = filtered.filter(o => o.status !== 'cancelled');
   const total    = allValid.reduce((s, o) => s + Number(o.total || 0), 0);
-  console.log('Summary:', dateStr, 'filtered:', filtered.length, 'total:', total);
 
   document.getElementById('summaryToday').textContent  = peso(total);
   document.getElementById('summaryOrders').textContent = allValid.length;

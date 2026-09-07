@@ -1723,7 +1723,6 @@ def admin_get_products():
                 for oi in (items_res.data or []):
                     pid = oi['product_id']
                     sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
-            print(f'Admin products - sold_map entries: {len(sold_map)}, completed orders: {len(completed_order_ids)}')
         except Exception as sold_err:
             print(f'Admin products sold count warning: {sold_err}')
 
