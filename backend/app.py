@@ -28,6 +28,21 @@ supabase = create_client(
     os.getenv('SUPABASE_KEY')
 )
 
+
+# ─── Supabase Retry Helper (WinError 10054/10035 fix) ──
+import time as _time
+
+def supabase_retry(fn, retries=3, delay=0.3):
+    """Retry a Supabase call on Windows socket errors."""
+    for attempt in range(retries):
+        try:
+            return fn()
+        except Exception as e:
+            if attempt < retries - 1:
+                _time.sleep(delay)
+                continue
+            raise e
+
 # Configure Flask-Mail
 app.config['MAIL_SERVER'] = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
 app.config['MAIL_PORT'] = int(os.getenv('MAIL_PORT', 587))
@@ -690,9 +705,9 @@ def api_get_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        res = supabase.table('cart').select(
+        res = supabase_retry(lambda: supabase.table('cart').select(
             '*, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage))'
-        ).eq('customer_id', customer_id).eq('status', 'active').execute()
+        ).eq('customer_id', customer_id).eq('status', 'active').execute())
         return jsonify(res.data), 200
     except Exception as e:
         print(f"API cart error: {e}")
@@ -777,9 +792,9 @@ def api_get_orders():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        res = supabase.table('order').select(
+        res = supabase_retry(lambda: supabase.table('order').select(
             '*, order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url, price)), payment(*), branch(branch_name)'
-        ).eq('customer_id', customer_id).order('created_at', desc=True).execute()
+        ).eq('customer_id', customer_id).order('created_at', desc=True).execute())
         return jsonify(res.data), 200
     except Exception as e:
         print(f"API get orders error: {e}")

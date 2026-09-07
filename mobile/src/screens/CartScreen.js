@@ -54,8 +54,6 @@ export default function CartScreen({ navigation }) {
   async function loadCart() {
     try {
       const data = await getCart();
-      console.log('Cart data:', JSON.stringify(data?.slice(0,1)));
-
       // Normalize — handle product as array or object
       const normalized = (data || []).map(item => ({
         ...item,
@@ -187,14 +185,17 @@ export default function CartScreen({ navigation }) {
     </View>
   );
 
+  // Safety check for undefined cart items
+  const safeCart = Array.isArray(cart) ? cart : [];
+
   return (
     <View style={styles.container}>
 
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.headerTitle}>My Cart</Text>
-        {cart.length > 0 && (
-          <Text style={styles.headerSub}>{cart.length} item(s)</Text>
+        {safeCart.length > 0 && (
+          <Text style={styles.headerSub}>{safeCart.length} item(s)</Text>
         )}
       </View>
 
@@ -321,7 +322,7 @@ export default function CartScreen({ navigation }) {
                     <View style={styles.qtyRow}>
                       <TouchableOpacity
                         style={styles.qtyBtn}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, item.product?.quantity)}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, item.product ? item.product.quantity : null)}
                       >
                         <Feather name="minus" size={13} color={COLORS.dark}/>
                       </TouchableOpacity>
@@ -335,7 +336,7 @@ export default function CartScreen({ navigation }) {
                       />
                       <TouchableOpacity
                         style={[styles.qtyBtn, item.quantity >= item.product?.quantity && styles.qtyBtnDisabled]}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, item.product?.quantity)}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, item.product ? item.product.quantity : null)}
                         disabled={item.quantity >= item.product?.quantity}
                       >
                         <Feather name="plus" size={13} color={item.quantity >= item.product?.quantity ? COLORS.grayLight : COLORS.dark}/>
