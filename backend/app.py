@@ -1177,23 +1177,25 @@ def staff_get_stock_requests():
 @staff_required
 def staff_create_stock_request():
     try:
-        data           = request.get_json()
-        staff_id       = session.get('staff_id')
-        product_id     = data.get('product_id')
+        data            = request.get_json()
+        staff_id        = session.get('staff_id')
+        product_id      = data.get('product_id')
         quantity_needed = int(data.get('quantity_needed', 0))
-        note           = data.get('note', '')
-        branch_id      = data.get('branch_id')
+        note            = data.get('note', '')
+        branch_id       = data.get('branch_id')
+        variant_options = data.get('variant_options') or None
 
         if not product_id or quantity_needed <= 0:
             return jsonify({'error': 'Product and quantity are required.'}), 400
 
         res = supabase.table('stock_request').insert({
-            'staff_id':       staff_id,
-            'branch_id':      branch_id,
-            'product_id':     product_id,
+            'staff_id':        staff_id,
+            'branch_id':       branch_id,
+            'product_id':      product_id,
             'quantity_needed': quantity_needed,
-            'note':           note,
-            'status':         'pending',
+            'note':            note,
+            'status':          'pending',
+            'variant_options': variant_options,
         }).execute()
         return jsonify(res.data[0]), 201
     except Exception as e:
@@ -2344,6 +2346,7 @@ def staff_place_order():
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
             'staff_id':   session.get('staff_id'),
+            'branch_id':  branch_id,
             'order_type': order_type,
             'quantity':   quantity,
             'total':      total,
@@ -2354,10 +2357,11 @@ def staff_place_order():
 
         # ── Create order items ────────────────────────
         supabase.table('order_item').insert([{
-            'order_id':   order_id,
-            'product_id': item['product_id'],
-            'qty':        item['quantity'],   # schema uses qty not quantity
-            'price':      item['price'],
+            'order_id':        order_id,
+            'product_id':      item['product_id'],
+            'qty':             item['quantity'],
+            'price':           item['price'],
+            'selected_options': item.get('selected_options', {}),
         } for item in cart_items]).execute()
 
         # ── Create payment ────────────────────────────
@@ -2382,9 +2386,11 @@ def staff_place_order():
         }).execute()
 
         # ── Deduct stock ──────────────────────────────
+        import time as _st
         for item in cart_items:
-            product_id = item['product_id']
-            qty        = item['quantity']
+            product_id       = item['product_id']
+            qty              = item['quantity']
+            selected_options = item.get('selected_options', {})
 
             # Deduct from branch_stock
             if branch_id:
@@ -2395,7 +2401,19 @@ def staff_place_order():
                         'quantity': new_branch_qty, 'updated_at': 'now()'
                     }).eq('product_id', product_id).eq('branch_id', branch_id).execute()
 
-            # Also deduct from product total quantity
+            # Deduct variant stock if selected_options present
+            if selected_options and branch_id:
+                try:
+                    _st.sleep(0.05)
+                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+                    match = [v for v in (all_vs.data or []) if v.get('options') == selected_options]
+                    if match:
+                        new_vs_qty = max(match[0]['quantity'] - qty, 0)
+                        supabase.table('variant_stock').update({'quantity': new_vs_qty, 'updated_at': 'now()'}).eq('id', match[0]['id']).execute()
+                except Exception as vs_err:
+                    print(f'Variant stock deduct warning: {vs_err}')
+
+            # Deduct from product total quantity
             prod = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
             if prod.data:
                 new_qty = max(prod.data[0]['quantity'] - qty, 0)
@@ -2411,7 +2429,9 @@ def staff_place_order():
         }), 201
 
     except Exception as e:
+        import traceback
         print(f"Staff place order error: {e}")
+        print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/staff/orders/<order_id>', methods=['PUT'])

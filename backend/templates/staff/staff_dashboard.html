@@ -439,5 +439,19 @@
   </div>
 
   <script src="{{ url_for('static', filename='js/staff.js') }}"></script>
+
+  <!-- Receipt Modal -->
+  <div id="receiptModalOverlay" onclick="closeReceiptModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;"></div>
+  <div id="receiptModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:1001;width:90%;max-width:420px;max-height:85vh;overflow-y:auto;background:var(--card-bg);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+    <div style="padding:1rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <h3 style="margin:0;font-size:16px;">🧾 Order Receipt</h3>
+      <button onclick="closeReceiptModal()" style="background:none;border:none;cursor:pointer;font-size:20px;color:var(--text-muted);">&times;</button>
+    </div>
+    <div id="receiptContent" style="padding:1rem;font-size:13px;"></div>
+    <div style="padding:1rem;border-top:1px solid var(--border);display:flex;gap:8px;">
+      <button onclick="window.print()" class="btn btn-outline" style="flex:1;">🖨️ Print</button>
+      <button onclick="closeReceiptModal()" class="btn btn-solid-green" style="flex:1;">Done</button>
+    </div>
+  </div>
 </body>
 </html>

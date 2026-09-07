@@ -380,7 +380,7 @@ async function loadOverview() {
             <td>
             <strong>${r.product?.product_name || '—'}</strong>
             ${r.variant_options && Object.keys(r.variant_options).length > 0
-              ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(r.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>`
+              ? '<div style="font-size:11px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
               : ''}
           </td>
             <td>${r.branch?.branch_name || '—'}</td>
@@ -2384,7 +2384,7 @@ function renderStockRequests(requests) {
           <td>
             <strong>${r.product?.product_name || '—'}</strong>
             ${r.variant_options && Object.keys(r.variant_options).length > 0
-              ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(r.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>`
+              ? '<div style="font-size:11px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
               : ''}
           </td>
           <td>${(() => {

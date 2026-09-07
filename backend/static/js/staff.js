@@ -90,7 +90,7 @@ const pageTitles = {
 // ─── Auto Refresh (5 seconds) ─────────────────────────
 let autoRefreshTimer = null;
 const AUTO_REFRESH_SECTIONS = ['orders', 'inventory', 'pos'];
-const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
+const AUTO_REFRESH_INTERVAL = 15000; // 15 seconds (increased to avoid collapsing expanded rows)
 
 function startAutoRefresh(section) {
   stopAutoRefresh();
@@ -285,7 +285,8 @@ function populateBranchSelects() {
 async function loadPosProducts() {
   try {
     const res   = await fetch('/api/products');
-    const all   = await res.json();
+    const rawAll = await res.json();
+    const all    = Array.isArray(rawAll) ? rawAll : [];
     // Filter to only show products for this branch
     posProducts = all.filter(p =>
       !p.branch_id || p.branch_id === staffBranchId
@@ -519,6 +520,8 @@ async function confirmPosVariant() {
     }
   }
 
+  // Check available variant stock
+  let availableStock = 0;
   try {
     const res  = await fetch('/api/variant-stock/check', {
       method: 'POST',
@@ -530,7 +533,8 @@ async function confirmPosVariant() {
       }),
     });
     const data = await res.json();
-    if ((data.quantity || 0) <= 0) {
+    availableStock = data.quantity || 0;
+    if (availableStock <= 0) {
       showToast('This variant is out of stock!', 'error');
       return;
     }
@@ -541,7 +545,7 @@ async function confirmPosVariant() {
     posCurrentProduct.product_id,
     `${posCurrentProduct.product_name} (${variantLabel})`,
     posCurrentProduct.effectivePrice,
-    posCurrentProduct.quantity,
+    availableStock || posCurrentProduct.quantity,
     { ...posSelectedVariants }
   );
   posSelectedVariants = {};
@@ -788,6 +792,11 @@ function renderInvHistory(data) {
 }
 
 async function loadInventory() {
+  // Save expanded variant rows before refresh
+  const expandedRows = new Set([...document.querySelectorAll('[id^="staffVarRow_"]')]
+    .filter(r => r.style.display !== 'none')
+    .map(r => r.id.replace('staffVarRow_', '')));
+
   try {
     // Sequential requests to avoid WinError 10035
     const prodRes        = await fetch('/api/products');
@@ -1282,7 +1291,8 @@ let allSummaryOrders = []; // store all orders for date filtering
 async function loadSummary() {
   try {
     const res    = await fetch('/api/staff/orders?limit=100');
-    allSummaryOrders = await res.json();
+    const raw = await res.json();
+    allSummaryOrders = Array.isArray(raw) ? raw : [];
 
     // Set today's date in picker — use PH timezone
     const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
@@ -1294,7 +1304,7 @@ async function loadSummary() {
 }
 
 function renderSummaryForDate(dateStr) {
-  const isToday = dateStr === new Date().toISOString().split('T')[0];
+  const isToday = dateStr === new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
   const label   = isToday ? 'Today' : new Date(dateStr + 'T00:00:00').toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' });
 
   // Update labels
@@ -1330,7 +1340,7 @@ function renderSummaryForDate(dateStr) {
           <td>${badge(o.order_type)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${peso(o.total)}</td>
-          <td>${new Date(o.date || o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' })}</td>
+          <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) : '—'}</td>
           <td>${badge(o.status)}</td>
         </tr>`).join('')
     : `<tr><td colspan="7" class="table-empty">No transactions for ${label}</td></tr>`;
@@ -1376,9 +1386,15 @@ async function loadRequests() {
       ? data.map(r => {
           const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
           const statusColor  = statusColors[r.status] || 'gray';
+          console.log('Request row:', r.product?.product_name, 'variant_options:', r.variant_options);
           return `
           <tr>
-            <td><strong>${r.product?.product_name || '—'}</strong></td>
+            <td>
+              <strong>${r.product?.product_name || '—'}</strong>
+              ${r.variant_options && Object.keys(r.variant_options).length > 0
+                ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+                : ''}
+            </td>
             <td>${r.product?.quantity ?? '—'} units</td>
             <td>${r.quantity_needed} units</td>
             <td><span class="badge badge--${statusColor}">${r.status}</span></td>
@@ -1474,7 +1490,7 @@ async function submitRequest(e) {
         quantity_needed: qty,
         note:            note,
         branch_id:       staffBranchId,
-        variant_options: getReqVariantOptions(),
+        variant_options: (() => { const v = getReqVariantOptions(); return Object.keys(v).length > 0 ? v : null; })()
       }),
     });
     if (res.ok) {
