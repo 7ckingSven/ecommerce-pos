@@ -882,23 +882,13 @@ function renderInvProducts(products) {
               ? '<span class="badge badge--yellow">Low Stock</span>'
               : '<span class="badge badge--green">In Stock</span>'
           }</td>
-
+        </tr>
+        <tr id="staffVarRow_${p.product_id}" style="display:none;background:var(--surface);">
+          <td colspan="6" style="padding:0;">
+            <div class="staff-variant-content" style="padding:8px 16px;"></div>
+          </td>
         </tr>`).join('')
     : '<tr><td colspan="6" class="table-empty">No products found</td></tr>';
-  // Add variant rows
-  document.querySelectorAll('[id^="staffVarRow_"]').forEach(function(r) { r.remove(); });
-  paged.forEach(function(p) {
-    var tr = document.getElementById('staffVarRow_' + p.product_id);
-    if (!tr) {
-      var row = document.createElement('tr');
-      row.id = 'staffVarRow_' + p.product_id;
-      row.style.display = 'none';
-      row.style.background = 'var(--surface)';
-      row.innerHTML = '<td colspan="6" style="padding:0;"><table style="width:100%;"><tbody class="staff-variant-content"></tbody></table></td>';
-      var refRow = document.querySelector('#invProductsBody tr:last-child');
-      if (refRow) refRow.after(row);
-    }
-  });
   renderPager('staffInvPagination', products.length, staffInvPage, 'changeStaffInvPage');
 }
 

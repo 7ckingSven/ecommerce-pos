@@ -1709,7 +1709,28 @@ def admin_unassign_discount():
 @admin_required
 def admin_get_products():
     try:
-        res = supabase.table('product').select('*, discount(discount_id, discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name))').order('created_at', desc=True).execute()
+        res = supabase.table('product').select(
+            '*, discount(discount_id, discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups'
+        ).order('created_at', desc=True).execute()
+
+        # Get sold counts from completed orders
+        sold_map = {}
+        try:
+            completed_orders    = supabase.table('order').select('order_id').eq('status', 'completed').execute()
+            completed_order_ids = [o['order_id'] for o in (completed_orders.data or [])]
+            if completed_order_ids:
+                items_res = supabase.table('order_item').select('product_id, qty').in_('order_id', completed_order_ids).execute()
+                for oi in (items_res.data or []):
+                    pid = oi['product_id']
+                    sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
+            print(f'Admin products - sold_map entries: {len(sold_map)}, completed orders: {len(completed_order_ids)}')
+        except Exception as sold_err:
+            print(f'Admin products sold count warning: {sold_err}')
+
+        # Add total_sold to each product
+        for p in res.data:
+            p['total_sold'] = sold_map.get(p['product_id'], 0)
+
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500

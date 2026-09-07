@@ -871,17 +871,20 @@ function updateBranchStockSummary(products) {
   const wrap = document.getElementById('branchStockSummary');
   if (!wrap) return;
 
-  // Group by branch
+  // Group by branch — store product_id for variant lookup
   const branchMap = {};
   products.forEach(p => {
     (p.branch_stock || []).forEach(bs => {
-      const name = bs.branch?.branch_name || 'Unknown';
-      if (!branchMap[name]) branchMap[name] = [];
-      branchMap[name].push({
+      const name     = bs.branch?.branch_name || 'Unknown';
+      const branchId = bs.branch_id;
+      if (!branchMap[name]) branchMap[name] = { branch_id: branchId, items: [] };
+      branchMap[name].items.push({
+        product_id:   p.product_id,
         product_name: p.product_name,
         quantity:     bs.quantity,
         image_url:    p.image_url,
         image_urls:   p.image_urls,
+        option_groups: p.option_groups || [],
       });
     });
   });
@@ -891,54 +894,94 @@ function updateBranchStockSummary(products) {
     return;
   }
 
-  // Render branches side by side using CSS classes
-  wrap.innerHTML = `
-    <div class="branch-stock-grid">
-      ${Object.entries(branchMap).map(([branch, items]) => `
-        <div class="branch-stock-card">
-          <div class="branch-stock-header">
-            <span>🏪</span>
-            <span class="branch-stock-name">${branch}</span>
-            <span class="branch-stock-count">${items.length} items</span>
-          </div>
-          <table class="data-table" style="margin:0;">
-            <thead>
-              <tr>
-                <th>Product</th>
-                <th style="text-align:center;">Stock</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              ${items.map(i => `
-                <tr>
-                  <td>
-                    <div style="display:flex;align-items:center;gap:8px;">
-                      ${i.image_url
-                        ? `<img src="${i.image_urls?.length ? i.image_urls[0] : i.image_url}" class="product-img-cell" alt="${i.product_name}" style="width:32px;height:32px;"/>`
-                        : `<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>`}
-                      <span style="font-size:12px;font-weight:600;">${i.product_name}</span>
-                    </div>
-                  </td>
-                  <td style="text-align:center;">
-                    <span class="branch-stock-qty ${i.quantity === 0 ? 'out-stock' : i.quantity <= 5 ? 'low-stock' : 'in-stock'}">
-                      ${i.quantity}
-                    </span>
-                  </td>
-                  <td>
-                    ${i.quantity === 0
-                      ? '<span class="badge badge--red">Out of Stock</span>'
-                      : i.quantity <= 5
-                        ? '<span class="badge badge--yellow">Low Stock</span>'
-                        : '<span class="badge badge--green">In Stock</span>'}
-                  </td>
-                </tr>`).join('')}
-            </tbody>
-          </table>
-        </div>
-      `).join('')}
-    </div>`;
+  var html = '<div class="branch-stock-grid">';
+  Object.keys(branchMap).forEach(function(branch) {
+    var branchId = branchMap[branch].branch_id;
+    var items    = branchMap[branch].items;
+    var rows     = items.map(function(i) {
+      var imgHtml = i.image_url
+        ? '<img src="' + (i.image_urls?.length ? i.image_urls[0] : i.image_url) + '" class="product-img-cell" style="width:32px;height:32px;" alt="' + i.product_name + '"/>'
+        : '<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
+      var qtyClass = i.quantity === 0 ? 'out-stock' : i.quantity <= 5 ? 'low-stock' : 'in-stock';
+      var badge    = i.quantity === 0
+        ? '<span class="badge badge--red">Out of Stock</span>'
+        : i.quantity <= 5
+          ? '<span class="badge badge--yellow">Low Stock</span>'
+          : '<span class="badge badge--green">In Stock</span>';
+      var hasVariants = i.option_groups && i.option_groups.length > 0;
+      var expandBtn   = hasVariants
+        ? '<span class="inv-expand-btn" style="margin-left:6px;font-size:10px;color:var(--text-muted);cursor:pointer;" onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this)">▶</span>'
+        : '';
+      return '<tr style="cursor:' + (hasVariants ? 'pointer' : 'default') + ';" '
+        + (hasVariants ? 'onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this.querySelector(\'.inv-expand-btn\'))"' : '')
+        + '>'
+        + '<td><div style="display:flex;align-items:center;gap:8px;">' + imgHtml
+        + '<span style="font-size:12px;font-weight:600;">' + i.product_name + '</span>'
+        + expandBtn + '</div></td>'
+        + '<td style="text-align:center;"><span class="branch-stock-qty ' + qtyClass + '">' + i.quantity + '</span></td>'
+        + '<td>' + badge + '</td>'
+        + '</tr>'
+        + '<tr id="invVarRow_' + i.product_id + '_' + branchId + '" style="display:none;background:var(--surface);">'
+        + '<td colspan="3" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>'
+        + '</tr>';
+    }).join('');
+
+    html += '<div class="branch-stock-card">'
+      + '<div class="branch-stock-header"><span>🏪</span>'
+      + '<span class="branch-stock-name">' + branch + '</span>'
+      + '<span class="branch-stock-count">' + items.length + ' items</span></div>'
+      + '<table class="data-table" style="margin:0;">'
+      + '<thead><tr><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th></tr></thead>'
+      + '<tbody>' + rows + '</tbody>'
+      + '</table></div>';
+  });
+  html += '</div>';
+  wrap.innerHTML = html;
 }
+
+async function toggleInvVariantRow(productId, branchId, btnEl) {
+  const rowId  = 'invVarRow_' + productId + '_' + branchId;
+  const row    = document.getElementById(rowId);
+  if (!row) return;
+
+  if (row.style.display !== 'none') {
+    row.style.display = 'none';
+    if (btnEl) btnEl.textContent = '▶';
+    return;
+  }
+
+  row.style.display = '';
+  if (btnEl) btnEl.textContent = '▼';
+
+  const cont = row.querySelector('.inv-variant-content');
+  cont.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Loading variants...</span>';
+
+  try {
+    const res  = await fetch('/api/variant-stock/' + productId + '?branch_id=' + branchId);
+    const data = await res.json();
+
+    if (!data.length) {
+      cont.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">No variant stock recorded yet.</span>';
+      return;
+    }
+
+    var chips = data.map(function(vs) {
+      var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
+      var qty   = vs.quantity || 0;
+      var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
+      var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+      return '<div style="padding:5px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
+        + '<span style="font-weight:500;">' + opts + '</span>'
+        + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
+        + (qty === 0 ? ' ⚠️' : '') + '</div>';
+    }).join('');
+
+    cont.innerHTML = '<div style="display:flex;flex-wrap:wrap;gap:4px;">' + chips + '</div>';
+  } catch (e) {
+    cont.innerHTML = '<span style="font-size:12px;color:#ef4444;">Failed to load variants.</span>';
+  }
+}
+window.toggleInvVariantRow = toggleInvVariantRow;
 
 async function loadInventory() {
   try {
