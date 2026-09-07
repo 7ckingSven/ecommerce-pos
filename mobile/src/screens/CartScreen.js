@@ -13,6 +13,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 export default function CartScreen({ navigation }) {
   const [cart,       setCart]       = useState([]);
   const [loading,    setLoading]    = useState(true);
+  const [error,      setError]      = useState(false);
   const [loggedIn,   setLoggedIn]   = useState(false);
   const [selected,   setSelected]   = useState({});
   const [editItem,   setEditItem]   = useState(null);
@@ -72,7 +73,7 @@ export default function CartScreen({ navigation }) {
       refreshCartCount();
     } catch (e) {
       console.error('Cart error:', e);
-      Alert.alert('Error', 'Failed to load cart. Please try again.');
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -196,7 +197,19 @@ export default function CartScreen({ navigation }) {
         )}
       </View>
 
-      {cart.length === 0 ? (
+      {error ? (
+        <View style={styles.emptyWrap}>
+          <Feather name="wifi-off" size={56} color={COLORS.grayLight}/>
+          <Text style={styles.emptyTitle}>Connection Error</Text>
+          <Text style={styles.emptyText}>Could not load your cart. Please check your internet connection.</Text>
+          <TouchableOpacity
+            style={[styles.checkoutBtn, { marginTop: 16 }]}
+            onPress={() => { setError(false); setLoading(true); loadCart(); }}
+          >
+            <Text style={styles.checkoutBtnText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
+      ) : cart.length === 0 ? (
         <View style={styles.emptyWrap}>
           <Feather name="shopping-cart" size={56} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Your cart is empty</Text>

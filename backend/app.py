@@ -1362,11 +1362,11 @@ def admin_update_purchase_order(po_id):
 
 # ─── Email OTP Helper ─────────────────────────────────
 def send_otp_email(recipient_email, otp):
-    try:
-        msg = Message(
-            subject    = 'Your OTP — Triple E & Fiel Collins',
-            recipients = [recipient_email],
-            body       = f"""Hello,
+    import time
+    msg = Message(
+        subject    = 'Your OTP — Triple E & Fiel Collins',
+        recipients = [recipient_email],
+        body       = f"""Hello,
 
 Your One-Time Password (OTP) for password reset is:
 
@@ -1376,12 +1376,17 @@ This code expires in 5 minutes.
 Do not share this with anyone.
 
 — Triple E & Fiel Collins General Merchandise"""
-        )
-        mail.send(msg)
-        return True
-    except Exception as e:
-        print(f'Email error: {e}')
-        return False
+    )
+    for attempt in range(3):
+        try:
+            mail.send(msg)
+            return True
+        except Exception as e:
+            print(f'Email error (attempt {attempt+1}): {e}')
+            if attempt < 2:
+                time.sleep(1)
+            continue
+    return False
 
 # ══════════════════════════════════════════════════════
 # FORGOT PASSWORD — GMAIL OTP ROUTES (Mobile)
