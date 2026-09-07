@@ -2572,6 +2572,8 @@ function updatePOTotal() {
 }
 
 async function submitCreatePO() {
+  const createBtn = document.querySelector('#createPOModal .btn-solid-green');
+  if (createBtn) { setButtonLoading(createBtn, true); }
   const supplier = document.getElementById('poSupplier').value.trim();
   const note     = document.getElementById('poNote').value.trim();
   if (!supplier) { showToast('Supplier name is required.', 'error'); return; }
@@ -2761,19 +2763,35 @@ function openPODetail(poId) {
       <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
       <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
   } else if (po.status === 'ordered') {
-    const branchOptions = allBranches.map(b =>
-      `<option value="${b.branch_id}">${b.branch_name}</option>`
+    const branchChecks = allBranches.map(b =>
+      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
+        <input type="checkbox" id="branchChk_${b.branch_id}" value="${b.branch_id}" checked
+          style="width:15px;height:15px;cursor:pointer;accent-color:var(--g-400);"
+          onchange="document.getElementById('branchQty_${b.branch_id}').disabled=!this.checked;"/>
+        <label for="branchChk_${b.branch_id}" style="font-size:13px;font-weight:500;min-width:130px;cursor:pointer;">${b.branch_name}</label>
+        <input type="number" id="branchQty_${b.branch_id}" min="0" value="0"
+          style="width:70px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;"/>
+        <span style="font-size:11px;color:var(--text-muted);">units</span>
+      </div>`
     ).join('');
     footer.innerHTML += `
-      <select id="poReceiveBranch" class="filter-select" style="font-size:12px;">
-        <option value="">Select branch to receive stock</option>
-        ${branchOptions}
-      </select>
-      <button class="btn btn-solid-green" onclick="
-        const branchId = document.getElementById('poReceiveBranch').value;
-        if (!branchId) { showToast('Please select a branch.', 'error'); return; }
-        updatePOStatus('${poId}', 'received', branchId)
-      ">Mark as Received ✓</button>`;
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;min-width:280px;">
+        <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">📦 Distribute Stock to Branches</div>
+        ${branchChecks}
+        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Check branches and enter quantity for each.</div>
+      </div>
+      <button id="markReceivedBtn" class="btn btn-solid-green" onclick="
+        var branches = [];
+        allBranches.forEach(function(b) {
+          var chk = document.getElementById('branchChk_' + b.branch_id);
+          var qty = parseInt(document.getElementById('branchQty_' + b.branch_id)?.value || '0');
+          if (chk && chk.checked && qty > 0) branches.push({ branch_id: b.branch_id, quantity: qty });
+        });
+        if (!branches.length) { showToast('Please select at least one branch and enter quantity.', 'error'); return; }
+        var btn = document.getElementById('markReceivedBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+        updatePOStatus('${poId}', 'received', null, branches);
+      ">Mark as Received ✓</button>`
   }
 
   document.getElementById('poDetailModalOverlay')?.classList.add('open');
@@ -2785,15 +2803,17 @@ function closePODetailModal() {
   document.getElementById('poDetailModal')?.classList.remove('open');
 }
 
-async function updatePOStatus(poId, status, branchId = null) {
+async function updatePOStatus(poId, status, branchId = null, branches = null) {
   const po = allPOs.find(p => p.po_id === poId);
+  const activeBtn = document.getElementById(status === 'received' ? 'markReceivedBtn' : 'markOrderedBtn');
   try {
     const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId }),
+      body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId, branches: branches }),
     });
     if (res.ok) {
+      if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = status === 'received' ? 'Mark as Received ✓' : 'Mark as Ordered'; }
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
       loadPurchaseOrders();
@@ -2808,7 +2828,7 @@ async function updatePOStatus(poId, status, branchId = null) {
       const err = await res.json();
       showToast(err.error || 'Failed to update PO.', 'error');
     }
-  } catch (e) { showToast('Error.', 'error'); }
+  } catch (e) { if (createBtn) { setButtonLoading(createBtn, false); } showToast('Error.', 'error'); }
 }
 
 

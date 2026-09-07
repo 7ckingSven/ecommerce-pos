@@ -204,7 +204,6 @@ def forgot_password():
             
             # Generate a 6-digit OTP
             otp = ''.join(random.choices(string.digits, k=6))
-            print(f"DEBUG: Generated OTP {otp} for email {email}")
             
             # Store OTP in session (expires on redirect to verify-otp page)
             session['otp_code'] = otp
@@ -245,7 +244,6 @@ def forgot_password():
                     '''
                 )
                 mail.send(msg)
-                print(f"DEBUG: OTP email sent successfully to {email}")
             except Exception as email_error:
                 print(f"WARNING: Failed to send email: {email_error}")
                 # Continue even if email fails - user can see OTP in console logs for testing
@@ -310,7 +308,6 @@ def verify_otp():
                 'password': hashed
             }).eq('user_id', user_id).execute()
             
-            print(f"DEBUG: Password reset successfully for user_id {user_id} (email: {email})")
             
             # Clear OTP session variables
             session.pop('otp_code', None)
@@ -865,19 +862,12 @@ def set_variant_stock():
             return jsonify({'error': 'product_id, branch_id and options are required'}), 400
 
         # Upsert variant stock
-        existing = supabase.table('variant_stock').select('id, quantity').eq('product_id', product_id).eq('branch_id', branch_id).eq('options', options).execute()
-        if existing.data:
-            supabase.table('variant_stock').update({
-                'quantity':   quantity,
-                'updated_at': 'now()'
-            }).eq('id', existing.data[0]['id']).execute()
+        all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+        match = [v for v in (all_vs.data or []) if v.get('options') == options]
+        if match:
+            supabase.table('variant_stock').update({'quantity': quantity, 'updated_at': 'now()'}).eq('id', match[0]['id']).execute()
         else:
-            supabase.table('variant_stock').insert({
-                'product_id': product_id,
-                'branch_id':  branch_id,
-                'options':    options,
-                'quantity':   quantity,
-            }).execute()
+            supabase.table('variant_stock').insert({'product_id': product_id, 'branch_id': branch_id, 'options': options, 'quantity': quantity}).execute()
 
         # Auto-activate product if total branch_stock >= 1
         try:
@@ -903,12 +893,11 @@ def check_variant_stock():
         if not product_id or not options:
             return jsonify({'quantity': 0}), 200
 
-        query = supabase.table('variant_stock').select('quantity').eq('product_id', product_id).eq('options', options)
+        query = supabase.table('variant_stock').select('quantity, options').eq('product_id', product_id)
         if branch_id:
             query = query.eq('branch_id', branch_id)
         res = query.execute()
-
-        total = sum(v['quantity'] for v in (res.data or []))
+        total = sum(v['quantity'] for v in (res.data or []) if v.get('options') == options)
         return jsonify({'quantity': total}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -1293,63 +1282,75 @@ def admin_update_purchase_order(po_id):
 
         # If received → add stock for each item to branch_stock
         if status == 'received':
-            po_branch_id = data.get('branch_id')  # branch admin selected
+            po_branch_id = data.get('branch_id')  # legacy single branch
+            branches     = data.get('branches', [])  # new: [{branch_id, quantity}]
             items_res = supabase.table('po_item').select(
-                '*, product(quantity)'
+                '*, product(quantity), variant_options'
             ).eq('po_id', po_id).execute()
-            for item in items_res.data:
-                product    = item.get('product') or {}
-                qty_added  = item['quantity']
 
-                if po_branch_id:
-                    # Update branch_stock for selected branch
-                    bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', item['product_id']).eq('branch_id', po_branch_id).execute()
+            # Build branch list to process
+            import time
+            if branches:
+                branch_list = [(b['branch_id'], int(b['quantity'])) for b in branches if b.get('branch_id') and int(b.get('quantity', 0)) > 0]
+            elif po_branch_id:
+                branch_list = [(po_branch_id, None)]
+            else:
+                branch_list = []
+
+            for item in items_res.data:
+                product         = item.get('product') or {}
+                variant_options = item.get('variant_options')
+                item_qty        = item['quantity']
+
+                for (b_id, b_qty) in branch_list:
+                    qty_added = b_qty if b_qty is not None else item_qty
+
+                    # Update branch_stock
+                    bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', item['product_id']).eq('branch_id', b_id).execute()
                     if bs_res.data:
                         qty_before = bs_res.data[0]['quantity']
                         qty_after  = qty_before + qty_added
-                        supabase.table('branch_stock').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', item['product_id']).eq('branch_id', po_branch_id).execute()
+                        supabase.table('branch_stock').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', item['product_id']).eq('branch_id', b_id).execute()
                     else:
                         qty_before = 0
                         qty_after  = qty_added
-                        supabase.table('branch_stock').insert({'product_id': item['product_id'], 'branch_id': po_branch_id, 'quantity': qty_added}).execute()
-                else:
-                    qty_before = product.get('quantity', 0)
-                    qty_after  = qty_before + qty_added
-                    # Update product quantity as fallback
-                    supabase.table('product').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', item['product_id']).execute()
+                        supabase.table('branch_stock').insert({'product_id': item['product_id'], 'branch_id': b_id, 'quantity': qty_added}).execute()
 
-                # Log to inventory — to_branch_id is optional
-                supabase.table('inventory').insert({
-                    'product_id':      item['product_id'],
-                    'staff_id':        session.get('staff_id'),
-                    'quantity_added':  qty_added,
-                    'quantity_before': qty_before,
-                    'quantity_after':  qty_after,
-                    'to_branch_id':    po_branch_id,
-                    'note':            f'PO received — {data.get("po_number", po_id)}',
-                }).execute()
+                    # Log to inventory
+                    supabase.table('inventory').insert({
+                        'product_id':      item['product_id'],
+                        'staff_id':        session.get('staff_id'),
+                        'quantity_added':  qty_added,
+                        'quantity_before': qty_before,
+                        'quantity_after':  qty_after,
+                        'to_branch_id':    b_id,
+                        'note':            f'PO received — {data.get("po_number", po_id)}',
+                    }).execute()
 
-                # Update variant_stock if item has variant_options
-                variant_options = item.get('variant_options')
-                if variant_options and po_branch_id:
+                    # Update variant_stock if item has variant_options
+                    if variant_options and b_id:
+                        try:
+                            time.sleep(0.05)
+                            all_vs_po = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', item['product_id']).eq('branch_id', b_id).execute()
+                            match_po = [v for v in (all_vs_po.data or []) if v.get('options') == variant_options]
+                            if match_po:
+                                supabase.table('variant_stock').update({'quantity': match_po[0]['quantity'] + qty_added, 'updated_at': 'now()'}).eq('id', match_po[0]['id']).execute()
+                            else:
+                                supabase.table('variant_stock').insert({'product_id': item['product_id'], 'branch_id': b_id, 'options': variant_options, 'quantity': qty_added}).execute()
+                        except Exception as vs_err:
+                            print(f'Variant stock PO update warning: {vs_err}')
+
+                    # Auto-activate product if total branch stock >= 1
                     try:
-                        existing_vs = supabase.table('variant_stock').select('id, quantity').eq('product_id', item['product_id']).eq('branch_id', po_branch_id).eq('options', variant_options).execute()
-                        if existing_vs.data:
-                            new_vs_qty = existing_vs.data[0]['quantity'] + qty_added
-                            supabase.table('variant_stock').update({'quantity': new_vs_qty, 'updated_at': 'now()'}).eq('id', existing_vs.data[0]['id']).execute()
-                        else:
-                            supabase.table('variant_stock').insert({'product_id': item['product_id'], 'branch_id': po_branch_id, 'options': variant_options, 'quantity': qty_added}).execute()
-                    except Exception as vs_err:
-                        print(f'Variant stock PO update warning: {vs_err}')
-
-                # Auto-activate product if total branch stock >= 1
-                try:
-                    all_bs = supabase.table('branch_stock').select('quantity').eq('product_id', item['product_id']).execute()
-                    total_stock = sum(bs['quantity'] for bs in (all_bs.data or []))
-                    if total_stock >= 1:
-                        supabase.table('product').update({'status': 'active'}).eq('product_id', item['product_id']).execute()
-                except Exception as act_err:
-                    print(f'Auto-activate warning: {act_err}')
+                        time.sleep(0.1)
+                        all_bs = supabase.table('branch_stock').select('quantity').eq('product_id', item['product_id']).execute()
+                        if all_bs.data:
+                            total_stock = sum(bs['quantity'] for bs in all_bs.data)
+                            if total_stock >= 1:
+                                time.sleep(0.1)
+                                supabase.table('product').update({'status': 'active'}).eq('product_id', item['product_id']).execute()
+                    except Exception as act_err:
+                        print(f'Auto-activate warning: {act_err}')
 
         return jsonify({'message': f'PO status updated to {status}.'}), 200
     except Exception as e:
@@ -2003,10 +2004,10 @@ def admin_add_inventory():
         variant_options = data.get('variant_options', {})
         if variant_options and to_branch_id:
             try:
-                existing = supabase.table('variant_stock').select('id, quantity').eq('product_id', product_id).eq('branch_id', to_branch_id).eq('options', variant_options).execute()
-                if existing.data:
-                    new_qty = existing.data[0]['quantity'] + quantity
-                    supabase.table('variant_stock').update({'quantity': new_qty, 'updated_at': 'now()'}).eq('id', existing.data[0]['id']).execute()
+                all_vs_inv = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+                match_inv = [v for v in (all_vs_inv.data or []) if v.get('options') == variant_options]
+                if match_inv:
+                    supabase.table('variant_stock').update({'quantity': match_inv[0]['quantity'] + quantity, 'updated_at': 'now()'}).eq('id', match_inv[0]['id']).execute()
                 else:
                     supabase.table('variant_stock').insert({'product_id': product_id, 'branch_id': to_branch_id, 'options': variant_options, 'quantity': quantity}).execute()
             except Exception as vs_err:

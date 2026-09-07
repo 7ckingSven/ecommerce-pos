@@ -108,8 +108,9 @@ export default function CartScreen({ navigation }) {
   // ─── Quantity Update ──────────────────────────────────
   async function handleUpdateQty(cartId, qty, maxStock) {
     if (qty < 1) { handleRemove(cartId); return; }
-    if (maxStock && qty > maxStock) {
-      Alert.alert('Maximum Stock', `Only ${maxStock} unit(s) available.`);
+    const limit = maxStock != null ? Number(maxStock) : null;
+    if (limit !== null && limit > 0 && qty > limit) {
+      Alert.alert('Maximum Stock', `Only ${limit} unit(s) available.`);
       return;
     }
     try {
