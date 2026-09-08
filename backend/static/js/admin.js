@@ -1718,8 +1718,25 @@ async function updateOrderStatus(id, status) {
   } catch (e) { showToast('Error updating status.', 'error'); }
 }
 
+let adminOrderTypeFilter   = '';
+let adminOrderStatusFilter = '';
+
 function filterOrders(type) {
-  renderOrders(type ? allOrders.filter(o => o.order_type === type) : allOrders);
+  adminOrderTypeFilter = type;
+  applyAdminOrderFilters();
+}
+
+function filterOrderStatus(status) {
+  adminOrderStatusFilter = status;
+  applyAdminOrderFilters();
+}
+
+function applyAdminOrderFilters() {
+  let filtered = allOrders;
+  if (adminOrderTypeFilter)   filtered = filtered.filter(o => o.order_type === adminOrderTypeFilter);
+  if (adminOrderStatusFilter) filtered = filtered.filter(o => o.status === adminOrderStatusFilter);
+  ordersPage = 1;
+  renderOrders(filtered);
 }
 
 function filterOrderStatus(status) {

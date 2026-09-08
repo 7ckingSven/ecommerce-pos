@@ -1150,10 +1150,6 @@ function viewStaffOrderItems(order) {
 }
 
 
-function filterStaffOrders(status) {
-  renderStaffOrders(status ? staffOrders.filter(o => o.status === status) : staffOrders);
-}
-
 async function loadOrders() {
   try {
     const res  = await fetch('/api/staff/orders?limit=50');
@@ -1319,9 +1315,27 @@ function viewStaffOrderItems(order) {
 }
 
 
-function filterStaffOrders(status) {
-  renderStaffOrders(status ? staffOrders.filter(o => o.status === status) : staffOrders);
+let staffOrderTypeFilter   = '';
+let staffOrderStatusFilter = '';
+
+function filterStaffOrderType(type) {
+  staffOrderTypeFilter = type;
+  applyStaffOrderFilters();
 }
+
+function filterStaffOrders(status) {
+  staffOrderStatusFilter = status;
+  applyStaffOrderFilters();
+}
+
+function applyStaffOrderFilters() {
+  let filtered = staffOrders;
+  if (staffOrderTypeFilter)   filtered = filtered.filter(o => o.order_type === staffOrderTypeFilter);
+  if (staffOrderStatusFilter) filtered = filtered.filter(o => o.status === staffOrderStatusFilter);
+  staffOrdersPage = 1;
+  renderStaffOrders(filtered);
+}
+window.filterStaffOrderType = filterStaffOrderType;
 
 async function updateOrderStatus(id, status) {
   try {
