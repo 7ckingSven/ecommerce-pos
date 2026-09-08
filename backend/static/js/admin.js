@@ -1148,7 +1148,12 @@ function renderInventory(data) {
         return `
         <tr>
           <td><span style="background:${type.bg};color:${type.color};border-radius:999px;padding:3px 10px;font-size:11px;font-weight:700;white-space:nowrap;">${type.icon} ${type.label}</span></td>
-          <td><strong>${i.product?.product_name || '—'}</strong></td>
+          <td>
+            <strong>${i.product?.product_name || '—'}</strong>
+            ${i.variant_options && Object.keys(i.variant_options).length > 0
+              ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + Object.entries(i.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+              : ''}
+          </td>
           <td>${i.staff ? `${i.staff.fname} ${i.staff.lname}` : '—'}</td>
           <td>${qtyDisplay}</td>
           <td>${i.quantity_before}</td>

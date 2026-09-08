@@ -999,6 +999,7 @@ def api_place_order():
                         'quantity_before': qty_before,
                         'quantity_after':  qty_after,
                         'to_branch_id':    branch_id,
+                        'variant_options': opts if opts else None,
                         'note':            f'Sale — Order #{order_id[:8].upper()}',
                     }).execute()
                 except Exception as log_err:
@@ -1035,6 +1036,7 @@ def api_place_order():
                         'quantity_before': qty_before,
                         'quantity_after':  qty_after,
                         'to_branch_id':    branch_id,
+                        'variant_options': opts if opts else None,
                         'note':            f'Sale — Order #{order_id[:8].upper()}',
                     }).execute()
                 except Exception as log_err:
@@ -1389,6 +1391,7 @@ def admin_update_purchase_order(po_id):
                         'quantity_before': qty_before,
                         'quantity_after':  qty_after,
                         'to_branch_id':    b_id,
+                        'variant_options': variant_options if variant_options else None,
                         'note':            f'PO received — {data.get("po_number", po_id)}',
                     }).execute()
 
@@ -2506,6 +2509,7 @@ def staff_place_order():
                     'quantity_before': qty_before,
                     'quantity_after':  qty_after,
                     'to_branch_id':    branch_id,
+                    'variant_options': selected_options if selected_options else None,
                     'note':            f'Sale — Order #{order_id[:8].upper()}',
                 }).execute()
             except Exception as log_err:
@@ -2586,7 +2590,7 @@ def staff_get_inventory():
         branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
 
         query = supabase.table('inventory').select(
-            '*, product(product_name, category), from_branch:branch!from_branch_id(branch_name), to_branch:branch!to_branch_id(branch_name)'
+            '*, product(product_name, category), variant_options, from_branch:branch!from_branch_id(branch_name), to_branch:branch!to_branch_id(branch_name)'
         )
 
         # Filter to records involving this branch (as source or destination)

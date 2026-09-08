@@ -817,7 +817,12 @@ function renderInvHistory(data) {
   document.getElementById('invHistoryBody').innerHTML = paged.length
     ? paged.map(i => `
           <tr>
-            <td>${i.product?.product_name || '—'}</td>
+            <td>
+              ${i.product?.product_name || '—'}
+              ${i.variant_options && Object.keys(i.variant_options).length > 0
+                ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + Object.entries(i.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+                : ''}
+            </td>
             <td><strong style="color:${Number(i.quantity_added) >= 0 ? 'var(--g-400)' : '#ef4444'};">
               ${Number(i.quantity_added) >= 0 ? '+' : ''}${i.quantity_added}
             </strong></td>
