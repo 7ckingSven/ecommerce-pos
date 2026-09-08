@@ -16,7 +16,8 @@ export default function CartScreen({ navigation }) {
   const [error,      setError]      = useState(false);
   const [loggedIn,   setLoggedIn]   = useState(false);
   const [selected,   setSelected]   = useState({});
-  const [editItem,   setEditItem]   = useState(null);
+  const [editItem,          setEditItem]          = useState(null);
+  const [variantWarnings,   setVariantWarnings]   = useState({});
   const [editOptions,setEditOptions]= useState({}); // { cart_id: true/false }
 
   const { refreshCartCount } = useCart();
