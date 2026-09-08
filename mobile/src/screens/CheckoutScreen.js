@@ -29,6 +29,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const [loading,       setLoading]       = useState(false);
   const [shippingFee,   setShippingFee]   = useState(0);
   const [orderLoading,  setOrderLoading]  = useState(false);
+  const isSubmitting = React.useRef(false); // prevent double order
   const [profileLoading,setProfileLoading]= useState(true);
   const [address,       setAddress]       = useState('');
   const [customerName,  setCustomerName]  = useState('');
@@ -234,13 +235,14 @@ export default function CheckoutScreen({ route, navigation }) {
 
   // ─── Place Order ──────────────────────────────────────
   async function handlePlaceOrder() {
-    if (orderLoading) return;
+    if (orderLoading || isSubmitting.current) return;
     setOrderLoading(true);
     if (!address.trim()) {
       Alert.alert('Address Required', 'Please add a delivery address before placing your order.', [
         { text: 'Add Address', onPress: openAddressModal },
         { text: 'Cancel' }
       ]);
+      setOrderLoading(false);
       return;
     }
 
@@ -258,10 +260,11 @@ export default function CheckoutScreen({ route, navigation }) {
           setSenderError('Sender number must be 11 digits starting with 09.');
           hasError = true;
         } else { setSenderError(''); }
-        if (hasError) return;
+        if (hasError) { setOrderLoading(false); return; }
       } else {
         if (!receiptImage) {
           Alert.alert('Required', 'Please upload your GCash receipt image.');
+          setOrderLoading(false);
           return;
         }
       }
@@ -271,10 +274,12 @@ export default function CheckoutScreen({ route, navigation }) {
       'Confirm Order',
       `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nGrand Total: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}\nDeliver to: ${address.split('|').map(s=>s.trim()).filter(Boolean).join(', ')}`,
       [
-        { text: 'Cancel' },
+        { text: 'Cancel', onPress: () => setOrderLoading(false) },
         {
           text: 'Confirm',
           onPress: async () => {
+            if (isSubmitting.current) return;
+            isSubmitting.current = true;
             setLoading(true);
             try {
               const items = cartItems.map(i => {
@@ -324,6 +329,8 @@ export default function CheckoutScreen({ route, navigation }) {
               Alert.alert('Error', msg);
             } finally {
               setLoading(false);
+              setOrderLoading(false);
+              isSubmitting.current = false;
             }
           }
         }
