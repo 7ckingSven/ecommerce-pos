@@ -1967,7 +1967,7 @@ def admin_delete_product(product_id):
 def admin_get_inventory():
     try:
         res = supabase.table('inventory').select(
-            '*, product(product_name, category), staff(fname, lname), from_branch:branch!from_branch_id(branch_name), to_branch:branch!to_branch_id(branch_name)'
+            '*, variant_options, product(product_name, category), staff(fname, lname), from_branch:branch!from_branch_id(branch_name), to_branch:branch!to_branch_id(branch_name)'
         ).order('date', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
