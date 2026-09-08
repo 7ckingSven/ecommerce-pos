@@ -1,7 +1,8 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-let invPage           = 1;
-let ordersPage        = 1;
+let invPage              = 1;
+let ordersPage           = 1;
+let inventoryTypeFilterVal = '';
 let branchStockPage   = 1;
 let allBranchProducts = [];
 
@@ -176,6 +177,23 @@ function toggleTheme() {
   const saved = localStorage.getItem('theme');
   if (saved) document.documentElement.setAttribute('data-theme', saved);
 })();
+
+
+// ─── Topbar Date ──────────────────────────────────────
+function updateTopbarDate() {
+  const el = document.getElementById('topbarDate');
+  if (!el) return;
+  const now = new Date();
+  el.textContent = now.toLocaleDateString('en-PH', {
+    timeZone: 'Asia/Manila',
+    weekday: 'short',
+    year:    'numeric',
+    month:   'long',
+    day:     'numeric',
+  });
+}
+updateTopbarDate();
+setInterval(updateTopbarDate, 60000);
 
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {
@@ -1081,13 +1099,28 @@ function getMovementType(i) {
     return { label: 'Adjustment', color: '#ef4444', icon: '↓', bg: 'rgba(239,68,68,0.1)' };
   if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id))
     return { label: 'Transfer', color: '#3b82f6', icon: '⇄', bg: 'rgba(59,130,246,0.1)' };
+  if (note.includes('sale') || note.includes('order #') || note.includes('sold'))
+    return { label: 'Sale', color: '#f59e0b', icon: '🛒', bg: 'rgba(245,158,11,0.1)' };
   if (qty > 0)
     return { label: 'Restock', color: 'var(--g-400)', icon: '↑', bg: 'rgba(22,163,74,0.1)' };
+  if (qty < 0)
+    return { label: 'Deduction', color: '#ef4444', icon: '↓', bg: 'rgba(239,68,68,0.1)' };
   return { label: 'Other', color: '#9ca3af', icon: '•', bg: 'rgba(107,114,128,0.1)' };
 }
 
+function filterInventoryType(val) {
+  inventoryTypeFilterVal = val;
+  invPage = 1;
+  renderInventory(allInventory);
+}
+window.filterInventoryType = filterInventoryType;
+
 function renderInventory(data) {
-  const paged = paginate(data, invPage);
+  allInventory = data;
+  const filteredInv = inventoryTypeFilterVal
+    ? data.filter(i => getMovementType(i).label.toLowerCase().includes(inventoryTypeFilterVal))
+    : data;
+  const paged = paginate(filteredInv, invPage);
   // Update stats
   const restocks    = data.filter(i => getMovementType(i).label === 'Restock');
   const transfers   = data.filter(i => getMovementType(i).label === 'Transfer');
@@ -1127,7 +1160,7 @@ function renderInventory(data) {
         </tr>`;
       }).join('')
     : '<tr><td colspan="10" class="table-empty">No inventory records found</td></tr>';
-  renderPager('invPagination', data.length, invPage, 'changeInvPage');
+  renderPager('invPagination', filteredInv.length, invPage, 'changeInvPage');
 }
 
 function filterInventorySearch(q) {
@@ -1300,6 +1333,68 @@ function closeTransferModal() {
   document.getElementById('transferModalOverlay')?.classList.remove('open');
   document.getElementById('transferModal')?.classList.remove('open');
   document.getElementById('transferForm')?.reset();
+  const tvw = document.getElementById('transferVariantWrap'); if (tvw) tvw.style.display = 'none';
+}
+
+
+function loadTransferVariants(productId) {
+  const wrap = document.getElementById('transferVariantWrap');
+  const cont = document.getElementById('transferVariantSelects');
+  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  const product = allProducts?.find(p => p.product_id === productId);
+  const groups  = product?.option_groups || [];
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:120px;">
+      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="transferVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
+        <option value="">All (no variant)</option>
+        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
+function getTransferVariantOptions() {
+  const cont = document.getElementById('transferVariantSelects');
+  if (!cont) return {};
+  const opts = {};
+  cont.querySelectorAll('select').forEach(sel => {
+    const label = sel.id.replace('transferVariantOpt_', '').replace(/_/g, ' ');
+    if (sel.value) opts[label] = sel.value;
+  });
+  return Object.keys(opts).length > 0 ? opts : {};
+}
+
+function loadAdjustVariants(productId) {
+  const wrap = document.getElementById('adjustVariantWrap');
+  const cont = document.getElementById('adjustVariantSelects');
+  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  const product = allProducts?.find(p => p.product_id === productId);
+  const groups  = product?.option_groups || [];
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:120px;">
+      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="adjustVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
+        <option value="">All (no variant)</option>
+        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
+function getAdjustVariantOptions() {
+  const cont = document.getElementById('adjustVariantSelects');
+  if (!cont) return {};
+  const opts = {};
+  cont.querySelectorAll('select').forEach(sel => {
+    const label = sel.id.replace('adjustVariantOpt_', '').replace(/_/g, ' ');
+    if (sel.value) opts[label] = sel.value;
+  });
+  return Object.keys(opts).length > 0 ? opts : {};
 }
 
 async function submitTransfer(e) {
@@ -1307,11 +1402,13 @@ async function submitTransfer(e) {
   const fromId = document.getElementById('transferFrom').value;
   const toId   = document.getElementById('transferTo').value;
   if (fromId === toId) { showToast('From and To branch must be different.', 'error'); return; }
+  const transferVariantOpts = getTransferVariantOptions();
   const data = {
-    product_id:     document.getElementById('transferProduct').value,
-    quantity:       parseInt(document.getElementById('transferQty').value),
-    from_branch_id: fromId,
-    to_branch_id:   toId,
+    product_id:      document.getElementById('transferProduct').value,
+    quantity:        parseInt(document.getElementById('transferQty').value),
+    from_branch_id:  fromId,
+    to_branch_id:    toId,
+    variant_options: Object.keys(transferVariantOpts).length ? transferVariantOpts : null,
     note:           document.getElementById('transferNote').value || 'Stock transfer',
     type:           'transfer',
   };
@@ -1358,15 +1455,17 @@ function closeAdjustModal() {
   document.getElementById('adjustModalOverlay')?.classList.remove('open');
   document.getElementById('adjustModal')?.classList.remove('open');
   document.getElementById('adjustForm')?.reset();
+  const avw = document.getElementById('adjustVariantWrap'); if (avw) avw.style.display = 'none';
 }
 
 async function submitAdjust(e) {
   e.preventDefault();
-  const productId = document.getElementById('adjustProduct').value;
-  const qty       = parseInt(document.getElementById('adjustQty').value);
-  const reason    = document.getElementById('adjustReason').value;
-  const branchId  = document.getElementById('adjustBranch').value;
-  const note      = document.getElementById('adjustNote').value;
+  const productId       = document.getElementById('adjustProduct').value;
+  const qty             = parseInt(document.getElementById('adjustQty').value);
+  const reason          = document.getElementById('adjustReason').value;
+  const branchId        = document.getElementById('adjustBranch').value;
+  const note            = document.getElementById('adjustNote').value;
+  const adjustVariantOpts = getAdjustVariantOptions();
 
   // Find current stock — check branch-level stock if branchId is set
   const product = allProducts.find(p => p.product_id === productId);
@@ -1381,11 +1480,12 @@ async function submitAdjust(e) {
   }
 
   const data = {
-    product_id:     productId,
-    quantity:       -qty, // negative = deduction
-    to_branch_id:   branchId,
-    note:           `[${reason.toUpperCase()}] ${note || reason}`,
-    type:           'adjustment',
+    product_id:      productId,
+    quantity:        -qty,
+    to_branch_id:    branchId,
+    note:            `[${reason.toUpperCase()}] ${note || reason}`,
+    type:            'adjustment',
+    variant_options: Object.keys(adjustVariantOpts).length ? adjustVariantOpts : null,
   };
 
   try {

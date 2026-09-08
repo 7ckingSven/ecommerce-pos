@@ -1,7 +1,8 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-let staffOrdersPage  = 1;
-let staffInvPage     = 1;
+let staffOrdersPage       = 1;
+let staffInvPage          = 1;
+let staffHistoryTypeFilterVal = '';
 let staffHistoryPage = 1;
 let allInvHistory    = [];
 
@@ -174,6 +175,23 @@ function toggleTheme() {
   const saved = localStorage.getItem('theme');
   if (saved) document.documentElement.setAttribute('data-theme', saved);
 })();
+
+
+// ─── Topbar Date ──────────────────────────────────────
+function updateTopbarDate() {
+  const el = document.getElementById('topbarDate');
+  if (!el) return;
+  const now = new Date();
+  el.textContent = now.toLocaleDateString('en-PH', {
+    timeZone: 'Asia/Manila',
+    weekday: 'short',
+    year:    'numeric',
+    month:   'long',
+    day:     'numeric',
+  });
+}
+updateTopbarDate();
+setInterval(updateTopbarDate, 60000);
 
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {
@@ -772,23 +790,57 @@ function printReceipt() {
 // INVENTORY
 // ══════════════════════════════════════════════════════
 
+function getStaffMovementType(i) {
+  const note = (i.note || '').toLowerCase();
+  const qty  = Number(i.quantity_added);
+  if (note.includes('sale') || note.includes('order #')) return 'sale';
+  if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id)) return 'transfer';
+  if (note.includes('[loss]') || note.includes('[damaged]') || note.includes('adjustment')) return 'adjustment';
+  if (qty > 0) return 'restock';
+  if (qty < 0) return 'deduction';
+  return 'other';
+}
+
+function filterStaffHistoryType(val) {
+  staffHistoryTypeFilterVal = val;
+  staffHistoryPage = 1;
+  renderInvHistory(allInvHistory);
+}
+window.filterStaffHistoryType = filterStaffHistoryType;
+
 function renderInvHistory(data) {
   allInvHistory = data;
-  const paged = paginate(data, staffHistoryPage);
+  const filteredHist = staffHistoryTypeFilterVal
+    ? data.filter(i => getStaffMovementType(i) === staffHistoryTypeFilterVal)
+    : data;
+  const paged = paginate(filteredHist, staffHistoryPage);
   document.getElementById('invHistoryBody').innerHTML = paged.length
     ? paged.map(i => `
           <tr>
             <td>${i.product?.product_name || '—'}</td>
-            <td><strong style="color:var(--g-400);">+${i.quantity_added}</strong></td>
+            <td><strong style="color:${Number(i.quantity_added) >= 0 ? 'var(--g-400)' : '#ef4444'};">
+              ${Number(i.quantity_added) >= 0 ? '+' : ''}${i.quantity_added}
+            </strong></td>
             <td>${i.quantity_before}</td>
             <td>${i.quantity_after}</td>
             <td>${i.from_branch?.branch_name || '—'}</td>
             <td>${i.to_branch?.branch_name   || '—'}</td>
             <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
-            <td style="max-width:200px;font-size:12px;">${i.note || '—'}</td>
+            <td style="max-width:200px;font-size:12px;">
+              ${(() => {
+                const note = (i.note || '').toLowerCase();
+                const qty  = Number(i.quantity_added);
+                if (note.includes('sale') || note.includes('order #'))
+                  return '<span style="background:rgba(245,158,11,0.1);color:#f59e0b;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">🛒 Sale</span>';
+                if (note.includes('po received') || note.includes('restock') || qty > 0)
+                  return '<span style="background:rgba(22,163,74,0.1);color:var(--g-400);border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">↑ Restock</span>';
+                return '';
+              })()}
+              ${i.note || '—'}
+            </td>
           </tr>`).join('')
     : '<tr><td colspan="8" class="table-empty">No inventory records yet</td></tr>';
-  renderPager('staffHistoryPagination', data.length, staffHistoryPage, 'changeStaffHistoryPage');
+  renderPager('staffHistoryPagination', filteredHist.length, staffHistoryPage, 'changeStaffHistoryPage');
 }
 
 async function loadInventory() {
@@ -1290,7 +1342,7 @@ let allSummaryOrders = []; // store all orders for date filtering
 
 async function loadSummary() {
   try {
-    const res    = await fetch('/api/staff/orders?limit=100');
+    const res    = await fetch('/api/staff/orders?limit=1000');
     const raw = await res.json();
     allSummaryOrders = Array.isArray(raw) ? raw : [];
 
@@ -1346,13 +1398,19 @@ function renderSummaryForDate(dateStr) {
     : `<tr><td colspan="7" class="table-empty">No transactions for ${label}</td></tr>`;
 }
 
-function loadSummaryByDate(dateStr) {
+async function loadSummaryByDate(dateStr) {
   if (!dateStr) return;
+  // Re-fetch all orders to ensure we have data for selected date
+  try {
+    const res = await fetch('/api/staff/orders?limit=1000');
+    const raw = await res.json();
+    allSummaryOrders = Array.isArray(raw) ? raw : [];
+  } catch (e) { console.error('Summary fetch error:', e); }
   renderSummaryForDate(dateStr);
 }
 
 function resetSummaryDate() {
-  const today  = new Date().toISOString().split('T')[0];
+  const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
   const picker = document.getElementById('summaryDatePicker');
   if (picker) picker.value = today;
   renderSummaryForDate(today);
