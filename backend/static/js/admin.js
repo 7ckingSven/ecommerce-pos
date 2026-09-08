@@ -1226,7 +1226,8 @@ async function openAddStockModal() {
 
   const branchSel = document.getElementById('addStockBranch');
   if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
-    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('') +
+    '<option value="both">📦 Both Branches</option>';
 
   document.getElementById('addStockModalOverlay')?.classList.add('open');
   document.getElementById('addStockModal')?.classList.add('open');
@@ -1277,12 +1278,22 @@ async function submitAddStock(e) {
   e.preventDefault();
   const addStockBtn = e.submitter || document.querySelector('#addStockForm button[type="submit"]');
   setButtonLoading(addStockBtn, true);
-  const variantOpts = getSelectedVariantOptions();
+  const variantOpts  = getSelectedVariantOptions();
+  const branchVal    = document.getElementById('addStockBranch').value;
+  const productId    = document.getElementById('addStockProduct').value;
+  const quantity     = parseInt(document.getElementById('addStockQty').value);
+  const note         = document.getElementById('addStockNote').value || 'Stock added';
+
+  // If "Both Branches" selected, send two requests
+  const branchIds = branchVal === 'both'
+    ? allBranches.map(b => b.branch_id)
+    : [branchVal];
+
   const data = {
-    product_id:      document.getElementById('addStockProduct').value,
-    quantity:        parseInt(document.getElementById('addStockQty').value),
-    to_branch_id:    document.getElementById('addStockBranch').value,
-    note:            document.getElementById('addStockNote').value || 'Stock added',
+    product_id:      productId,
+    quantity:        quantity,
+    to_branch_id:    branchVal === 'both' ? branchIds[0] : branchVal,
+    note:            note,
     type:            'restock',
     variant_options: variantOpts,
   };
@@ -1292,7 +1303,24 @@ async function submitAddStock(e) {
       body: JSON.stringify(data),
     });
     if (res.ok) {
-      showToast('Stock added successfully!');
+      // If both branches, send second request
+      if (branchVal === 'both' && branchIds.length > 1) {
+        for (let i = 1; i < branchIds.length; i++) {
+          await fetch('/api/admin/inventory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              product_id:      productId,
+              quantity:        quantity,
+              to_branch_id:    branchIds[i],
+              note:            note,
+              type:            'restock',
+              variant_options: variantOpts,
+            }),
+          });
+        }
+      }
+      showToast(branchVal === 'both' ? 'Stock added to both branches!' : 'Stock added successfully!');
       closeAddStockModal();
       loadInventory(); loadProducts();
     } else {
@@ -1445,7 +1473,8 @@ async function openAdjustModal() {
 
   const branchSel = document.getElementById('adjustBranch');
   if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
-    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+    allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('') +
+    '<option value="both">📦 Both Branches</option>';
 
   document.getElementById('adjustModalOverlay')?.classList.add('open');
   document.getElementById('adjustModal')?.classList.add('open');
