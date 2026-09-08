@@ -674,14 +674,19 @@ async function processOrder() {
       const receiptReceived = parseFloat(document.getElementById('posCashReceived').value) || 0;
       const receiptPayment  = selectedPayment;
       const receiptRefNo    = document.getElementById('posGcashRef').value;
+      setButtonLoading(processBtn, false);
       clearOrder();
       loadPosProducts();
+      loadOrders();
+      loadSummary();
       showToast('Order processed successfully!');
       showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo);
     } else {
+      setButtonLoading(processBtn, false);
       showToast(data.error || 'Failed to process order.', 'error');
     }
   } catch (e) {
+    setButtonLoading(processBtn, false);
     showToast('Error processing order.', 'error');
   }
 }
@@ -759,13 +764,13 @@ function showReceipt(data, items, received, payment, refNo) {
       Thank you for shopping!
     </div>`;
 
-  document.getElementById('receiptModalOverlay').classList.add('open');
-  document.getElementById('receiptModal').classList.add('open');
+  document.getElementById('receiptModalOverlay').style.display = 'block';
+  document.getElementById('receiptModal').style.display = 'block';
 }
 
 function closeReceiptModal() {
-  document.getElementById('receiptModalOverlay').classList.remove('open');
-  document.getElementById('receiptModal').classList.remove('open');
+  document.getElementById('receiptModalOverlay').style.display = 'none';
+  document.getElementById('receiptModal').style.display = 'none';
 }
 
 function printReceipt() {
