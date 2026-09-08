@@ -878,7 +878,7 @@
   <!-- Inventory Modal -->
   <!-- Add Stock Modal -->
   <div class="modal-overlay" id="addStockModalOverlay" onclick="closeAddStockModal()"></div>
-  <div class="modal" id="addStockModal">
+  <div class="modal" id="addStockModal" style="max-width:560px;">
     <div class="modal-header">
       <h3 class="modal-title">Add Stock</h3>
       <button class="modal-close" onclick="closeAddStockModal()">
@@ -887,38 +887,28 @@
     </div>
     <div class="modal-body">
       <form id="addStockForm" onsubmit="submitAddStock(event)">
-        <div class="form-group">
-          <label class="form-label">Product <span class="req">*</span></label>
-          <select id="addStockProduct" class="form-input form-select" required onchange="loadAddStockVariants(this.value)">
-            <option value="">Select product</option>
-          </select>
-        </div>
-        <!-- Variant Options (shown only if product has option_groups) -->
-        <div id="addStockVariantWrap" style="display:none;">
-          <div class="form-group">
-            <label class="form-label">Variant <span style="font-size:11px;color:var(--text-muted);">(optional — leave blank for total stock)</span></label>
-            <div id="addStockVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
-          </div>
-        </div>
-        <div class="form-row-2">
-          <div class="form-group">
-            <label class="form-label">Quantity to Add <span class="req">*</span></label>
-            <input type="number" id="addStockQty" class="form-input" min="1" required/>
-          </div>
-          <div class="form-group">
+        <!-- Global Branch + Note -->
+        <div class="form-row-2" style="margin-bottom:12px;">
+          <div class="form-group" style="margin:0;">
             <label class="form-label">To Branch <span class="req">*</span></label>
             <select id="addStockBranch" class="form-input form-select" required>
               <option value="">Select branch</option>
             </select>
           </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Note / Supplier</label>
+            <input type="text" id="addStockNote" class="form-input" placeholder="e.g. Supplier ABC"/>
+          </div>
         </div>
-        <div class="form-group">
-          <label class="form-label">Note / Supplier</label>
-          <textarea id="addStockNote" class="form-input form-textarea" rows="2" placeholder="e.g. Received from supplier ABC..."></textarea>
-        </div>
-        <div class="modal-footer">
+        <!-- Product Items Container -->
+        <div id="addStockItems" style="display:flex;flex-direction:column;gap:10px;max-height:400px;overflow-y:auto;padding-right:4px;"></div>
+        <!-- Add Another Product Button -->
+        <button type="button" onclick="addStockItemRow()" style="margin-top:10px;width:100%;padding:8px;border:1.5px dashed var(--border);border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span style="font-size:18px;">+</span> Add Another Product
+        </button>
+        <div class="modal-footer" style="margin-top:12px;">
           <button type="button" class="btn btn-cancel" onclick="closeAddStockModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Add Stock</button>
+          <button type="submit" class="btn btn-solid-green">Submit All</button>
         </div>
       </form>
     </div>

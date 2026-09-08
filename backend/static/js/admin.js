@@ -1215,28 +1215,88 @@ async function openAddStockModal() {
   if (!allProducts.length) await loadProducts();
   if (!allBranches.length) await loadBranches();
 
-  const sel = document.getElementById('addStockProduct');
-  if (sel) sel.innerHTML = '<option value="">Select product</option>' +
-    allProducts.map(p => {
-      const branchStockLabel = p.branch_stock?.length
-        ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' | ')
-        : `Stock: ${p.quantity}`;
-      return `<option value="${p.product_id}">${p.product_name} (${branchStockLabel})</option>`;
-    }).join('');
-
+  // Populate branch select
   const branchSel = document.getElementById('addStockBranch');
   if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
     allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('') +
     '<option value="both">📦 Both Branches</option>';
 
+  // Clear and add first product row
+  document.getElementById('addStockItems').innerHTML = '';
+  document.getElementById('addStockNote').value = '';
+  addStockItemRow();
+
   document.getElementById('addStockModalOverlay')?.classList.add('open');
   document.getElementById('addStockModal')?.classList.add('open');
 }
+
+let addStockRowCount = 0;
+
+function addStockItemRow() {
+  addStockRowCount++;
+  const rowId  = 'addStockRow_' + addStockRowCount;
+  const wrap   = document.getElementById('addStockItems');
+  const row    = document.createElement('div');
+  row.id       = rowId;
+  row.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;position:relative;';
+
+  const productOptions = allProducts.map(p => {
+    const bs = p.branch_stock?.length
+      ? p.branch_stock.map(b => `${b.branch?.branch_name||'Branch'}: ${b.quantity}`).join(' | ')
+      : `Stock: ${p.quantity}`;
+    return `<option value="${p.product_id}" data-groups='${JSON.stringify(p.option_groups||[])}'>${p.product_name} (${bs})</option>`;
+  }).join('');
+
+  row.innerHTML = `
+    ${addStockRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove()" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
+    <div class="form-group" style="margin-bottom:8px;">
+      <label class="form-label" style="font-size:11px;">Product <span class="req">*</span></label>
+      <select class="form-input form-select add-stock-product" required onchange="loadRowVariants(this, '${rowId}')">
+        <option value="">Select product</option>
+        ${productOptions}
+      </select>
+    </div>
+    <div class="add-stock-variant-wrap" style="display:none;margin-bottom:8px;">
+      <label class="form-label" style="font-size:11px;">Variant <span style="font-size:10px;color:var(--text-muted);">(optional)</span></label>
+      <div class="add-stock-variant-selects" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+    </div>
+    <div class="form-group" style="margin:0;">
+      <label class="form-label" style="font-size:11px;">Quantity <span class="req">*</span></label>
+      <input type="number" class="form-input add-stock-qty" min="1" required placeholder="e.g. 10"/>
+    </div>
+  `;
+  wrap.appendChild(row);
+}
+
+function loadRowVariants(sel, rowId) {
+  const row   = document.getElementById(rowId);
+  const wrap  = row.querySelector('.add-stock-variant-wrap');
+  const cont  = row.querySelector('.add-stock-variant-selects');
+  const opt   = sel.options[sel.selectedIndex];
+  const groups = JSON.parse(opt?.dataset?.groups || '[]');
+
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:100px;">
+      <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select add-stock-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
+        <option value="">Any</option>
+        ${(g.choices||[]).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+window.addStockItemRow  = addStockItemRow;
+window.loadRowVariants  = loadRowVariants;
 
 function closeAddStockModal() {
   document.getElementById('addStockModalOverlay')?.classList.remove('open');
   document.getElementById('addStockModal')?.classList.remove('open');
   document.getElementById('addStockForm')?.reset();
+  document.getElementById('addStockItems').innerHTML = '';
+  addStockRowCount = 0;
 }
 
 
@@ -1278,61 +1338,93 @@ async function submitAddStock(e) {
   e.preventDefault();
   const addStockBtn = e.submitter || document.querySelector('#addStockForm button[type="submit"]');
   setButtonLoading(addStockBtn, true);
-  const variantOpts  = getSelectedVariantOptions();
-  const branchVal    = document.getElementById('addStockBranch').value;
-  const productId    = document.getElementById('addStockProduct').value;
-  const quantity     = parseInt(document.getElementById('addStockQty').value);
-  const note         = document.getElementById('addStockNote').value || 'Stock added';
 
-  // If "Both Branches" selected, send two requests
+  const branchVal = document.getElementById('addStockBranch').value;
+  const note      = document.getElementById('addStockNote').value || 'Stock added';
+
+  if (!branchVal) {
+    showToast('Please select a branch.', 'error');
+    setButtonLoading(addStockBtn, false);
+    return;
+  }
+
+  // Collect all product rows
+  const rows = document.querySelectorAll('#addStockItems > div');
+  if (!rows.length) {
+    showToast('Please add at least one product.', 'error');
+    setButtonLoading(addStockBtn, false);
+    return;
+  }
+
+  const items = [];
+  let hasError = false;
+  rows.forEach(function(row) {
+    const productSel = row.querySelector('.add-stock-product');
+    const qtySel     = row.querySelector('.add-stock-qty');
+    const productId  = productSel?.value;
+    const qty        = parseInt(qtySel?.value || '0');
+
+    if (!productId || qty <= 0) { hasError = true; return; }
+
+    // Get variant options
+    const variantOpts = {};
+    row.querySelectorAll('.add-stock-variant-opt').forEach(function(vs) {
+      if (vs.value) variantOpts[vs.dataset.label] = vs.value;
+    });
+
+    items.push({
+      product_id:      productId,
+      quantity:        qty,
+      variant_options: Object.keys(variantOpts).length ? variantOpts : null,
+    });
+  });
+
+  if (hasError || !items.length) {
+    showToast('Please fill in all product rows correctly.', 'error');
+    setButtonLoading(addStockBtn, false);
+    return;
+  }
+
+  // Send requests for each item
   const branchIds = branchVal === 'both'
     ? allBranches.map(b => b.branch_id)
     : [branchVal];
 
-  const data = {
-    product_id:      productId,
-    quantity:        quantity,
-    to_branch_id:    branchVal === 'both' ? branchIds[0] : branchVal,
-    note:            note,
-    type:            'restock',
-    variant_options: variantOpts,
-  };
   try {
-    const res = await fetch('/api/admin/inventory', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      // If both branches, send second request
-      if (branchVal === 'both' && branchIds.length > 1) {
-        for (let i = 1; i < branchIds.length; i++) {
-          await fetch('/api/admin/inventory', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              product_id:      productId,
-              quantity:        quantity,
-              to_branch_id:    branchIds[i],
-              note:            note,
-              type:            'restock',
-              variant_options: variantOpts,
-            }),
-          });
-        }
+    let allOk = true;
+    for (const item of items) {
+      for (const bId of branchIds) {
+        const res = await fetch('/api/admin/inventory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product_id:      item.product_id,
+            quantity:        item.quantity,
+            to_branch_id:    bId,
+            note:            note,
+            type:            'restock',
+            variant_options: item.variant_options,
+          }),
+        });
+        if (!res.ok) { allOk = false; }
       }
-      showToast(branchVal === 'both' ? 'Stock added to both branches!' : 'Stock added successfully!');
+    }
+    if (allOk) {
+      const msg = branchVal === 'both'
+        ? `${items.length} product(s) added to both branches!`
+        : `${items.length} product(s) added successfully!`;
+      showToast(msg);
       closeAddStockModal();
       loadInventory(); loadProducts();
     } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to add stock.', 'error');
+      showToast('Some items failed to add. Please check.', 'error');
     }
-  } catch (e) { showToast('Error adding stock.', 'error'); }
-  finally { setButtonLoading(addStockBtn, false); }
+  } catch (err) {
+    showToast('Error adding stock.', 'error');
+  } finally {
+    setButtonLoading(addStockBtn, false);
+  }
 }
-
-// ─── STOCK TRANSFER Modal ─────────────────────────────
-
 async function openTransferModal() {
   if (!allProducts.length) await loadProducts();
   if (!allBranches.length) await loadBranches();
