@@ -26,9 +26,9 @@
     <!-- Nav -->
     <nav class="sidebar-nav">
       <div class="nav-section-label">Main</div>
-      <a href="#" class="nav-item active" onclick="showSection('overview', this)" data-tooltip="Overview">
+      <a href="#" class="nav-item active" onclick="showSection('overview', this)" data-tooltip="Dashboard">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
-        <span>Overview</span>
+        <span>Dashboard</span>
       </a>
       <a href="#" class="nav-item" onclick="showSection('products', this)" data-tooltip="Products">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
@@ -102,7 +102,7 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:20px;height:20px;"><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
         </button>
         <div>
-          <h1 class="topbar-title" id="pageTitle">Overview</h1>
+          <h1 class="topbar-title" id="pageTitle">Dashboard</h1>
           <p class="topbar-sub" id="pageSub">Welcome back, {{ session.name or 'Admin' }}</p>
         </div>
       </div>
@@ -143,6 +143,26 @@
             <span class="stat-label">Total Sales</span>
             <span class="stat-value" id="statSales">—</span>
             <span class="stat-sub">Revenue</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--green">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">Triple E Sales</span>
+            <span class="stat-value" id="statSalesTripleE">—</span>
+            <span class="stat-sub">Branch Revenue</span>
+          </div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">Fiel Collins Sales</span>
+            <span class="stat-value" id="statSalesFielCollins">—</span>
+            <span class="stat-sub">Branch Revenue</span>
           </div>
         </div>
         <div class="stat-card">
@@ -209,16 +229,32 @@
 
       <!-- Quick Status Row -->
       <div class="dashboard-grid" style="margin-bottom:1.5rem;">
-        <div class="card">
-          <div class="card-header">
-            <h3 class="card-title">🏆 Top Selling Products</h3>
-            <button class="btn-text" onclick="showSection('products', document.querySelector('[onclick*=products]'))">View all</button>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <!-- Top Selling -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">🏆 Top Selling</h3>
+              <button class="btn-text" onclick="showSection('sales', document.querySelector('[onclick*=sales]'))">View all</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Product</th><th>Category</th><th>Sold</th></tr></thead>
+                <tbody id="topSellingBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
+              </table>
+            </div>
           </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Product</th><th>Category</th><th>Sold</th></tr></thead>
-              <tbody id="topSellingBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
-            </table>
+          <!-- Least Selling -->
+          <div class="card">
+            <div class="card-header">
+              <h3 class="card-title">📉 Least Selling</h3>
+              <button class="btn-text" onclick="showSection('sales', document.querySelector('[onclick*=sales]'))">View all</button>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Product</th><th>Category</th><th>Sold</th></tr></thead>
+                <tbody id="leastSellingBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
+              </table>
+            </div>
           </div>
         </div>
         <div class="card">
@@ -251,7 +287,7 @@
         <div class="card">
           <div class="card-header">
             <h3 class="card-title">Low Stock Alert</h3>
-            <button class="btn-text" onclick="showSection('inventory', document.querySelector('.nav-item:nth-child(3)'))">Manage</button>
+            <button class="btn-text" onclick="showSection('inventory', document.querySelector('[onclick*=inventory]'))">Manage</button>
           </div>
           <div class="table-wrap">
             <table class="data-table">
@@ -601,13 +637,26 @@
             </table>
           </div>
         </div>
-        <div class="card">
-          <div class="card-header"><h3 class="card-title">Top Selling Products</h3></div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
-              <tbody id="topProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
-            </table>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;">
+          <!-- Top Selling in Sales Report -->
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">🏆 Top Selling Products</h3></div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+                <tbody id="topProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
+              </table>
+            </div>
+          </div>
+          <!-- Least Selling in Sales Report -->
+          <div class="card">
+            <div class="card-header"><h3 class="card-title">📉 Least Selling Products</h3></div>
+            <div class="table-wrap">
+              <table class="data-table">
+                <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+                <tbody id="leastProductsBody"><tr><td colspan="3" class="table-empty">Loading...</td></tr></tbody>
+              </table>
+            </div>
           </div>
         </div>
       </div>

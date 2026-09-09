@@ -85,7 +85,7 @@ window.changeInvPage    = changeInvPage;
 window.changeOrdersPage = changeOrdersPage;
 
 var pageTitles = {
-  overview:        ['Overview',          'Dashboard summary & recent activity'],
+  overview:        ['Dashboard',         'Dashboard summary & recent activity'],
   products:        ['Products',          'Manage your product catalog'],
   inventory:       ['Inventory',         'Track stock levels and movements'],
   orders:          ['Orders',            'Manage customer and walk-in orders'],
@@ -289,6 +289,24 @@ async function loadOverview() {
     document.getElementById('statOrders').textContent   = orders.length;
 
     const totalSales = payments.reduce((s, p) => s + Number(p.total || 0), 0);
+
+    // ── Branch Sales ────────────────────────────────────
+    // Get branch IDs from allBranches
+    const tripleEBranch     = allBranches.find(b => b.branch_name.toLowerCase().includes('triple'));
+    const fielCollinsBranch = allBranches.find(b => b.branch_name.toLowerCase().includes('fiel') || b.branch_name.toLowerCase().includes('collins'));
+
+    const completedOrders = Array.isArray(orders) ? orders.filter(o => o.status === 'completed') : [];
+    const salesTripleE     = completedOrders
+      .filter(o => tripleEBranch && o.branch_id === tripleEBranch.branch_id)
+      .reduce((s, o) => s + Number(o.total || 0), 0);
+    const salesFielCollins = completedOrders
+      .filter(o => fielCollinsBranch && o.branch_id === fielCollinsBranch.branch_id)
+      .reduce((s, o) => s + Number(o.total || 0), 0);
+
+    const teEl  = document.getElementById('statSalesTripleE');
+    const fcEl  = document.getElementById('statSalesFielCollins');
+    if (teEl)  teEl.textContent  = '₱' + salesTripleE.toLocaleString('en-PH', { minimumFractionDigits: 2 });
+    if (fcEl)  fcEl.textContent  = '₱' + salesFielCollins.toLocaleString('en-PH', { minimumFractionDigits: 2 });
     document.getElementById('statSales').textContent = peso(totalSales);
 
     const getTotal = p => p.branch_stock?.length
@@ -385,9 +403,22 @@ async function loadOverview() {
     document.getElementById('topSellingBody').innerHTML = sorted.slice(0, 5).length
       ? sorted.slice(0, 5).map(p => `
           <tr>
-            <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
+            <td><strong>${p.product_name}</strong></td>
             <td>${p.category || '—'}</td>
             <td><span style="font-weight:700;color:var(--g-400);">${Number(p.total_sold || 0).toLocaleString()} sold</span></td>
+          </tr>`).join('')
+      : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
+
+    // ── Least Selling Products ──────────────────────────
+    const leastSorted = [...activeProducts]
+      .filter(p => Number(p.total_sold || 0) >= 0)
+      .sort((a, b) => Number(a.total_sold || 0) - Number(b.total_sold || 0));
+    document.getElementById('leastSellingBody').innerHTML = leastSorted.slice(0, 5).length
+      ? leastSorted.slice(0, 5).map(p => `
+          <tr>
+            <td><strong>${p.product_name}</strong></td>
+            <td>${p.category || '—'}</td>
+            <td><span style="font-weight:700;color:${Number(p.total_sold || 0) === 0 ? '#ef4444' : '#f59e0b'};">${Number(p.total_sold || 0).toLocaleString()} sold</span></td>
           </tr>`).join('')
       : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
 
@@ -2083,10 +2114,25 @@ function renderSalesData(completed, allOrders) {
       productSales[name].revenue += Number(item.price||0)*Number(item.qty||item.quantity||0);
     });
   });
-  const top = Object.entries(productSales).sort((a,b)=>b[1].units-a[1].units).slice(0,5);
+  const allSorted = Object.entries(productSales).sort((a,b) => b[1].units - a[1].units);
+  const top   = allSorted.slice(0, 5);
+  const least = allSorted.slice(-5).reverse();
+
   document.getElementById('topProductsBody').innerHTML = top.length
-    ? top.map(([name,v])=>`<tr><td>${name}</td><td>${v.units}</td><td>${peso(v.revenue)}</td></tr>`).join('')
+    ? top.map(([name,v]) => `<tr><td>${name}</td><td>${v.units}</td><td>${peso(v.revenue)}</td></tr>`).join('')
     : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
+
+  // Least Selling
+  const leastEl = document.getElementById('leastProductsBody');
+  if (leastEl) {
+    leastEl.innerHTML = least.length
+      ? least.map(([name,v]) => `<tr>
+          <td>${name}</td>
+          <td><span style="color:${v.units === 0 ? '#ef4444' : '#f59e0b'};font-weight:700;">${v.units}</span></td>
+          <td>${peso(v.revenue)}</td>
+        </tr>`).join('')
+      : '<tr><td colspan="3" class="table-empty">No sales data yet</td></tr>';
+  }
 }
 
 async function loadSales() {
