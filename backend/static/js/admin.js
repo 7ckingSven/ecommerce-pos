@@ -2846,18 +2846,50 @@ async function toggleUserStatus(id, currentStatus) {
 
 async function submitUser(e) {
   e.preventDefault();
-  const id   = document.getElementById('userId').value;
+  const id  = document.getElementById('userId').value;
+  const btn = document.getElementById('userSubmitBtn');
+
+  // ── Validate phone
+  const phone = document.getElementById('uPhone').value;
+  if (phone && !/^09[0-9]{9}$/.test(phone)) {
+    showToast('Phone number must start with 09 and be 11 digits.', 'error');
+    return;
+  }
+
+  // ── Validate password (required for new user)
+  const password = document.getElementById('uPassword').value;
+  if (!id && password.length < 8) {
+    showToast('Password must be at least 8 characters.', 'error');
+    return;
+  }
+
+  // ── Confirm dialog
+  const fname    = document.getElementById('uFname').value;
+  const lname    = document.getElementById('uLname').value;
+  const username = document.getElementById('uUsername').value;
+  const action   = id ? 'update' : 'add';
+
+  const confirmed = await showConfirmDialog(
+    id ? 'Confirm Update Staff' : 'Confirm Add Staff',
+    `Are you sure you want to ${action} <strong>${fname} ${lname}</strong> with username <strong>${username}</strong>?`
+  );
+  if (!confirmed) return;
+
+  // ── Loading
+  setButtonLoading(btn, true);
+
   const data = {
-    fname:     document.getElementById('uFname').value,
+    fname:     fname,
     mi:        document.getElementById('uMi').value,
-    lname:     document.getElementById('uLname').value,
+    lname:     lname,
     email:     document.getElementById('uEmail').value,
-    phone:     document.getElementById('uPhone').value,
-    username:  document.getElementById('uUsername').value,
+    phone:     phone,
+    username:  username,
     role:      document.getElementById('uRole').value,
-    password:  document.getElementById('uPassword').value,
+    password:  password,
     branch_id: document.getElementById('uBranch').value || null,
   };
+
   try {
     const url    = id ? `/api/admin/users/${id}` : '/api/admin/users';
     const method = id ? 'PUT' : 'POST';
@@ -2866,16 +2898,42 @@ async function submitUser(e) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(data),
     });
+    const resData = await res.json().catch(() => ({}));
     if (res.ok) {
-      showToast(id ? 'Staff updated!' : 'Staff added!');
+      showToast(id ? 'Staff updated successfully!' : 'Staff added successfully!');
       closeUserModal();
       loadUsers();
     } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to save user.', 'error');
+      showToast(resData.error || 'Failed to save staff.', 'error');
     }
-  } catch (e) { showToast('Error saving user.', 'error'); }
+  } catch (err) {
+    showToast('Error saving staff. Please try again.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
 }
+
+// ── Confirm dialog helper ─────────────────────────────
+function showConfirmDialog(title, message) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div style="background:var(--card-bg);border-radius:16px;padding:1.5rem;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 0.5rem;font-size:16px;">${title}</h3>
+        <p style="margin:0 0 1.2rem;font-size:13px;color:var(--text-muted);line-height:1.6;">${message}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="confirmNo"  style="padding:8px 18px;border-radius:8px;border:1.5px solid var(--border);background:none;cursor:pointer;font-size:13px;">No</button>
+          <button id="confirmYes" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--g-700),var(--g-500));color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Yes, Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#confirmYes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+    overlay.querySelector('#confirmNo').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
+  });
+}
+window.showConfirmDialog = showConfirmDialog;
 
 // ─── Init ─────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════

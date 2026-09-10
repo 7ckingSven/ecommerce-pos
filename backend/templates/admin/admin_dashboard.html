@@ -1095,31 +1095,31 @@
         <div class="form-row-3">
           <div class="form-group">
             <label class="form-label">First Name <span class="req">*</span></label>
-            <input type="text" id="uFname" class="form-input" required/>
+            <input type="text" id="uFname" class="form-input" required placeholder="e.g. Maria" pattern="[A-Za-z ]{2,50}" title="Letters only, 2-50 characters"/>
           </div>
           <div class="form-group">
             <label class="form-label">MI</label>
-            <input type="text" id="uMi" class="form-input" maxlength="5"/>
+            <input type="text" id="uMi" class="form-input" maxlength="2" placeholder="e.g. C." title="Middle initial (optional)"/>
           </div>
           <div class="form-group">
             <label class="form-label">Last Name <span class="req">*</span></label>
-            <input type="text" id="uLname" class="form-input" required/>
+            <input type="text" id="uLname" class="form-input" required placeholder="e.g. Santos" pattern="[A-Za-z ]{2,50}" title="Letters only, 2-50 characters"/>
           </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Email <span class="req">*</span></label>
-            <input type="email" id="uEmail" class="form-input" required/>
+            <input type="email" id="uEmail" class="form-input" required placeholder="e.g. maria@email.com"/>
           </div>
           <div class="form-group">
             <label class="form-label">Phone</label>
-            <input type="tel" id="uPhone" class="form-input" maxlength="11" placeholder="09XXXXXXXXX"/>
+            <input type="tel" id="uPhone" class="form-input" maxlength="11" placeholder="09XXXXXXXXX" pattern="09[0-9]{9}" title="Must start with 09 and be 11 digits"/>
           </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Username <span class="req">*</span></label>
-            <input type="text" id="uUsername" class="form-input" required/>
+            <input type="text" id="uUsername" class="form-input" required placeholder="e.g. TEStaff" minlength="4" maxlength="30" title="4-30 characters, no spaces"/>
           </div>
           <div class="form-group">
             <label class="form-label">Role <span class="req">*</span></label>
@@ -1137,11 +1137,11 @@
         </div>
         <div class="form-group" id="uPasswordGroup">
           <label class="form-label">Password <span class="req">*</span></label>
-          <input type="password" id="uPassword" class="form-input" placeholder="Minimum 8 characters"/>
+          <input type="password" id="uPassword" class="form-input" placeholder="Minimum 8 characters" minlength="8" title="At least 8 characters"/>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeUserModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save</button>
+          <button type="submit" id="userSubmitBtn" class="btn btn-solid-green">Save</button>
         </div>
       </form>
     </div>
