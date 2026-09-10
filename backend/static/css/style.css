@@ -989,3 +989,47 @@ button:disabled {
   cursor: not-allowed;
   pointer-events: none;
 }
+
+/* ============================================================
+   CUSTOM SCROLLBAR — Green Theme
+   ============================================================ */
+
+/* Firefox */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--g-500) var(--g-50);
+}
+
+/* Chrome, Edge, Safari */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--g-50);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--g-400);
+  border-radius: 999px;
+  transition: background 0.2s;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--g-600);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Scrollbar starts below navbar */
+html {
+  scroll-padding-top: 66px;
+}
+
+body {
+  overflow-x: hidden;
+}

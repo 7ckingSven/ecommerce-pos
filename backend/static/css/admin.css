@@ -880,3 +880,35 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .branch-stock-qty.in-stock  { color: #16a34a; }
 .branch-stock-qty.low-stock { color: #f59e0b; }
 .branch-stock-qty.out-stock { color: #ef4444; }
+
+/* ============================================================
+   CUSTOM SCROLLBAR — Green Theme (Admin)
+   ============================================================ */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--g-600) var(--surface);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--g-600);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--g-400);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

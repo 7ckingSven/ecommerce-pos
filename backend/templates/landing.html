@@ -3,11 +3,176 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Triple E &amp; Fiel Collins General Merchandise</title>
+  <title>TEFC E-Commerce — Triple E &amp; Fiel Collins General Merchandise</title>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
+  <style>
+    /* ── Slideshow ── */
+    .slide-wrap {
+      position: relative;
+      width: 100%;
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      aspect-ratio: 4/3;
+      box-shadow: var(--shadow-lg);
+      background: var(--g-50);
+    }
+
+    .slide {
+      position: absolute;
+      inset: 0;
+      opacity: 0;
+      transition: opacity 0.8s ease-in-out;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .slide.active { opacity: 1; }
+
+    .slide img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
+    .slide-overlay {
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      background: linear-gradient(to top, rgba(20,83,45,0.85) 0%, transparent 100%);
+      padding: 1.5rem 1.5rem 1.2rem;
+    }
+
+    .slide-tag {
+      display: inline-block;
+      background: var(--g-400);
+      color: var(--dark);
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 1.5px;
+      text-transform: uppercase;
+      padding: 3px 10px;
+      border-radius: 999px;
+      margin-bottom: 8px;
+    }
+
+    .slide-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.5rem;
+      font-weight: 700;
+      color: white;
+      line-height: 1.2;
+      margin: 0 0 4px;
+    }
+
+    .slide-desc {
+      font-size: 12px;
+      color: rgba(255,255,255,0.8);
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    /* ── Dots ── */
+    .slide-dots {
+      display: flex;
+      justify-content: center;
+      gap: 6px;
+      margin-top: 14px;
+    }
+
+    .slide-dot {
+      width: 8px; height: 8px;
+      border-radius: 999px;
+      background: var(--g-200);
+      cursor: pointer;
+      border: none;
+      padding: 0;
+      transition: background 0.3s, width 0.3s;
+    }
+
+    .slide-dot.active {
+      background: var(--g-500);
+      width: 24px;
+    }
+
+    /* ── Prev/Next arrows ── */
+    .slide-arrow {
+      position: absolute;
+      top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,0.15);
+      backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 50%;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 10;
+      transition: background 0.2s;
+      color: white;
+    }
+
+    .slide-arrow:hover { background: rgba(255,255,255,0.28); }
+    .slide-arrow.prev { left: 12px; }
+    .slide-arrow.next { right: 12px; }
+    .slide-arrow svg { width: 16px; height: 16px; stroke: white; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+    /* ── Override hero-left alignment ── */
+    .hero-left {
+      justify-content: flex-start !important;
+      padding-top: 3rem !important;
+    }
+
+    /* ── Hero title area ── */
+    .hero-brand-eyebrow {
+      display: flex; align-items: center; gap: 8px;
+      margin-bottom: 0.5rem;
+    }
+
+    .hero-brand-dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--g-400);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+
+    .hero-brand-eyebrow-text {
+      font-size: 11px; font-weight: 600;
+      color: var(--g-400); letter-spacing: 2px;
+      text-transform: uppercase;
+    }
+
+    .hero-system-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(2.2rem, 4vw, 3.2rem);
+      font-weight: 700;
+      color: var(--white);
+      line-height: 1.1;
+      margin: 0 0 0.5rem;
+    }
+
+    .hero-system-title .accent { color: var(--g-400); }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--g-50); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb { background: var(--g-400); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--g-600); }
+    * { scrollbar-width: thin; scrollbar-color: var(--g-400) var(--g-50); }
+    html { scroll-padding-top: 66px; }
+
+    .hero-system-sub {
+      font-size: 13px;
+      color: var(--g-300);
+      margin: 0 0 1.5rem;
+      line-height: 1.6;
+    }
+  </style>
 </head>
 <body>
 
@@ -19,7 +184,7 @@
       </div>
       <div class="nav-brand-text">
         <span class="nav-brand-name">Triple E &amp; Fiel Collins General Merchandise</span>
-        <span class="nav-brand-sub">E-Commerce &amp; POS System</span>
+        <span class="nav-brand-sub">TEFC E-Commerce</span>
       </div>
     </a>
     <div class="nav-buttons">
@@ -37,65 +202,109 @@
   <!-- HERO -->
   <main class="hero">
 
-    <!-- LEFT — Intro -->
+    <!-- LEFT — Slideshow -->
     <div class="hero-left">
       <div class="hero-glow"></div>
-      <div class="hero-eyebrow">
-        <span class="eyebrow-dot"></span>
-        <span class="eyebrow-text">Welcome to Our System</span>
+
+      <!-- Brand + System Name -->
+      <div class="hero-brand-eyebrow">
+        <span class="hero-brand-dot"></span>
+        <span class="hero-brand-eyebrow-text">Triple E &amp; Fiel Collins General Merchandise</span>
       </div>
-      <h1 class="hero-title">
-        Your One-Stop<br>
-        <span class="accent">Shopping</span><br>
-        Experience at<br>
-        Triple E &amp; Fiel Collins<br>
-        General Merchandise
-      </h1>
-      <div class="hero-rule"></div>
-      <p class="hero-desc">
-        Shop conveniently from your phone or visit us in store.
-        We offer a wide range of products for every need —
-        from school supplies to home essentials.
+      <h1 class="hero-system-title"><span class="accent">TEFC</span> E-Commerce</h1>
+      <p class="hero-system-sub">
+        Shop the best products — from beauty to school supplies —
+        all in one convenient platform.
       </p>
-      <div class="feature-list">
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+
+      <!-- Slideshow -->
+      <div class="slide-wrap" id="slideshow">
+
+        <button class="slide-arrow prev" onclick="changeSlide(-1)">
+          <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="slide-arrow next" onclick="changeSlide(1)">
+          <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+
+        <!-- Slide 1 — School Supplies -->
+        <div class="slide active">
+          <img src="{{ url_for('static', filename='img/school supplies.jpg') }}" alt="School Supplies"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">School Supplies</span>
+            <h3 class="slide-title">Everything You Need for School</h3>
+            <p class="slide-desc">Complete your school requirements in one stop — notebooks, pens, and more.</p>
           </div>
-          <span class="feature-label">Wide range of products available</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+
+        <!-- Slide 2 — Dove Products -->
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/dove products.jpg') }}" alt="Dove Products"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Personal Care</span>
+            <h3 class="slide-title">Premium Dove Collection</h3>
+            <p class="slide-desc">Trusted personal care products that keep you fresh and confident every day.</p>
           </div>
-          <span class="feature-label">Shop anytime via our mobile app</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/><line x1="10" y1="12" x2="14" y2="12"/></svg>
+
+        <!-- Slide 3 — Personal Care -->
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/personal care.jpg') }}" alt="Personal Care"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Personal Care</span>
+            <h3 class="slide-title">Your Daily Essentials, Delivered</h3>
+            <p class="slide-desc">From skincare to hygiene — shop top personal care brands all in one place.</p>
           </div>
-          <span class="feature-label">Seamless inventory management</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+
+        <!-- Slide 4 — Natasha -->
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/natasha.jpg') }}" alt="Natasha"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Natasha</span>
+            <h3 class="slide-title">Natasha Fashion &amp; Beauty</h3>
+            <p class="slide-desc">Discover the latest Natasha collections — beauty and style for every woman.</p>
           </div>
-          <span class="feature-label">Fast and secure checkout</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
+
+        <!-- Slide 5 — Natasha 2 -->
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/natasha (2).jpg') }}" alt="Natasha Collection"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Natasha</span>
+            <h3 class="slide-title">Elevate Your Style with Natasha</h3>
+            <p class="slide-desc">Exclusive Natasha products that bring out the best in you — available now.</p>
           </div>
-          <span class="feature-label">Located in Koronadal City, South Cotabato</span>
         </div>
+
+        <!-- Slide 6 — Avon -->
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/avon.jpg') }}" alt="Avon"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Avon</span>
+            <h3 class="slide-title">Discover Premium Avon Beauty</h3>
+            <p class="slide-desc">Shop exclusive Avon fragrances, skincare, and cosmetics at great prices.</p>
+          </div>
+        </div>
+
       </div>
+
+      <!-- Dots -->
+      <div class="slide-dots" id="slideDots">
+        <button class="slide-dot active" onclick="goToSlide(0)"></button>
+        <button class="slide-dot" onclick="goToSlide(1)"></button>
+        <button class="slide-dot" onclick="goToSlide(2)"></button>
+        <button class="slide-dot" onclick="goToSlide(3)"></button>
+        <button class="slide-dot" onclick="goToSlide(4)"></button>
+        <button class="slide-dot" onclick="goToSlide(5)"></button>
+      </div>
+
     </div>
 
     <!-- RIGHT — App Download Card -->
     <div class="hero-right">
       <div class="landing-card">
 
-        <!-- Card Top -->
         <div class="card-top">
           <div class="card-icon-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
@@ -106,42 +315,27 @@
           <h2 class="card-title">Get the App</h2>
         </div>
 
-        <p class="landing-card-desc">
-          Download our mobile app and start shopping from anywhere. Available for Android.
-        </p>
+        <p class="landing-card-desc" style="margin-top:-0.5rem;">Download our mobile app and start shopping from anywhere. Available for Android.</p>
 
-        <!-- QR Code -->
         <div class="landing-qr-wrap">
           <div class="landing-qr-box">
-            <img src="{{ url_for('static', filename='img/app-qr-code.png') }}" alt="Scan to Download APK" class="landing-qr-img"/>
+            <img src="{{ url_for('static', filename='img/app-qr-code.png') }}" alt="Scan to Download APK" class="landing-qr-img" style="width:170px;height:170px;"/>
             <p class="landing-qr-label">Scan to Download</p>
           </div>
         </div>
 
-        <!-- Download Button -->
-        <a href="{{ url_for('download_apk') }}" class="btn btn-solid-green btn-full" download>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <div style="flex:1;height:1px;background:var(--g-100);"></div>
+          <span style="font-size:11px;color:var(--text-muted);font-weight:600;">OR</span>
+          <div style="flex:1;height:1px;background:var(--g-100);"></div>
+        </div>
+        <a href="{{ url_for('download_apk') }}" class="btn btn-solid-green" style="width:auto;padding-left:2rem;padding-right:2rem;align-self:center;" download>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
             <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
             <polyline points="7 10 12 15 17 10"/>
             <line x1="12" y1="15" x2="12" y2="3"/>
           </svg>
           Download APK
-        </a>
-
-        <div class="landing-divider-row">
-          <div class="landing-divider-line"></div>
-          <span class="landing-divider-text">already have an account?</span>
-          <div class="landing-divider-line"></div>
-        </div>
-
-        <!-- Sign In Button -->
-        <a href="{{ url_for('login') }}" class="btn btn-outline-green btn-full">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
-            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
-            <polyline points="10 17 15 12 10 7"/>
-            <line x1="15" y1="12" x2="3" y2="12"/>
-          </svg>
-          Sign In
         </a>
 
         <p class="landing-coming-soon">Download Android app to get started</p>
@@ -198,6 +392,37 @@
       <span>Capstone Project &mdash; STI College of Koronadal</span>
     </div>
   </footer>
+
+  <script>
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+    const dots   = document.querySelectorAll('.slide-dot');
+    let autoTimer = null;
+
+    function goToSlide(n) {
+      slides[currentSlide].classList.remove('active');
+      dots[currentSlide].classList.remove('active');
+      currentSlide = (n + slides.length) % slides.length;
+      slides[currentSlide].classList.add('active');
+      dots[currentSlide].classList.add('active');
+    }
+
+    function changeSlide(dir) {
+      goToSlide(currentSlide + dir);
+      resetAuto();
+    }
+
+    function startAuto() {
+      autoTimer = setInterval(() => goToSlide(currentSlide + 1), 3000);
+    }
+
+    function resetAuto() {
+      clearInterval(autoTimer);
+      startAuto();
+    }
+
+    startAuto();
+  </script>
 
 </body>
 </html>

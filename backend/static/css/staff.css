@@ -453,3 +453,35 @@
   .sidebar.collapsed { width: 240px !important; }
   .sidebar.collapsed + .main { margin-left: 0 !important; }
 }
+
+/* ============================================================
+   CUSTOM SCROLLBAR — Green Theme (Staff)
+   ============================================================ */
+
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--g-600) var(--surface);
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--surface);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--g-600);
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--g-400);
+}
+
+::-webkit-scrollbar-corner {
+  background: transparent;
+}

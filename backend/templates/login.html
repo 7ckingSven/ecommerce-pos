@@ -3,10 +3,111 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Login — Triple E &amp; Fiel Collins General Merchandise</title>
+  <title>Login — TEFC E-Commerce</title>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">  
+  <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <style>
+    /* ── Slideshow ── */
+    .slide-wrap {
+      position: relative;
+      width: 100%;
+      border-radius: var(--radius-xl);
+      overflow: hidden;
+      aspect-ratio: 4/3;
+      box-shadow: var(--shadow-lg);
+      background: var(--g-50);
+    }
+    .slide {
+      position: absolute; inset: 0;
+      opacity: 0;
+      transition: opacity 0.8s ease-in-out;
+    }
+    .slide.active { opacity: 1; }
+    .slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .slide-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(to top, rgba(20,83,45,0.85) 0%, transparent 100%);
+      padding: 1.5rem 1.5rem 1.2rem;
+    }
+    .slide-tag {
+      display: inline-block;
+      background: var(--g-400); color: var(--dark);
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      padding: 3px 10px; border-radius: 999px; margin-bottom: 8px;
+    }
+    .slide-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.5rem; font-weight: 700;
+      color: white; line-height: 1.2; margin: 0 0 4px;
+    }
+    .slide-desc { font-size: 12px; color: rgba(255,255,255,0.8); margin: 0; line-height: 1.5; }
+    .slide-arrow {
+      position: absolute; top: 50%; transform: translateY(-50%);
+      background: rgba(255,255,255,0.15); backdrop-filter: blur(4px);
+      border: 1px solid rgba(255,255,255,0.2); border-radius: 50%;
+      width: 36px; height: 36px;
+      display: flex; align-items: center; justify-content: center;
+      cursor: pointer; z-index: 10; color: white;
+      transition: background 0.2s;
+    }
+    .slide-arrow:hover { background: rgba(255,255,255,0.28); }
+    .slide-arrow.prev { left: 12px; }
+    .slide-arrow.next { right: 12px; }
+    .slide-arrow svg { width: 16px; height: 16px; stroke: white; fill: none; stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+    .slide-dots { display: flex; justify-content: center; gap: 6px; margin-top: 14px; }
+    .slide-dot {
+      width: 8px; height: 8px; border-radius: 999px;
+      background: var(--g-200); cursor: pointer;
+      border: none; padding: 0;
+      transition: background 0.3s, width 0.3s;
+    }
+    .slide-dot.active { background: var(--g-500); width: 24px; }
+
+    /* ── Override hero-left alignment ── */
+    .hero-left {
+      justify-content: flex-start !important;
+      padding-top: 3rem !important;
+    }
+
+    /* ── Hero title ── */
+    .hero-brand-eyebrow {
+      display: flex; align-items: center; gap: 8px; margin-bottom: 0.5rem;
+    }
+    .hero-brand-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: var(--g-400);
+      animation: pulse 2s infinite;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.5; transform: scale(0.8); }
+    }
+    .hero-brand-eyebrow-text {
+      font-size: 11px; font-weight: 600;
+      color: var(--g-400); letter-spacing: 2px; text-transform: uppercase;
+    }
+    .hero-system-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: clamp(2rem, 3.5vw, 2.8rem);
+      font-weight: 700; color: var(--white);
+      line-height: 1.1; margin: 0 0 0.5rem;
+    }
+    .hero-system-title .accent { color: var(--g-400); }
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: var(--g-50); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb { background: var(--g-400); border-radius: 999px; }
+    ::-webkit-scrollbar-thumb:hover { background: var(--g-600); }
+    * { scrollbar-width: thin; scrollbar-color: var(--g-400) var(--g-50); }
+    html { scroll-padding-top: 66px; }
+
+    .hero-system-sub {
+      font-size: 13px; color: var(--g-300);
+      margin: 0 0 1.5rem; line-height: 1.6;
+    }
+  </style>
 </head>
 <body>
 
@@ -18,7 +119,7 @@
       </div>
       <div class="nav-brand-text">
         <span class="nav-brand-name">Triple E &amp; Fiel Collins General Merchandise</span>
-        <span class="nav-brand-sub">E-Commerce &amp; POS System</span>
+        <span class="nav-brand-sub">TEFC E-Commerce</span>
       </div>
     </a>
   </header>
@@ -26,56 +127,92 @@
   <!-- HERO -->
   <main class="hero">
 
-    <!-- LEFT -->
+    <!-- LEFT — Slideshow -->
     <div class="hero-left">
       <div class="hero-glow"></div>
-      <div class="hero-eyebrow">
-        <span class="eyebrow-dot"></span>
-        <span class="eyebrow-text">Web-Based Management System</span>
+
+      <div class="hero-brand-eyebrow">
+        <span class="hero-brand-dot"></span>
+        <span class="hero-brand-eyebrow-text">Triple E &amp; Fiel Collins General Merchandise</span>
       </div>
-      <h1 class="hero-title">
-        Web-Based<br>
-        E-Commerce<br>
-        <span class="accent">Management System</span><br>
-        for Triple E and Fiel Collins<br>
-        General Merchandise
-      </h1>
-      <div class="hero-rule"></div>
-      <p class="hero-desc">
-        A complete point-of-sale and e-commerce platform designed to manage
-        products, orders, customers, and sales operations all in one unified system.
+      <h1 class="hero-system-title"><span class="accent">TEFC</span> E-Commerce</h1>
+      <p class="hero-system-sub">
+        A complete web-based management system for products,
+        orders, inventory, and sales operations.
       </p>
-      <div class="feature-list">
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><path d="M20 7H4a2 2 0 0 0-2 2v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2z"/><path d="M16 21V5a2 2 0 0 0-2-2h-4a2 2 0 0 0-2 2v16"/></svg>
+
+      <!-- Slideshow -->
+      <div class="slide-wrap">
+        <button class="slide-arrow prev" onclick="changeSlide(-1)">
+          <svg viewBox="0 0 24 24"><polyline points="15 18 9 12 15 6"/></svg>
+        </button>
+        <button class="slide-arrow next" onclick="changeSlide(1)">
+          <svg viewBox="0 0 24 24"><polyline points="9 18 15 12 9 6"/></svg>
+        </button>
+
+        <div class="slide active">
+          <img src="{{ url_for('static', filename='img/school supplies.jpg') }}" alt="School Supplies"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">School Supplies</span>
+            <h3 class="slide-title">Everything You Need for School</h3>
+            <p class="slide-desc">Complete your school requirements in one stop — notebooks, pens, and more.</p>
           </div>
-          <span class="feature-label">Product and Inventory Management</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/dove products.jpg') }}" alt="Dove Products"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Personal Care</span>
+            <h3 class="slide-title">Premium Dove Collection</h3>
+            <p class="slide-desc">Trusted personal care products that keep you fresh and confident every day.</p>
           </div>
-          <span class="feature-label">Sales and POS Checkout</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/personal care.jpg') }}" alt="Personal Care"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Personal Care</span>
+            <h3 class="slide-title">Your Daily Essentials, Delivered</h3>
+            <p class="slide-desc">From skincare to hygiene — shop top personal care brands all in one place.</p>
           </div>
-          <span class="feature-label">Customer and Member Management</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><line x1="18" y1="20" x2="18" y2="10"/><line x1="12" y1="20" x2="12" y2="4"/><line x1="6" y1="20" x2="6" y2="14"/></svg>
+
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/natasha.jpg') }}" alt="Natasha"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Natasha</span>
+            <h3 class="slide-title">Natasha Fashion &amp; Beauty</h3>
+            <p class="slide-desc">Discover the latest Natasha collections — beauty and style for every woman.</p>
           </div>
-          <span class="feature-label">Reports and Analytics Dashboard</span>
         </div>
-        <div class="feature-row">
-          <div class="feature-box">
-            <svg viewBox="0 0 24 24"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/natasha (2).jpg') }}" alt="Natasha Collection"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Natasha</span>
+            <h3 class="slide-title">Elevate Your Style with Natasha</h3>
+            <p class="slide-desc">Exclusive Natasha products that bring out the best in you — available now.</p>
           </div>
-          <span class="feature-label">Order and Credit Management</span>
         </div>
+
+        <div class="slide">
+          <img src="{{ url_for('static', filename='img/avon.jpg') }}" alt="Avon"/>
+          <div class="slide-overlay">
+            <span class="slide-tag">Avon</span>
+            <h3 class="slide-title">Discover Premium Avon Beauty</h3>
+            <p class="slide-desc">Shop exclusive Avon fragrances, skincare, and cosmetics at great prices.</p>
+          </div>
+        </div>
+      </div>
+
+      <!-- Dots -->
+      <div class="slide-dots">
+        <button class="slide-dot active" onclick="goToSlide(0)"></button>
+        <button class="slide-dot" onclick="goToSlide(1)"></button>
+        <button class="slide-dot" onclick="goToSlide(2)"></button>
+        <button class="slide-dot" onclick="goToSlide(3)"></button>
+        <button class="slide-dot" onclick="goToSlide(4)"></button>
+        <button class="slide-dot" onclick="goToSlide(5)"></button>
       </div>
     </div>
 
@@ -91,7 +228,6 @@
           <p class="card-subtitle" style="font-size:12px;color:#6b7280;margin-top:4px;">Admin &amp; Staff access only</p>
         </div>
 
-        <!-- Flash Messages -->
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             {% for category, message in messages %}
@@ -100,18 +236,13 @@
           {% endif %}
         {% endwith %}
 
-        <!-- Login Form -->
         <form method="POST" action="{{ url_for('login_post') }}">
           <div class="form-group">
             <input
-              type="text"
-              name="login_input"
-              id="loginInput"
-              class="form-input"
-              placeholder="Username"
+              type="text" name="login_input" id="loginInput"
+              class="form-input" placeholder="Username"
               value="{{ request.form.get('login_input', '') }}"
-              required
-              autocomplete="username"
+              required autocomplete="username"
             />
           </div>
           <div class="form-group">
@@ -120,13 +251,9 @@
             </div>
             <div class="input-wrap">
               <input
-                type="password"
-                id="customerPassword"
-                name="password"
-                class="form-input"
-                placeholder="Password"
-                required
-                autocomplete="current-password"
+                type="password" id="customerPassword" name="password"
+                class="form-input" placeholder="Password"
+                required autocomplete="current-password"
               />
               <button type="button" class="show-pass-btn" onclick="togglePassword('customerPassword', 'customerEyeIcon')" tabindex="-1">
                 <svg id="customerEyeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -154,7 +281,6 @@
           </button>
         </form>
 
-
       </div>
     </div>
   </main>
@@ -176,7 +302,7 @@
         <address>
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            tripleeandfielcollins@email.com
+            tripleefielcollins@gmail.com
           </div>
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -209,25 +335,55 @@
 
   <script src="{{ url_for('static', filename='js/login.js') }}"></script>
   <script>
-    // Disable login button on form submit
-    document.querySelector('form').addEventListener('submit', function() {
+    // ── Slideshow ──
+    let currentSlide = 0;
+    const slides = document.querySelectorAll('.slide');
+    const dots   = document.querySelectorAll('.slide-dot');
+    let autoTimer = null;
+
+    function goToSlide(n) {
+      slides[currentSlide].classList.remove('active');
+      dots[currentSlide].classList.remove('active');
+      currentSlide = (n + slides.length) % slides.length;
+      slides[currentSlide].classList.add('active');
+      dots[currentSlide].classList.add('active');
+    }
+
+    function changeSlide(dir) {
+      goToSlide(currentSlide + dir);
+      resetAuto();
+    }
+
+    function startAuto() {
+      autoTimer = setInterval(() => goToSlide(currentSlide + 1), 3000);
+    }
+
+    function resetAuto() {
+      clearInterval(autoTimer);
+      startAuto();
+    }
+
+    startAuto();
+
+    // ── Login button loading ──
+    document.querySelector('form').addEventListener('submit', function () {
       const btn = document.getElementById('loginSubmitBtn');
       if (btn) {
         btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;animation:spin 1s linear infinite;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Logging in...';
         btn.style.opacity = '0.7';
-        // Don't disable — let form submit first
         setTimeout(() => { btn.disabled = true; }, 100);
       }
     });
-    // Flash message color fix
+
+    // ── Flash message styles ──
     document.querySelectorAll('.flash-msg.error').forEach(el => {
-      el.style.background = 'rgba(239,68,68,0.1)';
-      el.style.color = '#ef4444';
-      el.style.border = '1px solid rgba(239,68,68,0.3)';
+      el.style.background   = 'rgba(239,68,68,0.1)';
+      el.style.color        = '#ef4444';
+      el.style.border       = '1px solid rgba(239,68,68,0.3)';
       el.style.borderRadius = '8px';
-      el.style.padding = '10px 14px';
+      el.style.padding      = '10px 14px';
       el.style.marginBottom = '1rem';
-      el.style.fontSize = '13px';
+      el.style.fontSize     = '13px';
     });
   </script>
 
