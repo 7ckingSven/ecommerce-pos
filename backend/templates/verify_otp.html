@@ -7,24 +7,162 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/auth.css') }}">
+  <style>
+    .page-wrap {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 100px 1.5rem 3rem;
+      background: var(--surface);
+    }
+    .auth-card {
+      width: 100%; max-width: 420px;
+      background: var(--white);
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-xl);
+      padding: 2.5rem 2rem;
+      box-shadow: var(--shadow-lg);
+      display: flex; flex-direction: column; gap: 1.2rem;
+    }
+    .auth-icon-wrap { display: flex; justify-content: center; }
+    .auth-icon-circle {
+      width: 60px; height: 60px;
+      background: linear-gradient(135deg, var(--g-600), var(--g-400));
+      border-radius: 50%;
+      display: flex; align-items: center; justify-content: center;
+      box-shadow: var(--shadow-g);
+    }
+    .auth-icon-circle svg {
+      width: 28px; height: 28px;
+      fill: none; stroke: white;
+      stroke-width: 2; stroke-linecap: round; stroke-linejoin: round;
+    }
+    .auth-title {
+      font-family: 'Cormorant Garamond', serif;
+      font-size: 1.8rem; font-weight: 700;
+      color: var(--dark); text-align: center;
+      line-height: 1.2; margin: 0;
+    }
+    .auth-sub {
+      font-size: 13px; color: var(--text-muted);
+      text-align: center; line-height: 1.6; margin: 0;
+    }
+    .auth-divider { height: 1px; background: var(--border); }
+    .auth-alert {
+      padding: 10px 14px; border-radius: var(--radius-md);
+      font-size: 13px; font-weight: 500;
+    }
+    .auth-alert.error   { background:#fef2f2; border:1px solid #fecaca; color:#dc2626; }
+    .auth-alert.success { background:var(--g-50); border:1px solid var(--g-200); color:var(--g-700); }
+
+    /* ── Timer ── */
+    .otp-timer-wrap {
+      display: flex; align-items: center;
+      justify-content: center; gap: 8px;
+    }
+    .otp-timer-circle {
+      width: 52px; height: 52px; border-radius: 50%;
+      background: var(--g-50); border: 2px solid var(--g-200);
+      display: flex; align-items: center; justify-content: center;
+      flex-direction: column;
+    }
+    .otp-timer-num {
+      font-size: 16px; font-weight: 700;
+      color: var(--dark); line-height: 1;
+    }
+    .otp-timer-label {
+      font-size: 9px; color: var(--text-muted);
+      font-weight: 500; text-transform: uppercase;
+    }
+    .otp-timer-sep {
+      font-size: 18px; font-weight: 700;
+      color: var(--text-muted); margin-bottom: 6px;
+    }
+    .otp-timer-expired {
+      text-align: center; font-size: 13px;
+      color: #dc2626; font-weight: 500;
+    }
+
+    /* ── Fields ── */
+    .auth-field { display: flex; flex-direction: column; gap: 6px; }
+    .auth-label {
+      font-size: 12px; font-weight: 600;
+      color: var(--text-secondary);
+      letter-spacing: 0.5px; text-transform: uppercase;
+    }
+    .auth-input {
+      width: 100%; padding: 11px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: var(--radius-md);
+      font-family: 'Sora', sans-serif;
+      font-size: 14px; color: var(--dark);
+      background: var(--surface); outline: none;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .auth-input:focus {
+      border-color: var(--g-500);
+      box-shadow: 0 0 0 3px rgba(34,197,94,0.12);
+      background: var(--white);
+    }
+    .auth-input-otp {
+      text-align: center;
+      font-size: 28px; font-weight: 700;
+      letter-spacing: 12px; padding: 14px;
+    }
+    .auth-hint { font-size: 11px; color: var(--text-muted); line-height: 1.5; }
+
+    /* ── Button ── */
+    .auth-btn {
+      width: 100%; padding: 12px;
+      background: linear-gradient(135deg, var(--g-700), var(--g-500));
+      color: white; border: none;
+      border-radius: var(--radius-md);
+      font-family: 'Sora', sans-serif;
+      font-size: 14px; font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      box-shadow: var(--shadow-g);
+    }
+    .auth-btn:hover:not(:disabled)  { opacity: 0.92; transform: translateY(-1px); }
+    .auth-btn:active:not(:disabled) { transform: translateY(0); }
+    .auth-btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none; box-shadow: none; }
+
+    /* ── Resend ── */
+    .resend-wrap {
+      display: flex; align-items: center;
+      justify-content: center; gap: 6px;
+      font-size: 13px;
+    }
+    .resend-link {
+      color: var(--g-600); text-decoration: none;
+      font-weight: 600; cursor: pointer;
+      background: none; border: none;
+      font-family: 'Sora', sans-serif; font-size: 13px;
+      transition: color 0.2s;
+    }
+    .resend-link:hover { color: var(--g-800); }
+    .resend-cooldown { font-size: 12px; color: var(--text-muted); }
+  </style>
 </head>
 <body>
 
   <!-- NAVBAR -->
   <header class="navbar">
-    <a href="{{ url_for('landing') }}" class="nav-brand">
+    <a href="{{ url_for('landing') }}" class="nav-brand nav-brand-link">
       <div class="nav-badge">
         <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
       </div>
-      <span class="nav-brand-name">Triple E &amp; Fiel Collins</span>
+      <div class="nav-brand-text">
+        <span class="nav-brand-name">Triple E &amp; Fiel Collins General Merchandise</span>
+        <span class="nav-brand-sub">E-Commerce &amp; POS System</span>
+      </div>
     </a>
   </header>
 
   <div class="page-wrap">
     <div class="auth-card">
 
-      <!-- Icon -->
       <div class="auth-icon-wrap">
         <div class="auth-icon-circle">
           <svg viewBox="0 0 24 24">
@@ -33,18 +171,37 @@
         </div>
       </div>
 
-      <h2 class="auth-title">Enter OTP</h2>
-      <p class="auth-sub">Enter the 6-digit OTP sent to your email address.</p>
+      <div>
+        <h2 class="auth-title">Verify OTP</h2>
+        <p class="auth-sub" style="margin-top:6px;">Enter the 6-digit OTP sent to your email address.</p>
+      </div>
 
-      <!-- Flash Messages -->
+      <div class="auth-divider"></div>
+
       {% with messages = get_flashed_messages(with_categories=true) %}
         {% for category, message in messages %}
           <div class="auth-alert {{ category }}">{{ message }}</div>
         {% endfor %}
       {% endwith %}
 
+      <!-- Timer -->
+      <div id="timerWrap" class="otp-timer-wrap">
+        <div class="otp-timer-circle">
+          <span class="otp-timer-num" id="timerMin">05</span>
+          <span class="otp-timer-label">min</span>
+        </div>
+        <span class="otp-timer-sep">:</span>
+        <div class="otp-timer-circle">
+          <span class="otp-timer-num" id="timerSec">00</span>
+          <span class="otp-timer-label">sec</span>
+        </div>
+      </div>
+      <p id="timerExpired" class="otp-timer-expired" style="display:none;">
+        ⚠ OTP has expired. Please request a new one.
+      </p>
+
       <!-- Form -->
-      <form method="POST" action="{{ url_for('verify_otp') }}">
+      <form method="POST" action="{{ url_for('verify_otp') }}" style="display:flex;flex-direction:column;gap:1rem;">
         <div class="auth-field">
           <label class="auth-label" for="otp">6-Digit OTP</label>
           <input
@@ -57,19 +214,23 @@
             required
             autocomplete="one-time-code"
           />
-          <p class="auth-hint">Check your inbox and spam folder. OTP expires in 15 minutes.</p>
+          <p class="auth-hint">Check your inbox and spam folder. OTP expires in 5 minutes.</p>
         </div>
-        <button type="submit" class="auth-btn">Verify OTP →</button>
+        <button type="submit" class="auth-btn" id="verifyBtn" disabled>Verify OTP →</button>
       </form>
 
-      <a href="{{ url_for('forgot_password') }}" class="auth-link">← Request new OTP</a>
+      <!-- Resend -->
+      <div class="resend-wrap">
+        <span style="color:var(--text-muted);">Didn't receive it?</span>
+        <a href="{{ url_for('forgot_password') }}" class="resend-link" id="resendBtn">
+          Resend OTP Code
+        </a>
+        <span class="resend-cooldown" id="resendCooldown" style="display:none;"></span>
+      </div>
 
     </div>
   </div>
 
-  <script>
-    document.getElementById('otp').focus();
-  </script>
-
+  <script src="{{ url_for('static', filename='js/verify_otp.js') }}"></script>
 </body>
 </html>
