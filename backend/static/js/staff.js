@@ -93,11 +93,69 @@ let autoRefreshTimer = null;
 const AUTO_REFRESH_SECTIONS = ['orders', 'inventory', 'pos'];
 const AUTO_REFRESH_INTERVAL = 15000; // 15 seconds (increased to avoid collapsing expanded rows)
 
+
+// ─── Preserve expanded rows + filter states across refresh ─────────────────
+function saveStaffExpandedRows() {
+  const expanded = [];
+  document.querySelectorAll('[id^="invVarRow_"]').forEach(row => {
+    if (row.style.display !== 'none') expanded.push(row.id);
+  });
+  return expanded;
+}
+
+function restoreStaffExpandedRows(expanded) {
+  expanded.forEach(id => {
+    const row = document.getElementById(id);
+    if (row) {
+      row.style.display = '';
+      const parts     = id.split('_');
+      const productId = parts[1];
+      const branchId  = parts[2];
+      const btn = document.querySelector('[onclick*="' + productId + '"]');
+      if (btn) btn.textContent = '▼';
+    }
+  });
+}
+
+function saveStaffFilterStates() {
+  return {
+    historyType:   document.getElementById('staffHistoryTypeFilter')?.value || '',
+    orderType:     document.getElementById('staffOrderTypeFilter')?.value || '',
+    orderStatus:   document.querySelector('#staffOrdersSection .filter-select')?.value || '',
+  };
+}
+
+function restoreStaffFilterStates(states) {
+  const histFilter = document.getElementById('staffHistoryTypeFilter');
+  if (histFilter && states.historyType) {
+    histFilter.value = states.historyType;
+    if (typeof filterStaffHistoryType === 'function') filterStaffHistoryType(states.historyType);
+  }
+  const orderTypeFilter = document.getElementById('staffOrderTypeFilter');
+  if (orderTypeFilter && states.orderType) {
+    orderTypeFilter.value = states.orderType;
+    if (typeof filterStaffOrderType === 'function') filterStaffOrderType(states.orderType);
+  }
+}
+
 function startAutoRefresh(section) {
   stopAutoRefresh();
   if (!AUTO_REFRESH_SECTIONS.includes(section)) return;
   autoRefreshTimer = setInterval(() => {
-    if (loaders[section]) loaders[section]();
+    if (loaders[section]) {
+      const expandedRows = saveStaffExpandedRows();
+      const filterStates = saveStaffFilterStates();
+      const origRender   = window.renderInvHistory;
+
+      window.renderInvHistory = function(data) {
+        if (origRender) origRender(data);
+        restoreStaffExpandedRows(expandedRows);
+        restoreStaffFilterStates(filterStates);
+        window.renderInvHistory = origRender;
+      };
+
+      loaders[section]();
+    }
   }, AUTO_REFRESH_INTERVAL);
 }
 

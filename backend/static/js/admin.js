@@ -101,11 +101,86 @@ let autoRefreshTimer = null;
 const AUTO_REFRESH_SECTIONS = ['overview', 'orders', 'inventory'];
 const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
 
+
+// ─── Preserve expanded rows + filter states across refresh ─────────────────
+function saveExpandedRows() {
+  const expanded = [];
+  document.querySelectorAll('[id^="invVarRow_"]').forEach(row => {
+    if (row.style.display !== 'none') expanded.push(row.id);
+  });
+  document.querySelectorAll('[id^="branchStockRow_"]').forEach(row => {
+    if (row.style.display !== 'none') expanded.push(row.id);
+  });
+  return expanded;
+}
+
+function restoreExpandedRows(expanded) {
+  expanded.forEach(id => {
+    const row = document.getElementById(id);
+    if (row) {
+      row.style.display = '';
+      // Update arrow icon
+      const productId = id.split('_')[1];
+      const branchId  = id.split('_')[2];
+      const btn = document.querySelector('[onclick*="' + productId + '"][onclick*="' + branchId + '"]');
+      if (btn) btn.textContent = '▼';
+    }
+  });
+}
+
+function saveFilterStates() {
+  return {
+    inventoryType:    document.getElementById('inventoryTypeFilter')?.value || '',
+    adminOrderType:   document.getElementById('adminOrderTypeFilter')?.value || '',
+    adminOrderStatus: document.getElementById('adminOrderStatusFilter')?.value || '',
+    invSearch:        document.querySelector('.search-input')?.value || '',
+  };
+}
+
+function restoreFilterStates(states) {
+  const invFilter = document.getElementById('inventoryTypeFilter');
+  if (invFilter && states.inventoryType) {
+    invFilter.value = states.inventoryType;
+    filterInventoryType(states.inventoryType);
+  }
+  const orderType = document.getElementById('adminOrderTypeFilter');
+  if (orderType && states.adminOrderType) {
+    orderType.value = states.adminOrderType;
+  }
+  const orderStatus = document.getElementById('adminOrderStatusFilter');
+  if (orderStatus && states.adminOrderStatus) {
+    orderStatus.value = states.adminOrderStatus;
+    if (states.adminOrderType || states.adminOrderStatus) applyAdminOrderFilters();
+  }
+}
+
 function startAutoRefresh(section) {
   stopAutoRefresh(); // clear any existing timer
   if (!AUTO_REFRESH_SECTIONS.includes(section)) return;
   autoRefreshTimer = setInterval(() => {
-    if (loaders[section]) loaders[section]();
+    if (loaders[section]) {
+      const expandedRows  = saveExpandedRows();
+      const filterStates  = saveFilterStates();
+      const origInventory = renderInventory;
+      const origOrders    = renderOrders;
+
+      // Patch renderInventory to restore after render
+      window.renderInventory = function(data) {
+        origInventory(data);
+        restoreExpandedRows(expandedRows);
+        restoreFilterStates(filterStates);
+        window.renderInventory = origInventory;
+      };
+
+      // Patch renderOrders to restore after render
+      window.renderOrders = function(data) {
+        origOrders(data);
+        restoreFilterStates(filterStates);
+        window.renderOrders = origOrders;
+      };
+
+      loaders[section]();
+    }
   }, AUTO_REFRESH_INTERVAL);
 }
 
