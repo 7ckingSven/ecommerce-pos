@@ -1228,7 +1228,7 @@ async function loadOrders() {
       const db = new Date(b.created_at || b.date || 0);
       return db - da;
     });
-    renderStaffOrders(staffOrders);
+    applyStaffOrderFilters();
     updateOrdersBadge(staffOrders);
   } catch (e) { console.error('Orders error:', e); }
 }
@@ -1385,6 +1385,7 @@ function viewStaffOrderItems(order) {
 
 let staffOrderTypeFilter   = '';
 let staffOrderStatusFilter = '';
+let staffOrderSearchText   = '';
 
 function filterStaffOrderType(type) {
   staffOrderTypeFilter = type;
@@ -1396,10 +1397,29 @@ function filterStaffOrders(status) {
   applyStaffOrderFilters();
 }
 
+function filterStaffOrderSearch(val) {
+  staffOrderSearchText = val.toLowerCase();
+  staffOrdersPage = 1;
+  applyStaffOrderFilters();
+}
+window.filterStaffOrderSearch = filterStaffOrderSearch;
+
 function applyStaffOrderFilters() {
   let filtered = staffOrders;
   if (staffOrderTypeFilter)   filtered = filtered.filter(o => o.order_type === staffOrderTypeFilter);
   if (staffOrderStatusFilter) filtered = filtered.filter(o => o.status === staffOrderStatusFilter);
+  if (staffOrderSearchText) {
+    filtered = filtered.filter(o => {
+      const customer = o.customer ? (o.customer.fname + ' ' + o.customer.lname).toLowerCase() : 'walk-in';
+      const orderId  = (o.order_id || '').toLowerCase();
+      const status   = (o.status || '').toLowerCase();
+      const type     = (o.order_type || '').toLowerCase();
+      return customer.includes(staffOrderSearchText)
+          || orderId.includes(staffOrderSearchText)
+          || status.includes(staffOrderSearchText)
+          || type.includes(staffOrderSearchText);
+    });
+  }
   staffOrdersPage = 1;
   renderStaffOrders(filtered);
 }
