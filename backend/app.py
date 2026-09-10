@@ -123,7 +123,7 @@ def download_apk():
         apk_path,
         mimetype='application/vnd.android.package-archive',
         as_attachment=True,
-        download_name='TripleE-FielCollins-App.apk'
+        download_name='TripleE-FielCollince-App.apk'
     )
 
 # ─── UNIFIED LOGIN ────────────────────────────────────
@@ -230,14 +230,14 @@ def forgot_password():
             # Send OTP via email
             try:
                 msg = Message(
-                    subject='Password Reset OTP - Triple E & Fiel Collins',
+                    subject='Password Reset OTP - Triple E & Fiel Collince',
                     recipients=[email],
                     html=f'''
                     <html>
                         <body style="font-family: Arial, sans-serif; line-height: 1.6;">
                             <div style="max-width: 600px; margin: 0 auto;">
                                 <h2>Password Reset Request</h2>
-                                <p>You have requested to reset your password for Triple E & Fiel Collins Management System.</p>
+                                <p>You have requested to reset your password for Triple E & Fiel Collince Management System.</p>
                                 <p style="font-size: 18px; margin: 20px 0;">Your One-Time Password (OTP) is:</p>
                                 <div style="background-color: #f0f0f0; padding: 20px; border-radius: 5px; text-align: center;">
                                     <p style="font-size: 32px; font-weight: bold; letter-spacing: 3px; margin: 0;">{otp}</p>
@@ -250,7 +250,7 @@ def forgot_password():
                                 </p>
                                 <hr style="border: none; border-top: 1px solid #ddd; margin-top: 30px;">
                                 <p style="color: #999; font-size: 12px; text-align: center;">
-                                    Triple E & Fiel Collins General Merchandise<br>
+                                    Triple E & Fiel Collince General Merchandise<br>
                                     E-Commerce & POS System
                                 </p>
                             </div>
@@ -1433,7 +1433,7 @@ def admin_update_purchase_order(po_id):
 def send_otp_email(recipient_email, otp):
     import time
     msg = Message(
-        subject    = 'Your OTP — Triple E & Fiel Collins',
+        subject    = 'Your OTP — Triple E & Fiel Collince',
         recipients = [recipient_email],
         body       = f"""Hello,
 
@@ -1444,7 +1444,7 @@ Your One-Time Password (OTP) for password reset is:
 This code expires in 5 minutes.
 Do not share this with anyone.
 
-— Triple E & Fiel Collins General Merchandise"""
+— Triple E & Fiel Collince General Merchandise"""
     )
     for attempt in range(3):
         try:
