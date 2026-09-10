@@ -2789,8 +2789,63 @@ function renderUsers(users) {
     : '<tr><td colspan="7" class="table-empty">No users found</td></tr>';
 }
 
+let userSearchText = '';
+let userRoleFilter = '';
+
+function filterUserSearch(val) {
+  userSearchText = val.toLowerCase();
+  applyUserFilters();
+}
+window.filterUserSearch = filterUserSearch;
+
 function filterUserRole(role) {
-  renderUsers(role ? allUsers.filter(u => u.role === role) : allUsers);
+  userRoleFilter = role;
+  applyUserFilters();
+}
+
+function filterUserStatus(status) {
+  userStatusFilter = status;
+  applyUserFilters();
+}
+window.filterUserStatus = filterUserStatus;
+
+function applyUserFilters() {
+  let filtered = allUsers;
+
+  // Role filter
+  if (userRoleFilter) {
+    filtered = filtered.filter(u => u.role === userRoleFilter);
+  }
+
+  // Status filter
+  if (userStatusFilter) {
+    filtered = filtered.filter(u => {
+      const status = (u.status || 'active').toLowerCase().trim();
+      return status === userStatusFilter;
+    });
+  }
+
+  // Search filter
+  if (userSearchText) {
+    filtered = filtered.filter(u => {
+      const s    = Array.isArray(u.staff)    ? u.staff[0]    : u.staff;
+      const c    = Array.isArray(u.customer) ? u.customer[0] : u.customer;
+      const name = s?.fname
+        ? (s.fname + ' ' + (s.lname || '')).toLowerCase()
+        : c?.fname
+        ? (c.fname + ' ' + (c.lname || '')).toLowerCase()
+        : '';
+      const username = (u.username || '').toLowerCase();
+      const email    = (s?.email || c?.email || '').toLowerCase();
+      const role     = (u.role || '').toLowerCase();
+      return name.includes(userSearchText)
+          || username.includes(userSearchText)
+          || email.includes(userSearchText)
+          || role.includes(userSearchText);
+    });
+  }
+
+  renderUsers(filtered);
 }
 
 function openUserModal(user = null) {
