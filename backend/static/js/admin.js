@@ -2210,6 +2210,154 @@ function renderSalesData(completed, allOrders) {
   }
 }
 
+
+// ─── Print / PDF Sales Report ──────────────────────────────────────────────
+function printSalesReport() {
+  const filterLabel = document.getElementById('salesFilterLabel')?.textContent || 'All Time';
+  const now         = new Date().toLocaleDateString('en-PH', { timeZone:'Asia/Manila', year:'numeric', month:'long', day:'numeric', hour:'2-digit', minute:'2-digit' });
+
+  // Gather stats
+  const totalEl   = document.getElementById('salesTotal')?.textContent   || '₱0.00';
+  const onlineEl  = document.getElementById('salesOnline')?.textContent  || '₱0.00';
+  const walkinEl  = document.getElementById('salesWalkin')?.textContent  || '₱0.00';
+  const teRev     = document.getElementById('branchTE_revenue')?.textContent || '₱0.00';
+  const teOrders  = document.getElementById('branchTE_orders')?.textContent  || '0';
+  const teWalkin  = document.getElementById('branchTE_walkin')?.textContent  || '0';
+  const teOnline  = document.getElementById('branchTE_online')?.textContent  || '0';
+  const fcRev     = document.getElementById('branchFC_revenue')?.textContent || '₱0.00';
+  const fcOrders  = document.getElementById('branchFC_orders')?.textContent  || '0';
+  const fcWalkin  = document.getElementById('branchFC_walkin')?.textContent  || '0';
+  const fcOnline  = document.getElementById('branchFC_online')?.textContent  || '0';
+
+  // Top products
+  const topRows   = document.getElementById('topProductsBody')?.innerHTML   || '';
+  const leastRows = document.getElementById('leastProductsBody')?.innerHTML || '';
+
+  // Payment breakdown
+  const payRows   = document.getElementById('paymentBreakdownBody')?.innerHTML || '';
+
+  const printWin = window.open('', '_blank', 'width=900,height=700');
+  printWin.document.write(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Sales Report — TEFC E-Commerce</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; padding: 32px; background: #fff; }
+    .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #16a34a; padding-bottom: 16px; }
+    .header h1 { font-size: 22px; font-weight: 800; color: #14532d; }
+    .header h2 { font-size: 14px; font-weight: 600; color: #166534; margin-top: 4px; }
+    .header p  { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .badge-green { background: #dcfce7; color: #14532d; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    .section { margin-bottom: 20px; }
+    .section-title { font-size: 13px; font-weight: 700; color: #14532d; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #dcfce7; padding-bottom: 6px; margin-bottom: 10px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; text-align: center; }
+    .stat-box .val { font-size: 18px; font-weight: 800; color: #14532d; }
+    .stat-box .lbl { font-size: 11px; color: #6b7280; margin-top: 2px; }
+    .branch-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .branch-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; }
+    .branch-name { font-size: 13px; font-weight: 700; color: #14532d; margin-bottom: 8px; }
+    .branch-row { display: flex; justify-content: space-between; font-size: 12px; padding: 3px 0; border-bottom: 1px dashed #dcfce7; }
+    .branch-row:last-child { border: none; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #14532d; color: #fff; padding: 7px 10px; text-align: left; font-size: 11px; }
+    td { padding: 6px 10px; border-bottom: 1px solid #f0fdf4; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    .footer { margin-top: 24px; text-align: center; font-size: 11px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+    @media print {
+      body { padding: 16px; }
+      button { display: none; }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="header">
+    <h1>🏪 TEFC E-Commerce</h1>
+    <h2>Triple E &amp; Fiel Collince General Merchandise</h2>
+    <p>SALES REPORT &nbsp;|&nbsp; <span class="badge-green">${filterLabel}</span></p>
+    <p style="margin-top:6px;">Generated: ${now}</p>
+  </div>
+
+  <!-- Overview -->
+  <div class="section">
+    <div class="section-title">Sales Overview</div>
+    <div class="stat-grid">
+      <div class="stat-box"><div class="val">${totalEl}</div><div class="lbl">Total Revenue</div></div>
+      <div class="stat-box"><div class="val">${onlineEl}</div><div class="lbl">Online Sales</div></div>
+      <div class="stat-box"><div class="val">${walkinEl}</div><div class="lbl">Walk-in Sales</div></div>
+    </div>
+  </div>
+
+  <!-- Branch Breakdown -->
+  <div class="section">
+    <div class="section-title">Branch Sales Breakdown</div>
+    <div class="branch-grid">
+      <div class="branch-box">
+        <div class="branch-name">🏪 Triple E</div>
+        <div class="branch-row"><span>Total Revenue</span><span><b>${teRev}</b></span></div>
+        <div class="branch-row"><span>Total Orders</span><span>${teOrders}</span></div>
+        <div class="branch-row"><span>Walk-in Orders</span><span>${teWalkin}</span></div>
+        <div class="branch-row"><span>Online Orders</span><span>${teOnline}</span></div>
+      </div>
+      <div class="branch-box">
+        <div class="branch-name">🏪 Fiel Collince</div>
+        <div class="branch-row"><span>Total Revenue</span><span><b>${fcRev}</b></span></div>
+        <div class="branch-row"><span>Total Orders</span><span>${fcOrders}</span></div>
+        <div class="branch-row"><span>Walk-in Orders</span><span>${fcWalkin}</span></div>
+        <div class="branch-row"><span>Online Orders</span><span>${fcOnline}</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Top Selling -->
+  <div class="section">
+    <div class="section-title">Top Selling Products</div>
+    <table>
+      <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+      <tbody>${topRows}</tbody>
+    </table>
+  </div>
+
+  <!-- Least Selling -->
+  <div class="section">
+    <div class="section-title">Least Selling Products</div>
+    <table>
+      <thead><tr><th>Product</th><th>Units Sold</th><th>Revenue</th></tr></thead>
+      <tbody>${leastRows}</tbody>
+    </table>
+  </div>
+
+  <!-- Payment Breakdown -->
+  <div class="section">
+    <div class="section-title">Payment Method Breakdown</div>
+    <table>
+      <thead><tr><th>Payment Method</th><th>Transactions</th><th>Total Amount</th></tr></thead>
+      <tbody>${payRows}</tbody>
+    </table>
+  </div>
+
+  <div class="footer">
+    <p>Triple E &amp; Fiel Collince General Merchandise &mdash; TEFC E-Commerce &amp; POS System</p>
+    <p>This report is system-generated and reflects data based on the selected filter period.</p>
+    <p style="margin-top:8px;">
+      <button onclick="window.print()" style="background:#16a34a;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;">🖨️ Print</button>
+      <button onclick="window.close()" style="background:#f3f4f6;color:#111;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;">✕ Close</button>
+    </p>
+  </div>
+
+</body>
+</html>
+  `);
+  printWin.document.close();
+  printWin.focus();
+  setTimeout(() => printWin.print(), 500);
+}
+window.printSalesReport = printSalesReport;
+
 async function loadSales() {
   try {
     const [orders, customers] = await Promise.all([
