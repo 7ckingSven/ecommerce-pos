@@ -714,7 +714,7 @@ function showReceipt(data, items, received, payment, refNo) {
 
   document.getElementById('receiptContent').innerHTML = `
     <div class="receipt-header">
-      <strong>Triple E & Fiel Collins</strong><br>
+      <strong>Triple E & Fiel Collince</strong><br>
       <span>General Merchandise</span><br>
       ${branchName ? `<span>${branchName} Branch</span><br>` : ''}
       <span>Koronadal City, South Cotabato</span><br>
