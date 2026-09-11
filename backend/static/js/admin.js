@@ -10,6 +10,65 @@ function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
 }
 
+
+// ─── Custom Pager (same design as renderPager, custom page size) ────────────
+function renderPagerCustom(containerId, total, currentPage, pageSize, fnName) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  var totalPages = Math.ceil(total / pageSize);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  var s = (currentPage - 1) * pageSize + 1;
+  var e = Math.min(currentPage * pageSize, total);
+
+  function btn(page, label, disabled) {
+    return '<button '
+      + (disabled ? 'disabled ' : '')
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="height:30px;padding:0 10px;border-radius:6px;'
+      + 'border:1.5px solid var(--border);background:var(--surface);'
+      + 'color:var(--text-primary);font-size:12px;cursor:pointer;'
+      + 'opacity:' + (disabled ? '0.4' : '1') + ';">'
+      + label + '</button>';
+  }
+
+  function pageBtn(page, active) {
+    return '<button '
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="min-width:30px;height:30px;border-radius:6px;'
+      + 'border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';'
+      + 'background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';'
+      + 'color:' + (active ? '#fff' : 'var(--text-primary)') + ';'
+      + 'font-size:12px;font-weight:' + (active ? '700' : '400') + ';'
+      + 'cursor:pointer;padding:0 6px;">'
+      + page + '</button>';
+  }
+
+  var btns = '';
+  for (var i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
+      btns += pageBtn(i, i === currentPage);
+    } else if (Math.abs(i - currentPage) === 2) {
+      btns += '<span style="color:var(--text-muted);padding:0 2px;">...</span>';
+    }
+  }
+
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;">'
+    + '<span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span>'
+    + '<div style="display:flex;align-items:center;gap:4px;">'
+    + btn(currentPage - 1, 'Prev', currentPage === 1)
+    + btns
+    + btn(currentPage + 1, 'Next', currentPage === totalPages)
+    + '</div></div>';
+
+  el.querySelectorAll('button[data-fn]').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var fn   = this.getAttribute('data-fn');
+      var page = parseInt(this.getAttribute('data-page'));
+      if (window[fn]) window[fn](page);
+    });
+  });
+}
+
 function renderPager(containerId, total, currentPage, fnName) {
   var el = document.getElementById(containerId);
   if (!el) return;
@@ -3027,7 +3086,18 @@ window.showConfirmDialog = showConfirmDialog;
 
 let allStockRequests = [];
 let allPOs           = [];
+let poPage           = 1;
+const PO_PAGE_SIZE   = 10;
+let srPage           = 1;
+const SR_PAGE_SIZE   = 6;
 let poItems          = []; // items in create PO modal
+
+
+// ─── PO & SR page change handlers ─────────────────────────────────────────
+function changePOPage(page) { poPage = page; renderPOs(allPOs); }
+function changeSRPage(page) { srPage = page; renderStockRequests(allStockRequests); }
+window.changePOPage = changePOPage;
+window.changeSRPage = changeSRPage;
 
 async function loadPurchaseOrders() {
   try {
@@ -3053,8 +3123,11 @@ async function loadPurchaseOrders() {
 
 function renderStockRequests(requests) {
   const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
-  document.getElementById('stockRequestsBody').innerHTML = requests.length
-    ? requests.map(r => `
+  if (srPage > Math.ceil(requests.length / SR_PAGE_SIZE)) srPage = 1;
+  const paged = requests.slice((srPage - 1) * SR_PAGE_SIZE, srPage * SR_PAGE_SIZE);
+  renderPagerCustom('srPagination', requests.length, srPage, SR_PAGE_SIZE, 'changeSRPage');
+  document.getElementById('stockRequestsBody').innerHTML = paged.length
+    ? paged.map(r => `
         <tr>
           <td>
             <strong>${r.product?.product_name || '—'}</strong>
@@ -3086,8 +3159,11 @@ function renderStockRequests(requests) {
 
 function renderPOs(pos) {
   const statusColors = { draft:'gray', ordered:'blue', received:'green', cancelled:'red' };
-  document.getElementById('poBody').innerHTML = pos.length
-    ? pos.map(po => {
+  if (poPage > Math.ceil(pos.length / PO_PAGE_SIZE)) poPage = 1;
+  const paged = pos.slice((poPage - 1) * PO_PAGE_SIZE, poPage * PO_PAGE_SIZE);
+  renderPagerCustom('poPagination', pos.length, poPage, PO_PAGE_SIZE, 'changePOPage');
+  document.getElementById('poBody').innerHTML = paged.length
+    ? paged.map(po => {
         const items    = po.po_item || [];
         const total    = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
         const itemCount = items.length;
