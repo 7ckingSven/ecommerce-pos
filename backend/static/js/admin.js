@@ -179,7 +179,9 @@ function startAutoRefresh(section) {
         window.renderOrders = origOrders;
       };
 
+      lockSidebar();
       loaders[section]();
+      setTimeout(unlockSidebar, 1000);
     }
   }, AUTO_REFRESH_INTERVAL);
 }
@@ -269,6 +271,34 @@ function updateTopbarDate() {
 }
 updateTopbarDate();
 setInterval(updateTopbarDate, 60000);
+
+
+// ─── Sidebar Toggle ────────────────────────────────────────
+function toggleSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (!sidebar) return;
+  sidebar.classList.toggle('collapsed');
+  localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+}
+window.toggleSidebar = toggleSidebar;
+
+// Restore sidebar state on load
+(function() {
+  const sidebar   = document.getElementById('sidebar');
+  const collapsed = localStorage.getItem('sidebarCollapsed');
+  if (sidebar && collapsed === 'true') sidebar.classList.add('collapsed');
+})();
+
+
+// ─── Lock sidebar width during refresh to prevent icon shift ───────────────
+function lockSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.style.width = sidebar.offsetWidth + 'px';
+}
+function unlockSidebar() {
+  const sidebar = document.getElementById('sidebar');
+  if (sidebar) sidebar.style.width = '';
+}
 
 // ─── Toast ────────────────────────────────────────────
 function showToast(msg, type = 'success') {

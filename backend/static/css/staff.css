@@ -372,9 +372,12 @@
 
 /* Center nav icons */
 .sidebar.collapsed .nav-item {
-  justify-content: center;
-  padding: 9px 0;
-  gap: 0;
+  justify-content: center !important;
+  align-items: center !important;
+  padding: 9px 0 !important;
+  gap: 0 !important;
+  position: relative !important;
+  overflow: visible !important;
 }
 .sidebar.collapsed .nav-item span {
   opacity: 0;
@@ -414,31 +417,34 @@
 }
 
 /* Tooltips on hover when collapsed */
-.sidebar.collapsed .nav-item {
-  position: relative;
-}
 .sidebar.collapsed .nav-item::after {
   content: attr(data-tooltip);
-  position: absolute;
-  left: calc(100% + 12px);
-  top: 50%;
-  transform: translateY(-50%);
-  background: var(--surface-2);
+  position: fixed;
+  left: 72px;
+  background: var(--card-bg);
   color: var(--text);
   border: 1px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 5px 10px;
+  padding: 6px 12px;
   font-size: 12px;
   font-weight: 600;
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
-  z-index: 200;
-  box-shadow: 0 4px 12px var(--shadow);
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(0,0,0,0.15);
 }
 .sidebar.collapsed .nav-item:hover::after {
   opacity: 1;
+}
+
+.sidebar.collapsed .nav-item svg {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  margin: 0 auto;
+  display: block;
 }
 
 /* ─── Responsive ─── */
