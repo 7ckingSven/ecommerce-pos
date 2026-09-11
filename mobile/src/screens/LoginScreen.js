@@ -70,8 +70,8 @@ export default function LoginScreen({ navigation }) {
             style={styles.logoImg}
             resizeMode="cover"
           />
-          <Text style={styles.appName}>{APP_NAME}</Text>
-          <Text style={styles.appSub}>{APP_SUBTITLE}</Text>
+          <Text style={styles.appName}>TEFC E-Commerce</Text>
+          <Text style={styles.appSub}>Triple E & Fiel Collince General Merchandise</Text>
         </View>
 
         {/* Card */}
@@ -153,7 +153,7 @@ export default function LoginScreen({ navigation }) {
           </View>
         </View>
 
-        <Text style={styles.footer}>© 2026 Triple E & Fiel Collins General Merchandise</Text>
+        <Text style={styles.footer}>© 2026 Triple E & Fiel Collince General Merchandise</Text>
       </ScrollView>
     </KeyboardAvoidingView>
   );

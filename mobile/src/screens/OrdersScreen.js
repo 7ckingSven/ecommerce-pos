@@ -105,7 +105,6 @@ export default function OrdersScreen({ navigation }) {
   if (!loggedIn) {
     return (
       <View style={styles.container}>
-        <View style={styles.header}><Text style={styles.headerTitle}>My Orders</Text></View>
         <View style={styles.emptyWrap}>
           <Feather name="lock" size={48} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Please log in</Text>
@@ -126,10 +125,6 @@ export default function OrdersScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Orders</Text>
-        <Text style={styles.headerSub}>{filteredOrders.length} order(s)</Text>
-      </View>
 
       {/* Tab Bar - always stays at top */}
       <ScrollView

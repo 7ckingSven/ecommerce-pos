@@ -168,7 +168,6 @@ export default function CartScreen({ navigation }) {
   // ─── Not Logged In ────────────────────────────────────
   if (!loggedIn) return (
     <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.headerTitle}>My Cart</Text></View>
       <View style={styles.emptyWrap}>
         <Feather name="lock" size={48} color={COLORS.grayLight}/>
         <Text style={styles.emptyTitle}>Please log in</Text>
@@ -191,14 +190,6 @@ export default function CartScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-
-      {/* Header */}
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Cart</Text>
-        {safeCart.length > 0 && (
-          <Text style={styles.headerSub}>{safeCart.length} item(s)</Text>
-        )}
-      </View>
 
       {error ? (
         <View style={styles.emptyWrap}>

@@ -215,40 +215,32 @@ export default function HomeScreen({ navigation }) {
   return (
     <View style={styles.container}>
 
-      {/* Header */}
+      {/* Header — Green header */}
       <View style={styles.header}>
-        <View>
-          <Text style={styles.headerGreeting}>Welcome! 👋</Text>
-          <Text style={styles.headerTitle}>Triple E & Fiel Collins</Text>
-        </View>
-        <TouchableOpacity
-          style={styles.cartBtn}
-          onPress={() => navigation.navigate('Cart')}
-        >
-          <Feather name="shopping-cart" size={22} color={COLORS.white}/>
-          {cartCount > 0 && (
-            <View style={styles.cartBadge}>
-              <Text style={styles.cartBadgeText}>{cartCount}</Text>
-            </View>
-          )}
-        </TouchableOpacity>
-      </View>
+        <View style={styles.headerTop}>
+          <View>
+            <Text style={styles.headerTitle}>TEFC E-Commerce</Text>
+            <Text style={styles.headerSub}>Triple E & Fiel Collince</Text>
+          </View>
 
-      {/* Search */}
-      <View style={styles.searchWrap}>
-        <Feather name="search" size={16} color={COLORS.textMuted} style={{ marginRight: 6 }}/>
-        <TextInput
-          style={styles.searchInput}
-          placeholder="Search products..."
-          placeholderTextColor={COLORS.textMuted}
-          value={search}
-          onChangeText={handleSearch}
-        />
-        {search !== '' && (
-          <TouchableOpacity onPress={() => { setSearch(''); loadProducts(selectedCat); }}>
+        </View>
+
+        {/* Search Bar inside header */}
+        <View style={styles.searchWrap}>
+          <Feather name="search" size={16} color={COLORS.textMuted} style={{ marginRight: 6 }}/>
+          <TextInput
+            style={styles.searchInput}
+            placeholder="Search products..."
+            placeholderTextColor={COLORS.textMuted}
+            value={search}
+            onChangeText={handleSearch}
+          />
+          {search !== '' && (
+            <TouchableOpacity onPress={() => { setSearch(''); loadProducts(selectedCat); }}>
             <Feather name="x" size={16} color={COLORS.textMuted}/>
           </TouchableOpacity>
         )}
+        </View>
       </View>
 
       {/* Category Filter */}
@@ -335,9 +327,12 @@ const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: COLORS.grayBg },
 
   // Header
-  header:                 { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: COLORS.dark, paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md },
+  header:                 { paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, backgroundColor: '#16a34a', shadowColor: '#14532d', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
+  headerTop:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.sm },
+
   headerGreeting:         { fontSize: 12, color: COLORS.grayLight },
-  headerTitle:            { fontSize: 16, fontWeight: '700', color: COLORS.white },
+  headerTitle:            { fontSize: 18, fontWeight: '700', color: '#fff' },
+  headerSub:              { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
   cartBtn:                { position: 'relative', padding: 4 },
   cartBadge:              { position: 'absolute', top: 0, right: 0, backgroundColor: COLORS.primary, borderRadius: RADIUS.full, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
   cartBadgeText:          { fontSize: 9, color: COLORS.white, fontWeight: '700' },
@@ -349,7 +344,7 @@ const styles = StyleSheet.create({
   // Categories
   catScroll:              { maxHeight: 44 }, // kept for compatibility
   catContent:             { paddingHorizontal: SPACING.md, gap: 8, alignItems: 'center' },
-  filterSection:          { marginBottom: 6 },
+  filterSection:          { marginBottom: 6, marginTop: SPACING.sm },
   filterLabel:            { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, paddingHorizontal: SPACING.md, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   catChip:                { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: COLORS.grayBorder },
   catChipActive:          { backgroundColor: COLORS.primary, borderColor: COLORS.primary },

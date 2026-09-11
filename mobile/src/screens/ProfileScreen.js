@@ -220,32 +220,26 @@ export default function ProfileScreen({ navigation }) {
     </View>
   );
 
+  // ─── Not Logged In ───────────────────────────────────
+  const initials = customer
+    ? ((customer.fname?.[0] || '') + (customer.lname?.[0] || '')).toUpperCase()
+    : '?';
+
   if (!loggedIn) return (
     <View style={styles.container}>
-      <View style={styles.header}><Text style={styles.headerTitle}>My Profile</Text></View>
       <View style={styles.emptyWrap}>
-        <Feather name="user" size={56} color={COLORS.grayLight}/>
-        <Text style={styles.emptyTitle}>Not logged in</Text>
-        <Text style={styles.emptyText}>Log in to view and manage your profile.</Text>
+        <Feather name="user" size={48} color={COLORS.textMuted}/>
+        <Text style={styles.emptyTitle}>Not Logged In</Text>
+        <Text style={styles.emptyText}>Please log in to view your profile.</Text>
         <TouchableOpacity style={styles.loginBtn} onPress={() => navigation.navigate('Login')}>
           <Text style={styles.loginBtnText}>Log In</Text>
-        </TouchableOpacity>
-        <TouchableOpacity onPress={() => navigation.navigate('Register')}>
-          <Text style={styles.registerLink}>Create an Account</Text>
         </TouchableOpacity>
       </View>
     </View>
   );
 
-  const initials = customer
-    ? `${customer.fname?.[0]||''}${customer.lname?.[0]||''}`.toUpperCase()
-    : 'C';
-
-  return (
+  if (loggedIn) return (
     <View style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>My Profile</Text>
-      </View>
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
 
@@ -308,28 +302,7 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-        {/* Quick Actions */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Quick Actions</Text>
-          <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('Orders')}>
-            <View style={styles.actionLeft}>
-              <View style={[styles.actionIcon, { backgroundColor: COLORS.primaryBg }]}>
-                <Feather name="package" size={18} color={COLORS.primary}/>
-              </View>
-              <Text style={styles.actionLabel}>My Orders</Text>
-            </View>
-            <Feather name="chevron-right" size={18} color={COLORS.textMuted}/>
-          </TouchableOpacity>
-          <TouchableOpacity style={styles.actionRow} onPress={() => navigation.navigate('Cart')}>
-            <View style={styles.actionLeft}>
-              <View style={[styles.actionIcon, { backgroundColor:'#eff6ff' }]}>
-                <Feather name="shopping-cart" size={18} color="#3b82f6"/>
-              </View>
-              <Text style={styles.actionLabel}>My Cart</Text>
-            </View>
-            <Feather name="chevron-right" size={18} color={COLORS.textMuted}/>
-          </TouchableOpacity>
-        </View>
+
 
         {/* Logout */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>

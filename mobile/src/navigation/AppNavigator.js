@@ -18,9 +18,11 @@ import CheckoutScreen      from '../screens/CheckoutScreen';
 import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 
+import { View, Text, StyleSheet } from 'react-native';
 import { COLORS } from '../utils/constants';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CartProvider } from '../utils/CartContext';
+import { useCart } from '../utils/CartContext';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -46,9 +48,45 @@ function CartStack() {
   );
 }
 
+// ─── Badge Component ─────────────────────────────────
+function TabBadge({ count, color }) {
+  if (!count || count <= 0) return null;
+  return (
+    <View style={{
+      position: 'absolute', top: -4, right: -8,
+      backgroundColor: COLORS.primary,
+      borderRadius: 10, minWidth: 18, height: 18,
+      alignItems: 'center', justifyContent: 'center',
+      paddingHorizontal: 4,
+    }}>
+      <Text style={{ color: '#fff', fontSize: 10, fontWeight: '700' }}>
+        {count > 99 ? '99+' : count}
+      </Text>
+    </View>
+  );
+}
+
 // ─── Main Tabs ────────────────────────────────────────
 function MainTabs() {
   const insets = useSafeAreaInsets();
+  const { cartCount } = useCart();
+  const [orderCount, setOrderCount] = React.useState(0);
+
+  React.useEffect(() => {
+    async function fetchOrderCount() {
+      try {
+        const { getOrders } = require('../services/orderService');
+        const orders = await getOrders();
+        const active = (orders || []).filter(o =>
+          ['pending','processing','out_for_delivery'].includes(o.status)
+        ).length;
+        setOrderCount(active);
+      } catch (e) {}
+    }
+    fetchOrderCount();
+    const interval = setInterval(fetchOrderCount, 30000);
+    return () => clearInterval(interval);
+  }, []);
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({
@@ -72,7 +110,13 @@ function MainTabs() {
             Orders:  'package',
             Profile: 'user',
           };
-          return <Feather name={icons[route.name]} size={22} color={color}/>;
+          return (
+            <View style={{ width: 28, alignItems: 'center' }}>
+              <Feather name={icons[route.name]} size={22} color={color}/>
+              {route.name === 'Cart'   && <TabBadge count={cartCount}/>}
+              {route.name === 'Orders' && <TabBadge count={orderCount}/>}
+            </View>
+          );
         },
       })}
     >
