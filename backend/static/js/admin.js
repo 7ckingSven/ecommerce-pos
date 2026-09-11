@@ -99,7 +99,7 @@ var pageTitles = {
 // ─── Auto Refresh (5 seconds) ─────────────────────────
 let autoRefreshTimer = null;
 const AUTO_REFRESH_SECTIONS = ['overview', 'orders', 'inventory'];
-const AUTO_REFRESH_INTERVAL = 5000; // 5 seconds
+const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 
 
 // ─── Preserve expanded rows + filter states across refresh ─────────────────
