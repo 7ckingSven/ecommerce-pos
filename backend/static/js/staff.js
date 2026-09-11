@@ -84,7 +84,7 @@ const pageTitles = {
   inventory: ['Inventory',        'View branch stock levels'],
   orders:    ['Orders',           'Manage online customer orders'],
   requests:  ['Stock Requests',   'Request stock from admin'],
-  summary:   ['Sales Summary',    'View your sales performance'],
+  summary:   ['Sales Summary',    'View sales performance'],
 };
 
 
