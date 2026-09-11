@@ -145,11 +145,11 @@ window.changeOrdersPage = changeOrdersPage;
 
 var pageTitles = {
   overview:        ['Dashboard',         'Dashboard summary & recent activity'],
-  products:        ['Products',          'Manage your product catalog'],
-  inventory:       ['Inventory',         'Track stock levels and movements'],
-  orders:          ['Orders',            'Manage customer and walk-in orders'],
+  products:        ['Products',          'Manage product catalog and details'],
+  inventory:       ['Inventory',         'Manage stock levels and movements'],
+  orders:          ['Orders',            'Manage online customer orders'],
   purchase_orders: ['Purchase Orders',   'Manage purchase orders & stock requests'],
-  sales:           ['Sales Reports',     'View sales analytics and reports'],
+  sales:           ['Sales Reports',     'View analytics and generate sales reports'],
   discounts:       ['Discounts',         'Manage product discounts'],
   users:           ['User Management',   'Manage admin and staff accounts'],
 };

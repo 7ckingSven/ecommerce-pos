@@ -82,7 +82,7 @@ window.changeStaffInvPage    = changeStaffInvPage;
 const pageTitles = {
   pos:       ['Point of Sale',    'Process walk-in customer orders'],
   inventory: ['Inventory',        'View branch stock levels'],
-  orders:    ['Orders',           'View and manage customer orders'],
+  orders:    ['Orders',           'Manage online customer orders'],
   requests:  ['Stock Requests',   'Request stock from admin'],
   summary:   ['Sales Summary',    'View your sales performance'],
 };
