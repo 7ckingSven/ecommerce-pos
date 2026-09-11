@@ -648,22 +648,17 @@ def api_products():
                 pid = oi['product_id']
                 sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
 
-        # Expand products with branch stock — one card per branch with stock > 0
-        expanded = []
+        # Return products with branch_stock array intact (not expanded per branch)
+        result = []
         for p in res.data:
+            entry = dict(p)
+            entry['total_sold'] = sold_map.get(p['product_id'], 0)
+            # Keep total quantity as sum of all branch stocks
             branch_stocks = p.get('branch_stock', [])
-            if not branch_stocks:
-                continue
-            for bs in branch_stocks:
-                if bs['quantity'] > 0:
-                    entry = dict(p)
-                    entry['branch_id']   = bs['branch_id']
-                    entry['branch_name'] = bs.get('branch', {}).get('branch_name', '')
-                    entry['quantity']    = bs['quantity']
-                    entry['total_sold']  = sold_map.get(p['product_id'], 0)
-                    expanded.append(entry)
+            entry['quantity'] = sum(bs['quantity'] for bs in branch_stocks)
+            result.append(entry)
 
-        return jsonify(expanded), 200
+        return jsonify(result), 200
     except Exception as e:
         print(f"API products error: {e}")
         return jsonify({'error': 'Failed to fetch products.'}), 500

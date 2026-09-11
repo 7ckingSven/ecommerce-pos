@@ -394,9 +394,11 @@ async function loadPosProducts() {
     const rawAll = await res.json();
     const all    = Array.isArray(rawAll) ? rawAll : [];
     // Filter to only show products for this branch
-    posProducts = all.filter(p =>
-      !p.branch_id || p.branch_id === staffBranchId
-    );
+    posProducts = all.filter(p => {
+      if (!staffBranchId) return true;
+      const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+      return bs !== undefined;
+    });
     renderPosProducts(posProducts);
     populateCategories(posProducts);
   } catch (e) { console.error('POS products error:', e); }
@@ -431,6 +433,9 @@ function renderPosProducts(products) {
     return;
   }
   wrap.innerHTML = products.map(p => {
+    // Get branch-specific stock
+    const branchStock = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+    const stockQty    = branchStock ? branchStock.quantity : p.quantity || 0;
     // Compute display price with discount if applicable
     const disc          = p.discount;
     const discountedPx  = disc ? p.price * (1 - disc.percentage / 100) : null;
@@ -443,8 +448,8 @@ function renderPosProducts(products) {
     const effectivePrice = discountedPx !== null ? discountedPx : p.price;
 
     return `
-      <div class="pos-product-card${p.quantity <= 0 ? ' out-of-stock' : ''}"
-           onclick="${p.quantity > 0 ? `selectPosProduct('${p.product_id}')` : ''}">
+      <div class="pos-product-card${stockQty <= 0 ? ' out-of-stock' : ''}"
+           onclick="${stockQty > 0 ? `selectPosProduct('${p.product_id}')` : ''}">
         ${p.image_url
           ? `<img src="${p.image_url}" class="pos-product-img" alt="${p.product_name}"/>`
           : `<div class="pos-product-img-placeholder">
@@ -453,7 +458,7 @@ function renderPosProducts(products) {
         }
         <div class="pos-product-name">${p.product_name}</div>
         ${priceDisplay}
-        <div class="pos-product-stock">${p.quantity <= 0 ? '⚠️ Out of stock' : `Stock: ${p.quantity}`}</div>
+        <div class="pos-product-stock">${stockQty <= 0 ? '⚠️ Out of stock' : `Stock: ${stockQty}`}</div>
       </div>`;
   }).join('');
 }
@@ -953,9 +958,11 @@ async function loadInventory() {
     const allInvProdsRaw = await prodRes.json();
     const allInvProds    = Array.isArray(allInvProdsRaw) ? allInvProdsRaw : [];
     // Filter to this branch only
-    invProducts = allInvProds.filter(p =>
-      !p.branch_id || p.branch_id === staffBranchId
-    );
+    invProducts = allInvProds.filter(p => {
+      if (!staffBranchId) return true;
+      const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+      return bs !== undefined;
+    });
     const invRes    = await fetch('/api/staff/inventory');
     const invDataRaw = await invRes.json();
     const invData   = Array.isArray(invDataRaw) ? invDataRaw : [];
@@ -1053,20 +1060,23 @@ window.toggleStaffVariantRow = toggleStaffVariantRow;
 function renderInvProducts(products) {
   const paged = paginate(products, staffInvPage);
   document.getElementById('invProductsBody').innerHTML = paged.length
-    ? paged.map(p => `
+    ? paged.map(p => {
+        const bs  = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+        const qty = bs ? bs.quantity : 0;
+        return `
         <tr>
           <td style='cursor:pointer;' onclick="toggleStaffVariantRow('${p.product_id}', this.querySelector('.staff-expand-btn'))"><span class='staff-expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
           <td>${p.brand || '—'}</td>
           <td>${p.category}</td>
           <td>${peso(p.price)}</td>
           <td>
-            <span style="color:${p.quantity <= 0 ? '#ef4444' : p.quantity <= 10 ? '#eab308' : 'var(--g-400)'};font-weight:600;">
-              ${p.quantity}
+            <span style="color:${qty <= 0 ? '#ef4444' : qty <= 10 ? '#eab308' : 'var(--g-400)'};font-weight:600;">
+              ${qty}
             </span>
           </td>
-          <td>${p.quantity <= 0
+          <td>${qty <= 0
             ? '<span class="badge badge--red">Out of Stock</span>'
-            : p.quantity <= 10
+            : qty <= 10
               ? '<span class="badge badge--yellow">Low Stock</span>'
               : '<span class="badge badge--green">In Stock</span>'
           }</td>
@@ -1075,7 +1085,8 @@ function renderInvProducts(products) {
           <td colspan="6" style="padding:0;">
             <div class="staff-variant-content" style="padding:8px 16px;"></div>
           </td>
-        </tr>`).join('')
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="6" class="table-empty">No products found</td></tr>';
   renderPager('staffInvPagination', products.length, staffInvPage, 'changeStaffInvPage');
 }
@@ -1698,7 +1709,7 @@ async function submitRequest(e) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadBranches();
-  loadPosProducts();
+  await loadPosProducts();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');
