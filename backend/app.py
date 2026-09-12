@@ -2330,7 +2330,7 @@ def staff_my_branch():
             return jsonify({'error': 'Staff not found in session.'}), 401
 
         res = supabase.table('staff').select(
-            'branch_id, branch(branch_id, branch_name, address)'
+            'fname, mi, lname, branch_id, branch(branch_id, branch_name, address)'
         ).eq('staff_id', staff_id).execute()
 
         if not res.data or not res.data[0].get('branch_id'):
@@ -2340,10 +2340,14 @@ def staff_my_branch():
         if isinstance(branch, list):
             branch = branch[0] if branch else {}
 
+        staff_data = res.data[0]
         return jsonify({
             'branch_id':   branch.get('branch_id'),
             'branch_name': branch.get('branch_name'),
             'address':     branch.get('address'),
+            'fname':       staff_data.get('fname', ''),
+            'mi':          staff_data.get('mi', ''),
+            'lname':       staff_data.get('lname', ''),
         }), 200
     except Exception as e:
         print(f"Staff my-branch error: {e}")

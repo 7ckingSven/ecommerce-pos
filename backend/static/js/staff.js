@@ -345,6 +345,8 @@ async function loadStaffBranch() {
     if (data.branch_id) {
       staffBranchId   = data.branch_id;
       staffBranchName = data.branch_name;
+      window.staffFname = data.fname || '';
+      window.staffLname = data.lname || '';
 
       // Set hidden input for POS
       const input = document.getElementById('posBranch');
@@ -675,7 +677,7 @@ function updateTotal() {
 }
 
 function clearOrder() {
-  if (orderItems.length && !confirm('Clear current order?')) return;
+
   orderItems = [];
   renderOrderItems();
   updateTotal();
@@ -767,13 +769,13 @@ async function processOrder() {
       const receiptReceived = parseFloat(document.getElementById('posCashReceived').value) || 0;
       const receiptPayment  = selectedPayment;
       const receiptRefNo    = document.getElementById('posGcashRef').value;
+      const receiptCustomer = document.getElementById('posCustomer')?.value?.trim() || '';
       setButtonLoading(processBtn, false);
-      clearOrder();
       loadPosProducts();
       loadOrders();
       loadSummary();
       showToast('Order processed successfully!');
-      showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo);
+      showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo, receiptCustomer);
     } else {
       setButtonLoading(processBtn, false);
       showToast(data.error || 'Failed to process order.', 'error');
@@ -785,7 +787,7 @@ async function processOrder() {
 }
 
 // ─── Receipt ──────────────────────────────────────────
-function showReceipt(data, items, received, payment, refNo) {
+function showReceipt(data, items, received, payment, refNo, customerName = '') {
   // Use passed parameters (captured before clearOrder)
   items    = items    || orderItems;
   received = received !== undefined ? received : parseFloat(document.getElementById('posCashReceived').value) || 0;
@@ -798,8 +800,12 @@ function showReceipt(data, items, received, payment, refNo) {
 
   // VAT Inclusive (12%) breakdown
   const VAT_RATE  = 0.12;
-  const vatAmount = total - (total / (1 + VAT_RATE));
+  const vatAmount = total * VAT_RATE;
   const baseAmt   = total - vatAmount;
+
+  // Get staff and customer name for receipt
+  const staffFullName  = (window.staffFname || '') + ' ' + (window.staffLname || '');
+  const customerInput  = customerName || '';
 
   // Get branch name for receipt
   const branchId   = staffBranchId || document.getElementById('posBranch').value;
@@ -812,6 +818,14 @@ function showReceipt(data, items, received, payment, refNo) {
       ${branchName ? `<span>${branchName} Branch</span><br>` : ''}
       <span>Koronadal City, South Cotabato</span><br>
       <span style="font-size:11px;color:var(--text-muted);">${now.toLocaleString('en-PH')}</span>
+    </div>
+    <hr class="receipt-divider"/>
+    <div style="margin-bottom:0.5rem;font-size:11px;">
+      <div class="receipt-row">
+        <span>Cashier</span>
+        <span>${staffFullName.trim() || '—'}</span>
+      </div>
+      ${customerInput ? `<div class="receipt-row"><span>Customer</span><span>${customerInput}</span></div>` : '<div class="receipt-row"><span>Customer</span><span>Walk-in</span></div>'}
     </div>
     <hr class="receipt-divider"/>
     <div style="margin-bottom:0.5rem;">
@@ -853,7 +867,6 @@ function showReceipt(data, items, received, payment, refNo) {
     <div class="receipt-footer">
       Order ID: ${shortId(data.order_id)}<br>
       Payment: ${payment.replace(/_/g, ' ').toUpperCase()}<br>
-      VAT Reg. TIN: 000-000-000-000<br>
       Thank you for shopping!
     </div>`;
 
@@ -864,6 +877,7 @@ function showReceipt(data, items, received, payment, refNo) {
 function closeReceiptModal() {
   document.getElementById('receiptModalOverlay').style.display = 'none';
   document.getElementById('receiptModal').style.display = 'none';
+  clearOrder();
 }
 
 function printReceipt() {
