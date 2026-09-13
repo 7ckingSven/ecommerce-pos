@@ -126,10 +126,12 @@ def build_otp_email(otp_code, title='Verification Code', purpose='verify your em
             </p>
             <table width="100%" cellpadding="0" cellspacing="0">
               <tr><td align="center" style="padding:8px 0 24px;">
-                <div style="display:inline-block;background:#f0fdf4;border:2px solid #16a34a;border-radius:12px;padding:20px 40px;">
-                  <p style="margin:0 0 4px;font-size:12px;color:#16a34a;font-weight:600;letter-spacing:1px;text-transform:uppercase;">{title}</p>
-                  <p style="margin:0;font-size:36px;font-weight:700;color:#14532d;letter-spacing:8px;">{otp_code}</p>
-                </div>
+                <table cellpadding="0" cellspacing="0" style="margin:0 auto;">
+                  <tr><td align="center" style="background:#f0fdf4;border:2px solid #16a34a;border-radius:12px;padding:20px 40px;">
+                    <p style="margin:0 0 4px;font-size:12px;color:#16a34a;font-weight:600;letter-spacing:1px;text-transform:uppercase;">{title}</p>
+                    <p style="margin:0;font-size:36px;font-weight:700;color:#14532d;letter-spacing:8px;text-align:center;">{otp_code}</p>
+                  </td></tr>
+                </table>
               </td></tr>
             </table>
             <p style="margin:0 0 8px;font-size:13px;color:#6b7280;text-align:center;">&#9201; This code expires in <strong>5 minutes</strong>.</p>
@@ -281,36 +283,9 @@ def forgot_password():
             
             # Send OTP via email
             try:
-                msg = Message(
-                    subject='Password Reset OTP - Triple E & Fiel Collince',
-                    recipients=[email],
-                    html=f'''
-                    <html>
-                        <body style="font-family: Arial, sans-serif; line-height: 1.6;">
-                            <div style="max-width: 600px; margin: 0 auto;">
-                                <h2>Password Reset Request</h2>
-                                <p>You have requested to reset your password for Triple E & Fiel Collince Management System.</p>
-                                <p style="font-size: 18px; margin: 20px 0;">Your One-Time Password (OTP) is:</p>
-                                <div style="background-color: #f0f0f0; padding: 20px; border-radius: 5px; text-align: center;">
-                                    <p style="font-size: 32px; font-weight: bold; letter-spacing: 3px; margin: 0;">{otp}</p>
-                                </div>
-                                <p style="color: #666; font-size: 14px; margin-top: 20px;">
-                                    This OTP will expire in 15 minutes.
-                                </p>
-                                <p style="color: #999; font-size: 12px; margin-top: 20px;">
-                                    If you did not request this password reset, please ignore this email.
-                                </p>
-                                <hr style="border: none; border-top: 1px solid #ddd; margin-top: 30px;">
-                                <p style="color: #999; font-size: 12px; text-align: center;">
-                                    Triple E & Fiel Collince General Merchandise<br>
-                                    E-Commerce & POS System
-                                </p>
-                            </div>
-                        </body>
-                    </html>
-                    '''
-                )
-                mail.send(msg)
+                msg = msg_obj = Message(subject='TEFC E-Commerce — Password Reset OTP', recipients=[email])
+                msg_obj.html = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
+                mail.send(msg_obj)
             except Exception as email_error:
                 print(f"WARNING: Failed to send email: {email_error}")
                 # Continue even if email fails - user can see OTP in console logs for testing
