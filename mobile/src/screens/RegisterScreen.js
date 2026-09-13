@@ -8,7 +8,8 @@ import { register } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 
-export default function RegisterScreen({ navigation }) {
+export default function RegisterScreen({ navigation, route }) {
+  const verifiedEmail = route?.params?.verifiedEmail || '';
   const [step,        setStep]        = useState(1);
   const [loading,     setLoading]     = useState(false);
   const [showPass,    setShowPass]    = useState(false);
@@ -17,7 +18,7 @@ export default function RegisterScreen({ navigation }) {
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [form, setForm] = useState({
     fname: '', mi: '', lname: '',
-    email: '', username: '', phone_number: '',
+    email: verifiedEmail, username: '', phone_number: '',
     street: '', barangay: '', city: '', province: '', zip_code: '',
     dob: '', gender: '',
     password: '', confirmPassword: '',
@@ -207,18 +208,27 @@ export default function RegisterScreen({ navigation }) {
                 { key:'username',     label:'Username *',       icon:'at-sign',placeholder:'Choose a username' },
               ].map(f => (
                 <View key={f.key} style={styles.fieldWrap}>
-                  <Text style={styles.label}>{f.label}</Text>
-                  <View style={styles.inputRow}>
-                    <View style={styles.inputIcon}><Feather name={f.icon} size={16} color={COLORS.textMuted}/></View>
+                  <View style={{ flexDirection:'row', alignItems:'center', marginBottom:4 }}>
+                    <Text style={styles.label}>{f.label}</Text>
+                    {f.key === 'email' && verifiedEmail ? (
+                      <View style={{ flexDirection:'row', alignItems:'center', marginLeft:8 }}>
+                        <Feather name="check-circle" size={13} color={COLORS.primary}/>
+                        <Text style={{ fontSize:11, color:COLORS.primary, marginLeft:3, fontWeight:'600' }}>Verified</Text>
+                      </View>
+                    ) : null}
+                  </View>
+                  <View style={[styles.inputRow, f.key === 'email' && verifiedEmail && { borderColor: COLORS.primary, backgroundColor: '#f0fdf4' }]}>
+                    <View style={styles.inputIcon}><Feather name={f.icon} size={16} color={f.key === 'email' && verifiedEmail ? COLORS.primary : COLORS.textMuted}/></View>
                     <TextInput
                       style={[styles.input, styles.inputFlex]}
                       placeholder={f.placeholder}
                       placeholderTextColor={COLORS.textMuted}
                       value={form[f.key]}
-                      onChangeText={v => update(f.key, v)}
+                      onChangeText={v => f.key === 'email' && verifiedEmail ? null : update(f.key, v)}
                       keyboardType={f.keyboard || 'default'}
                       autoCapitalize="none"
                       maxLength={f.max}
+                      editable={!(f.key === 'email' && verifiedEmail)}
                     />
                   </View>
                 </View>

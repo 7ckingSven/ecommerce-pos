@@ -101,6 +101,58 @@ def staff_required(f):
 # WEB ROUTES — Staff & Public Pages
 # ══════════════════════════════════════════════════════
 
+
+# ─── Shared HTML Email Template ────────────────────────────────────────────
+def build_otp_email(otp_code, title='Verification Code', purpose='verify your email address'):
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f0fdf4;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 0;">
+    <tr><td align="center">
+      <table width="480" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#14532d,#16a34a);padding:32px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;">TEFC E-Commerce</h1>
+            <p style="margin:6px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Triple E &amp; Fiel Collince General Merchandise</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <p style="margin:0 0 16px;font-size:15px;color:#111827;">Hello!</p>
+            <p style="margin:0 0 24px;font-size:14px;color:#6b7280;line-height:1.6;">
+              You requested to {purpose} for your <strong>TEFC E-Commerce</strong> account.
+              Use the code below to continue.
+            </p>
+            <table width="100%" cellpadding="0" cellspacing="0">
+              <tr><td align="center" style="padding:8px 0 24px;">
+                <div style="display:inline-block;background:#f0fdf4;border:2px solid #16a34a;border-radius:12px;padding:20px 40px;">
+                  <p style="margin:0 0 4px;font-size:12px;color:#16a34a;font-weight:600;letter-spacing:1px;text-transform:uppercase;">{title}</p>
+                  <p style="margin:0;font-size:36px;font-weight:700;color:#14532d;letter-spacing:8px;">{otp_code}</p>
+                </div>
+              </td></tr>
+            </table>
+            <p style="margin:0 0 8px;font-size:13px;color:#6b7280;text-align:center;">&#9201; This code expires in <strong>5 minutes</strong>.</p>
+            <p style="margin:0 0 24px;font-size:13px;color:#6b7280;text-align:center;">If you did not request this, please ignore this email.</p>
+            <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/>
+            <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
+              This email was sent by TEFC E-Commerce &mdash; Triple E &amp; Fiel Collince General Merchandise<br/>
+              Koronadal City, South Cotabato
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f9fafb;padding:16px;text-align:center;">
+            <p style="margin:0;font-size:11px;color:#9ca3af;">&copy; 2026 Triple E &amp; Fiel Collince General Merchandise. All rights reserved.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
 @app.route('/')
 def landing():
     return render_template('landing.html')
@@ -458,6 +510,80 @@ def api_check_duplicate():
 
         return jsonify({'message': 'All details are available.'}), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+# ─── Email Verification OTP ────────────────────────────────────────────────
+
+@app.route('/api/auth/send-email-otp', methods=['POST'])
+def api_auth_send_email_otp():
+    try:
+        data  = request.get_json()
+        email = data.get('email', '').strip().lower()
+        if not email:
+            return jsonify({'error': 'Email is required.'}), 400
+
+        # Check if email already registered
+        existing = supabase.table('customer').select('email').eq('email', email).execute()
+        if existing.data:
+            return jsonify({'error': 'This email is already registered. Please log in.'}), 400
+
+        # Generate 6-digit OTP
+        import random
+        otp_code = str(random.randint(100000, 999999))
+
+        # Delete existing OTPs for this email
+        supabase.table('otp_codes').delete().eq('email', email).execute()
+
+        # Save OTP
+        from datetime import datetime, timedelta
+        expires_at = (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+        supabase.table('otp_codes').insert({
+            'email':      email,
+            'otp':        otp_code,
+            'expires_at': expires_at,
+            'used':       False,
+        }).execute()
+
+        # Send email
+        msg      = Message(subject='TEFC E-Commerce — Email Verification Code', recipients=[email])
+        msg.html = build_otp_email(otp_code, title='Verification Code', purpose='verify your email address')
+        mail.send(msg)
+
+        return jsonify({'message': 'OTP sent successfully.'}), 200
+    except Exception as e:
+        print(f'Send email OTP error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/auth/verify-email-otp', methods=['POST'])
+def api_auth_verify_email_otp():
+    try:
+        data     = request.get_json()
+        email    = data.get('email', '').strip().lower()
+        otp_code = data.get('otp', '').strip()
+
+        if not email or not otp_code:
+            return jsonify({'error': 'Email and OTP are required.'}), 400
+
+        from datetime import datetime
+        res = supabase.table('otp_codes').select('*').eq('email', email).eq('otp', otp_code).eq('used', False).execute()
+        if not res.data:
+            return jsonify({'error': 'Invalid OTP code. Please try again.'}), 400
+
+        otp_record = res.data[0]
+        expires_at = otp_record.get('expires_at', '')
+        now        = datetime.utcnow().isoformat()
+
+        if now > expires_at:
+            return jsonify({'error': 'OTP has expired. Please request a new one.'}), 400
+
+        # Mark OTP as used
+        supabase.table('otp_codes').update({'used': True}).eq('email', email).execute()
+
+        return jsonify({'message': 'Email verified successfully.', 'verified': True}), 200
+    except Exception as e:
+        print(f'Verify email OTP error: {e}')
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/register', methods=['POST'])
@@ -1427,20 +1553,8 @@ def admin_update_purchase_order(po_id):
 # ─── Email OTP Helper ─────────────────────────────────
 def send_otp_email(recipient_email, otp):
     import time
-    msg = Message(
-        subject    = 'Your OTP — Triple E & Fiel Collince',
-        recipients = [recipient_email],
-        body       = f"""Hello,
-
-Your One-Time Password (OTP) for password reset is:
-
-    {otp}
-
-This code expires in 5 minutes.
-Do not share this with anyone.
-
-— Triple E & Fiel Collince General Merchandise"""
-    )
+    msg      = Message(subject='TEFC E-Commerce — Password Reset OTP', recipients=[recipient_email])
+    msg.html = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
     for attempt in range(3):
         try:
             mail.send(msg)
