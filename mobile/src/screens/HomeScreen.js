@@ -44,11 +44,15 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
         <Text style={styles.productName} numberOfLines={2}>{product.product_name}</Text>
         {product.brand ? <Text style={styles.productBrand}>{product.brand}</Text> : null}
         <Text style={styles.productCat}>{product.category}</Text>
-        {product.branch_name ? (
-          <View style={styles.branchTag}>
-            <Text style={styles.branchTagText}>🏪 {product.branch_name}</Text>
-          </View>
-        ) : null}
+        {(() => {
+          const bs = (product.branch_stock || []).find(b => b.quantity > 0);
+          const branchName = bs?.branch?.branch_name;
+          return branchName ? (
+            <View style={styles.branchTag}>
+              <Text style={styles.branchTagText}>🏪 {branchName}</Text>
+            </View>
+          ) : null;
+        })()}
 
         {/* Sold Count */}
         <Text style={styles.soldCount}>
@@ -193,7 +197,7 @@ export default function HomeScreen({ navigation }) {
     const ok = await requireLogin('addToCart', { product_id: product.product_id });
     if (!ok) return;
     // Go to ProductDetail so customer can select option groups first
-    navigation.navigate('ProductDetail', { product, branchId: product.branch_id || null });
+    navigation.navigate('ProductDetail', { product, branchId: (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null });
   }
 
   // ─── Buy Now (requires login → ProductDetail) ────────
@@ -201,7 +205,7 @@ export default function HomeScreen({ navigation }) {
     const ok = await requireLogin('buyNow', { product });
     if (!ok) return;
     // Navigate to ProductDetail — customer selects options then buys
-    navigation.navigate('ProductDetail', { product, branchId: product.branch_id || null });
+    navigation.navigate('ProductDetail', { product, branchId: (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null });
   }
 
   function onRefresh() {
@@ -312,7 +316,7 @@ export default function HomeScreen({ navigation }) {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
-              onPress={p => navigation.navigate('ProductDetail', { product: p, branchId: p.branch_id || null })}
+              onPress={p => navigation.navigate('ProductDetail', { product: p, branchId: (p.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null })}
               onAddToCart={handleAddToCart}
               onBuyNow={handleBuyNow}
             />

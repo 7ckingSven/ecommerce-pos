@@ -159,9 +159,11 @@ export default function CartScreen({ navigation }) {
   // ─── Checkout ─────────────────────────────────────────
   function handleCheckout() {
     if (!someChecked) return;
+    const branchId = selectedItems[0]?.branch_id || null;
     navigation.navigate('Checkout', {
       cartItems: selectedItems,
       total,
+      branchId,
     });
   }
 

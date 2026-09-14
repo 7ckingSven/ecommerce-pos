@@ -1194,7 +1194,8 @@ function closeGenericModal() {
 function viewStaffOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const branch   = order.branch_name || order.branch?.branch_name || staffBranchName || '—';
+  const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
+  const branch   = branchObj?.branch_name || order.branch_name || staffBranchName || '—';
 
   // Parse delivery address
   const addrParts  = (order.address || '').split('|');
@@ -1252,6 +1253,7 @@ function viewStaffOrderItems(order) {
     + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
     + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ' + branch + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
     + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
     + '</div>'
@@ -1359,7 +1361,8 @@ function closeGenericModal() {
 function viewStaffOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const branch   = order.branch_name || order.branch?.branch_name || staffBranchName || '—';
+  const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
+  const branch   = branchObj?.branch_name || order.branch_name || staffBranchName || '—';
 
   // Parse delivery address
   const addrParts  = (order.address || '').split('|');
@@ -1417,6 +1420,7 @@ function viewStaffOrderItems(order) {
     + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
     + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ' + branch + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
     + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
     + '</div>'

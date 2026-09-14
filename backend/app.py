@@ -155,6 +155,72 @@ def build_otp_email(otp_code, title='Verification Code', purpose='verify your em
 </html>"""
 
 
+
+# ─── Firebase FCM Push Notification (Admin SDK v1) ─────────────────────────
+import firebase_admin
+from firebase_admin import credentials, messaging as fcm_messaging
+
+# Initialize Firebase Admin SDK once
+_firebase_initialized = False
+
+def init_firebase():
+    global _firebase_initialized
+    if not _firebase_initialized:
+        try:
+            import os
+            # Try service account file first, then env var
+            service_account_path = os.path.join(
+                os.path.dirname(__file__),
+                'tefc-ecommerce-firebase-adminsdk-fbsvc-68826d1480.json'
+            )
+            if os.path.exists(service_account_path):
+                cred = credentials.Certificate(service_account_path)
+            else:
+                # Fallback: use env var path
+                cred = credentials.Certificate(
+                    os.environ.get('FIREBASE_SERVICE_ACCOUNT', service_account_path)
+                )
+            if not firebase_admin._apps:
+                firebase_admin.initialize_app(cred)
+            _firebase_initialized = True
+        except Exception as e:
+            print(f'Firebase init error: {e}')
+
+def send_push_notification(fcm_token, title, body, data=None):
+    """Send FCM push notification using Firebase Admin SDK."""
+    try:
+        if not fcm_token:
+            return
+        init_firebase()
+        message = fcm_messaging.Message(
+            notification=fcm_messaging.Notification(
+                title=title,
+                body=body,
+            ),
+            data={k: str(v) for k, v in (data or {}).items()},
+            token=fcm_token,
+            android=fcm_messaging.AndroidConfig(
+                priority='high',
+                notification=fcm_messaging.AndroidNotification(
+                    sound='default',
+                ),
+            ),
+        )
+        response = fcm_messaging.send(message)
+        print(f'FCM sent: {response}')
+    except Exception as e:
+        print(f'FCM error: {e}')
+
+
+# Notification messages per status
+ORDER_STATUS_MESSAGES = {
+    'processing':       ('Order Update 📦',  'Your order is now being prepared!'),
+    'out_for_delivery': ('On the Way! 🚚',   'Your order is out for delivery!'),
+    'completed':        ('Order Delivered ✅','Your order has been delivered. Thank you!'),
+    'cancelled':        ('Order Cancelled',   'Your order has been cancelled.'),
+}
+
+
 @app.route('/')
 def landing():
     return render_template('landing.html')
@@ -561,6 +627,27 @@ def api_auth_verify_email_otp():
         print(f'Verify email OTP error: {e}')
         return jsonify({'error': str(e)}), 500
 
+
+# ─── Save FCM Token ────────────────────────────────────────────────────────
+@app.route('/api/customer/fcm-token', methods=['POST'])
+def save_fcm_token():
+    try:
+        data        = request.get_json()
+        fcm_token   = data.get('fcm_token', '').strip()
+        customer_id = request.headers.get('X-Customer-ID')
+        if not customer_id:
+            return jsonify({'error': 'Unauthorized'}), 401
+        if not fcm_token:
+            return jsonify({'error': 'FCM token required'}), 400
+
+        supabase.table('customer').update(
+            {'fcm_token': fcm_token}
+        ).eq('customer_id', customer_id).execute()
+
+        return jsonify({'message': 'FCM token saved.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/register', methods=['POST'])
 def api_register():
     data         = request.get_json()
@@ -802,7 +889,7 @@ def api_get_cart():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         res = supabase_retry(lambda: supabase.table('cart').select(
-            '*, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage))'
+            '*, branch_id, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -2213,7 +2300,7 @@ def admin_get_orders():
             limit = 500
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, customer(fname, lname, email), staff(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).execute()
 
         # Get branch lookup
@@ -2241,7 +2328,39 @@ def admin_update_order(order_id):
         if status not in valid_statuses:
             return jsonify({'error': 'Invalid status.'}), 400
 
-        supabase.table('order').update({'status': status}).eq('order_id', order_id).execute()
+        # Update status and assign staff_id if not already set
+        update_data = {'status': status}
+        # Set staff_id to the admin/staff who updated the order
+        staff_id = session.get('staff_id')
+        if staff_id:
+            # Only set if order doesn't already have a staff_id
+            existing = supabase.table('order').select('staff_id').eq('order_id', order_id).execute()
+            if existing.data and not existing.data[0].get('staff_id'):
+                update_data['staff_id'] = staff_id
+
+        supabase.table('order').update(update_data).eq('order_id', order_id).execute()
+
+        # Send push notification to customer
+        try:
+            order_res = supabase.table('order').select(
+                'customer_id, customer(fcm_token, fname)'
+            ).eq('order_id', order_id).execute()
+            if order_res.data:
+                order_data = order_res.data[0]
+                customer   = order_res.data[0].get('customer')
+                if isinstance(customer, list): customer = customer[0] if customer else {}
+                fcm_token  = customer.get('fcm_token') if customer else None
+                fname      = customer.get('fname', 'Customer') if customer else 'Customer'
+                if fcm_token and status in ORDER_STATUS_MESSAGES:
+                    notif_title, notif_body = ORDER_STATUS_MESSAGES[status]
+                    send_push_notification(
+                        fcm_token,
+                        notif_title,
+                        notif_body,
+                        {'order_id': order_id, 'status': status}
+                    )
+        except Exception as notif_err:
+            print(f'Notification error: {notif_err}')
 
         # If cancelled — return stock to branch
         if status == 'cancelled':
@@ -2461,7 +2580,7 @@ def staff_get_orders():
         branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
 
         query = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, customer(fname, lname, email), staff(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit)
 
         # Filter to this branch's orders only
@@ -2634,7 +2753,37 @@ def staff_update_order(order_id):
         if status not in valid_statuses:
             return jsonify({'error': 'Invalid status.'}), 400
 
-        supabase.table('order').update({'status': status}).eq('order_id', order_id).execute()
+        # Update status and assign staff_id if not already set
+        update_data = {'status': status}
+        staff_id = session.get('staff_id')
+        if staff_id:
+            existing = supabase.table('order').select('staff_id').eq('order_id', order_id).execute()
+            if existing.data and not existing.data[0].get('staff_id'):
+                update_data['staff_id'] = staff_id
+
+        supabase.table('order').update(update_data).eq('order_id', order_id).execute()
+
+        # Send push notification to customer
+        try:
+            order_res = supabase.table('order').select(
+                'customer_id, customer(fcm_token, fname)'
+            ).eq('order_id', order_id).execute()
+            if order_res.data:
+                order_data = order_res.data[0]
+                customer   = order_res.data[0].get('customer')
+                if isinstance(customer, list): customer = customer[0] if customer else {}
+                fcm_token  = customer.get('fcm_token') if customer else None
+                fname      = customer.get('fname', 'Customer') if customer else 'Customer'
+                if fcm_token and status in ORDER_STATUS_MESSAGES:
+                    notif_title, notif_body = ORDER_STATUS_MESSAGES[status]
+                    send_push_notification(
+                        fcm_token,
+                        notif_title,
+                        notif_body,
+                        {'order_id': order_id, 'status': status}
+                    )
+        except Exception as notif_err:
+            print(f'Notification error: {notif_err}')
 
         # If cancelled — return stock to branch
         if status == 'cancelled':

@@ -1882,7 +1882,8 @@ function closeModal() {
 function viewOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const branch   = order.branch_name || order.branch?.branch_name || '—';
+  const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
+  const branch   = branchObj?.branch_name || order.branch_name || '—';
 
   // Parse delivery address
   const addrParts  = (order.address || '').split('|');
@@ -1932,6 +1933,7 @@ function viewOrderItems(order) {
       <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
         <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
         <div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ${branch}</strong></div>
+        <div><span style="color:var(--text-muted);">Served By</span><br/><strong>${(() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</strong></div>
         <div><span style="color:var(--text-muted);">Type</span><br/>${badge(order.order_type)}</div>
         <div><span style="color:var(--text-muted);">Status</span><br/>${badge(order.status)}</div>
         <div><span style="color:var(--text-muted);">Payment</span><br/>${order.payment?.payment_method ? badge(order.payment.payment_method) : '—'}</div>
@@ -1974,7 +1976,7 @@ function renderOrders(orders) {
         <tr>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td>${o.staff ? `${o.staff.fname} ${o.staff.lname}` : '—'}</td>
+          <td>${(() => { const s = Array.isArray(o.staff) ? o.staff[0] : o.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</td>
           <td>${badge(o.order_type)}</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>

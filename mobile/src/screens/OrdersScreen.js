@@ -312,12 +312,16 @@ export default function OrdersScreen({ navigation }) {
                   <Text style={styles.detailLabel}>Type</Text>
                   <Text style={styles.detailValue}>{selectedOrder?.order_type === 'online' ? 'Online Order' : 'Walk-in'}</Text>
                 </View>
-                {selectedOrder?.branch_name && (
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Branch</Text>
-                    <Text style={styles.detailValue}>{selectedOrder.branch_name}</Text>
-                  </View>
-                )}
+                {(() => {
+                  const branchObj  = Array.isArray(selectedOrder?.branch) ? selectedOrder?.branch[0] : selectedOrder?.branch;
+                  const branchName = branchObj?.branch_name || selectedOrder?.branch_name;
+                  return branchName ? (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Branch</Text>
+                      <Text style={styles.detailValue}>{branchName}</Text>
+                    </View>
+                  ) : null;
+                })()}
               </View>
 
               {/* Items */}

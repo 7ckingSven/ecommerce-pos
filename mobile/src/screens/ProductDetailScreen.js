@@ -81,7 +81,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
     setLoadingCart(true);
     try {
-      await addToCart(product.product_id, quantity, branchId || product.branch_id || null, selectedOptions);
+      await addToCart(product.product_id, quantity, branchId || null, selectedOptions);
       Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
         { text: 'Continue Shopping', onPress: () => navigation.goBack() },
         { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
@@ -140,7 +140,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       cartItems: buyNowItem,
       total:     buyNowTotal,
       isBuyNow:  true,
-      branchId:  branchId || product.branch_id || null,
+      branchId:  branchId || null,
     });
   }
 
@@ -155,7 +155,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     try {
       const res = await api.post('/variant-stock/check', {
         product_id: product.product_id,
-        branch_id:  product.branch_id || null,
+        branch_id:  branchId || null,
         options,
       });
       setVariantStock(res.data.quantity ?? 0);
@@ -224,11 +224,15 @@ export default function ProductDetailScreen({ route, navigation }) {
               ? <View style={styles.tag}><Text style={styles.tagText}>{product.brand}</Text></View>
               : null
             }
-            {product.branch_name ? (
-              <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
-                <Text style={styles.tagText}>🏪 {product.branch_name}</Text>
-              </View>
-            ) : null}
+            {(() => {
+              const bs = (product.branch_stock || []).find(b => b.quantity > 0);
+              const branchName = bs?.branch?.branch_name;
+              return branchName ? (
+                <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
+                <Text style={styles.tagText}>🏪 {branchName}</Text>
+                </View>
+              ) : null;
+            })()}
           {hasDiscount && (
               <View style={styles.discountTag}>
                 <Feather name="tag" size={10} color={COLORS.white} style={{ marginRight: 3 }}/>

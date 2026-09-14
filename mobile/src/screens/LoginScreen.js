@@ -5,7 +5,9 @@ import {
   Platform, Image,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { login, isLoggedIn } from '../services/authService';
+import { login, isLoggedIn, getCustomer } from '../services/authService';
+import { API_BASE_URL } from '../utils/constants';
+import { getMessaging, getToken } from '@react-native-firebase/messaging';
 import { COLORS, SPACING, RADIUS, SHADOW, APP_NAME, APP_SUBTITLE } from '../utils/constants';
 
 export default function LoginScreen({ navigation }) {
@@ -28,6 +30,27 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       await login(loginInput.trim(), password);
+
+      // Save FCM token after login
+      try {
+        const fcm      = getMessaging();
+        const token    = await getToken(fcm);
+        const customer = await getCustomer();
+        if (token && customer?.customer_id) {
+          await fetch(`${API_BASE_URL}/customer/fcm-token`, {
+            method:  'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Customer-ID': customer.customer_id,
+            },
+            body: JSON.stringify({ fcm_token: token }),
+          });
+          console.log('FCM token saved after login');
+        }
+      } catch (fcmErr) {
+        console.log('FCM token save error:', fcmErr);
+      }
+
       navigation.replace('Main');
     } catch (err) {
       const status = err.response?.status;

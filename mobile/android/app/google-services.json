@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "416926984171",
+    "project_id": "tefc-ecommerce",
+    "storage_bucket": "tefc-ecommerce.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:416926984171:android:da41f93286a82215121bae",
+        "android_client_info": {
+          "package_name": "com.mobile"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBnjyqFDn96DuaaxiOD23D4LAN_Q5vKzys"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
