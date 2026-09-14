@@ -53,6 +53,7 @@ export default function ProfileScreen({ navigation }) {
   const [showOldPass,    setShowOldPass]    = useState(false);
   const [showNewPass,    setShowNewPass]    = useState(false);
   const [showConfirmPass,setShowConfirmPass]= useState(false);
+  const [legalModal,     setLegalModal]     = useState(null);
 
   useEffect(() => { loadProfile(); }, []);
 
@@ -304,11 +305,73 @@ export default function ProfileScreen({ navigation }) {
 
 
 
+        {/* Legal */}
+        <View style={{ backgroundColor: COLORS.white, borderRadius: 12, marginBottom: 16, overflow:'hidden' }}>
+          <Text style={{ fontSize:11, fontWeight:'700', color: COLORS.textMuted, textTransform:'uppercase', letterSpacing:1, padding:12, paddingBottom:4 }}>Legal</Text>
+          {[
+            { label:'Privacy Policy',      icon:'shield',    type:'privacy' },
+            { label:'Terms & Conditions',  icon:'file-text', type:'terms'   },
+          ].map((item, i) => (
+            <TouchableOpacity
+              key={item.type}
+              onPress={() => setLegalModal(item.type)}
+              style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:14, borderTopWidth: i === 0 ? 0 : 1, borderTopColor: COLORS.grayBorder }}
+            >
+              <View style={{ flexDirection:'row', alignItems:'center', gap:12 }}>
+                <Feather name={item.icon} size={16} color={COLORS.primary}/>
+                <Text style={{ fontSize:14, color: COLORS.dark, fontWeight:'500' }}>{item.label}</Text>
+              </View>
+              <Feather name="chevron-right" size={16} color={COLORS.textMuted}/>
+            </TouchableOpacity>
+          ))}
+        </View>
+
         {/* Logout */}
         <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
           <Feather name="log-out" size={18} color="#ef4444"/>
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
+
+        {/* Legal Modal */}
+        {legalModal && (
+          <View style={{ position:'absolute', inset:0, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:16, zIndex:999 }}>
+            <View style={{ backgroundColor: COLORS.white, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' }}>
+              <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder }}>
+                <Text style={{ fontSize:16, fontWeight:'700', color: COLORS.dark }}>
+                  {legalModal === 'terms' ? 'Terms & Conditions' : 'Privacy Policy'}
+                </Text>
+                <TouchableOpacity onPress={() => setLegalModal(null)}>
+                  <Feather name="x" size={20} color={COLORS.textMuted}/>
+                </TouchableOpacity>
+              </View>
+              <ScrollView style={{ padding:16 }}>
+                {legalModal === 'terms' ? (
+                  <>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Acceptance of Terms</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>By using TEFC E-Commerce, you agree to be bound by these Terms and Conditions.</Text>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. Account Registration</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>You must provide accurate information when creating an account and are responsible for your credentials.</Text>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Orders and Payments</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>All orders are subject to availability. We accept Cash and GCash payments.</Text>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Cancellation Policy</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Orders may be cancelled while in Pending status only.</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Information We Collect</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>We collect your name, email, phone number, and delivery address when you register or place an order.</Text>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. How We Use Your Information</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Your information is used to process orders, manage your account, and send OTP codes.</Text>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Data Security</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Passwords are securely hashed. We take reasonable measures to protect your data.</Text>
+                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Contact Us</Text>
+                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Contact us at tripleefielcollince@gmail.com for privacy concerns.</Text>
+                  </>
+                )}
+              </ScrollView>
+            </View>
+          </View>
+        )}
 
         <View style={{ height: SPACING.xl }}/>
       </ScrollView>

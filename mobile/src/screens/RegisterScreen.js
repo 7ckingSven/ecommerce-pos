@@ -14,6 +14,8 @@ export default function RegisterScreen({ navigation, route }) {
   const [loading,     setLoading]     = useState(false);
   const [showPass,    setShowPass]    = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
+  const [agreed,      setAgreed]      = useState(false);
+  const [legalModal,  setLegalModal]  = useState(null);
   const [psgcAddress,        setPsgcAddress]       = useState({});
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
   const [form, setForm] = useState({
@@ -297,11 +299,32 @@ export default function RegisterScreen({ navigation, route }) {
             </>
           )}
 
+          {/* T&C Checkbox */}
+          {step === 3 && (
+            <View style={{ flexDirection:'row', alignItems:'flex-start', gap:10, marginTop:8, marginBottom:8 }}>
+              <TouchableOpacity
+                onPress={() => setAgreed(!agreed)}
+                style={{ width:20, height:20, borderRadius:4, borderWidth:1.5,
+                  borderColor: agreed ? COLORS.primary : COLORS.grayBorder,
+                  backgroundColor: agreed ? COLORS.primary : COLORS.white,
+                  alignItems:'center', justifyContent:'center', marginTop:2, flexShrink:0 }}
+              >
+                {agreed && <Feather name="check" size={13} color={COLORS.white}/>}
+              </TouchableOpacity>
+              <Text style={{ fontSize:12, color: COLORS.textSecondary, flex:1, lineHeight:18 }}>
+                I agree to the{' '}
+                <Text style={{ color: COLORS.primary, fontWeight:'600' }} onPress={() => setLegalModal('terms')}>Terms & Conditions</Text>
+                {' '}and{' '}
+                <Text style={{ color: COLORS.primary, fontWeight:'600' }} onPress={() => setLegalModal('privacy')}>Privacy Policy</Text>
+              </Text>
+            </View>
+          )}
+
           {/* Button */}
           <TouchableOpacity
-            style={styles.btn}
+            style={[styles.btn, (step === 3 && (!agreed || !form.password || form.password !== form.confirmPassword)) && { backgroundColor: COLORS.grayLight }]}
             onPress={step < 3 ? nextStep : handleRegister}
-            disabled={loading || checkingDuplicate}
+            disabled={loading || checkingDuplicate || (step === 3 && (!agreed || !form.password || form.password !== form.confirmPassword))}
             activeOpacity={0.85}
           >
             {(loading || checkingDuplicate) ? (
@@ -324,6 +347,47 @@ export default function RegisterScreen({ navigation, route }) {
           )}
         </View>
       </ScrollView>
+
+      {/* Legal Modal */}
+      {legalModal && (
+        <View style={{ position:'absolute', inset:0, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:16, zIndex:999 }}>
+          <View style={{ backgroundColor: COLORS.white, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' }}>
+            <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder }}>
+              <Text style={{ fontSize:16, fontWeight:'700', color: COLORS.dark }}>
+                {legalModal === 'terms' ? 'Terms & Conditions' : 'Privacy Policy'}
+              </Text>
+              <TouchableOpacity onPress={() => setLegalModal(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ padding:16 }}>
+              {legalModal === 'terms' ? (
+                <>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Acceptance of Terms</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>By registering and using TEFC E-Commerce, you agree to be bound by these Terms and Conditions.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. Account Registration</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>You must provide accurate and complete information when creating an account. You are responsible for maintaining the confidentiality of your credentials.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Orders and Payments</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>All orders are subject to availability. We accept Cash and GCash payments. Orders are confirmed upon successful payment verification.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Cancellation Policy</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Orders may be cancelled while in Pending status. Once processing or out for delivery, cancellation may not be possible.</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Information We Collect</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>We collect your name, email, phone number, and delivery address when you register or place an order.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. How We Use Your Information</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Your information is used to process orders, manage your account, send OTP codes, and communicate about your orders.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Data Security</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>We take reasonable measures to protect your personal information. Passwords are securely hashed and never stored in plain text.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Contact Us</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>For questions about this Privacy Policy, contact us at tripleefielcollince@gmail.com.</Text>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      )}
     </KeyboardAvoidingView>
   );
 }
