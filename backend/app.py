@@ -5,7 +5,7 @@ from flask_cors import CORS
 from flask_mail import Mail, Message
 from supabase import create_client
 from dotenv import load_dotenv
-from datetime import timedelta, datetime
+from datetime import timedelta, datetime, timezone
 from functools import wraps
 import bcrypt
 import os
@@ -577,8 +577,7 @@ def api_auth_send_email_otp():
         supabase.table('otp_codes').delete().eq('email', email).execute()
 
         # Save OTP
-        from datetime import datetime, timedelta
-        expires_at = (datetime.utcnow() + timedelta(minutes=5)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
         supabase.table('otp_codes').insert({
             'email':      email,
             'otp':        otp_code,
@@ -614,7 +613,7 @@ def api_auth_verify_email_otp():
 
         otp_record = res.data[0]
         expires_at = otp_record.get('expires_at', '')
-        now        = datetime.utcnow().isoformat()
+        now        = datetime.now(timezone.utc).isoformat()
 
         if now > expires_at:
             return jsonify({'error': 'OTP has expired. Please request a new one.'}), 400

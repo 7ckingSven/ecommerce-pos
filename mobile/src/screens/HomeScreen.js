@@ -2,6 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, RefreshControl, Image, Alert,
+  StatusBar,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getProducts, searchProducts } from '../services/productService';
@@ -219,31 +220,29 @@ export default function HomeScreen({ navigation }) {
   return (
     <View style={styles.container}>
 
-      {/* Header — Green header */}
+      {/* Status Bar — green to match header */}
+      <StatusBar backgroundColor="#16a34a" barStyle="light-content" translucent={false}/>
+
+      {/* Header — Compact */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <View>
-            <Text style={styles.headerTitle}>TEFC E-Commerce</Text>
-            <Text style={styles.headerSub}>Triple E & Fiel Collince</Text>
+          <Text style={styles.headerTitle}>TEFC</Text>
+          {/* Search Bar inline */}
+          <View style={styles.searchWrap}>
+            <Feather name="search" size={14} color={COLORS.textMuted} style={{ marginRight: 4 }}/>
+            <TextInput
+              style={styles.searchInput}
+              placeholder="Search products..."
+              placeholderTextColor={COLORS.textMuted}
+              value={search}
+              onChangeText={handleSearch}
+            />
+            {search !== '' && (
+              <TouchableOpacity onPress={() => { setSearch(''); loadProducts(selectedCat); }}>
+                <Feather name="x" size={14} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            )}
           </View>
-
-        </View>
-
-        {/* Search Bar inside header */}
-        <View style={styles.searchWrap}>
-          <Feather name="search" size={16} color={COLORS.textMuted} style={{ marginRight: 6 }}/>
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search products..."
-            placeholderTextColor={COLORS.textMuted}
-            value={search}
-            onChangeText={handleSearch}
-          />
-          {search !== '' && (
-            <TouchableOpacity onPress={() => { setSearch(''); loadProducts(selectedCat); }}>
-            <Feather name="x" size={16} color={COLORS.textMuted}/>
-          </TouchableOpacity>
-        )}
         </View>
       </View>
 
@@ -331,19 +330,19 @@ const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: COLORS.grayBg },
 
   // Header
-  header:                 { paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md, borderBottomLeftRadius: 20, borderBottomRightRadius: 20, backgroundColor: '#16a34a', shadowColor: '#14532d', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8, elevation: 8 },
-  headerTop:              { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.sm },
+  header:                 { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm, backgroundColor: '#16a34a', shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
+  headerTop:              { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   headerGreeting:         { fontSize: 12, color: COLORS.grayLight },
-  headerTitle:            { fontSize: 18, fontWeight: '700', color: '#fff' },
+  headerTitle:            { fontSize: 16, fontWeight: '900', color: '#fff', flexShrink: 0, letterSpacing: 1.5, textTransform: 'uppercase' },
   headerSub:              { fontSize: 11, color: 'rgba(255,255,255,0.75)', marginTop: 2 },
   cartBtn:                { position: 'relative', padding: 4 },
   cartBadge:              { position: 'absolute', top: 0, right: 0, backgroundColor: COLORS.primary, borderRadius: RADIUS.full, width: 16, height: 16, alignItems: 'center', justifyContent: 'center' },
   cartBadgeText:          { fontSize: 9, color: COLORS.white, fontWeight: '700' },
 
   // Search
-  searchWrap:             { flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, margin: SPACING.md, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.sm, borderWidth: 1.5, borderColor: COLORS.grayBorder, ...SHADOW.sm },
-  searchInput:            { flex: 1, padding: 10, fontSize: 14, color: COLORS.dark },
+  searchWrap:             { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, borderRadius: 10, paddingHorizontal: SPACING.sm, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  searchInput:            { flex: 1, paddingVertical: 4, paddingHorizontal: 4, fontSize: 13, color: COLORS.dark },
 
   // Categories
   catScroll:              { maxHeight: 44 }, // kept for compatibility

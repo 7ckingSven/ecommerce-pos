@@ -24,6 +24,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [loadingBuy,  setLoadingBuy]  = useState(false);
   const [activeIdx,       setActiveIdx]       = useState(0);
   const [selectedOptions, setSelectedOptions] = useState({});
+  const [showFullDesc, setShowFullDesc] = useState(false);
   const [variantStock,    setVariantStock]    = useState(null); // null=unchecked, number=qty
   const { width } = Dimensions.get('window');
   const images = product.image_urls?.length
@@ -278,7 +279,22 @@ export default function ProductDetailScreen({ route, navigation }) {
           {product.description ? (
             <View style={styles.descWrap}>
               <Text style={styles.descTitle}>Description</Text>
-              <Text style={styles.desc}>{product.description}</Text>
+              <Text
+                style={styles.desc}
+                numberOfLines={showFullDesc ? undefined : 3}
+              >
+                {product.description}
+              </Text>
+              {product.description.length > 100 && (
+                <TouchableOpacity
+                  onPress={() => setShowFullDesc(!showFullDesc)}
+                  style={{ marginTop: 4 }}
+                >
+                  <Text style={{ fontSize: 13, color: COLORS.primary, fontWeight: '600' }}>
+                    {showFullDesc ? 'View Less ▲' : 'View More ▼'}
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           ) : null}
 
