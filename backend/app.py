@@ -854,6 +854,11 @@ def api_products():
 @app.route('/api/products/<product_id>', methods=['GET'])
 def api_product_detail(product_id):
     try:
+        import uuid as _uuid
+        try:
+            _uuid.UUID(product_id)
+        except ValueError:
+            return jsonify({'error': 'Invalid product ID.'}), 404
         res = supabase.table('product').select(
             '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight, net_weight_unit'
         ).eq('product_id', product_id).execute()
