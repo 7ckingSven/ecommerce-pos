@@ -691,8 +691,8 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   transition: all var(--transition);
   white-space: nowrap;
 }
-.btn-solid-green { background: var(--g-600); color: #ffffff; }
-.btn-solid-green:hover { background: var(--g-700); }
+.btn-solid-green { background: var(--g-600); color: #ffffff; transition: all 0.2s ease; }
+.btn-solid-green:hover { background: var(--g-700); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(22,163,74,0.4); }
 .btn-cancel {
   background: var(--surface-2);
   color: var(--text-muted);
@@ -915,4 +915,23 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+/* ─── Stock Transfer & Adjust Stock Button Hovers ─── */
+.btn[style*="background:#3b82f6"]:hover {
+  background: #2563eb !important;
+  border-color: #2563eb !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+  transition: all 0.2s ease;
+}
+.btn[style*="background:#ef4444"]:hover {
+  background: #dc2626 !important;
+  border-color: #dc2626 !important;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(239,68,68,0.4);
+  transition: all 0.2s ease;
+}
+.btn[style*="background:#3b82f6"],
+.btn[style*="background:#ef4444"] {
+  transition: all 0.2s ease;
 }
