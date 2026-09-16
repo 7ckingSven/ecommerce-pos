@@ -2120,7 +2120,7 @@ function applySalesMonthFilter(month) {
   document.getElementById('salesDateFrom').value    = '';
   document.getElementById('salesDateTo').value      = '';
 
-  if (!month) { filterSalesOrders(allSalesOrders); return; }
+  if (!month) { document.getElementById('salesFilterLabel').textContent = ''; filterSalesOrders(allSalesOrders); return; }
 
   const now      = new Date();
   const filtered = allSalesOrders.filter(o => {
