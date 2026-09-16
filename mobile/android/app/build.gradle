@@ -95,6 +95,15 @@ android {
             keyPassword 'android'
         }
     }
+    // ─── Rename APK output ───────────────────────────────────────
+    applicationVariants.all { variant ->
+        variant.outputs.all { output ->
+            def versionName = variant.versionName
+            def buildType   = variant.buildType.name
+            outputFileName  = "TEFC-ECommerce-v${versionName}-${buildType}.apk"
+        }
+    }
+
     buildTypes {
         debug {
             signingConfig signingConfigs.debug

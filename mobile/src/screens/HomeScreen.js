@@ -14,7 +14,8 @@ import { useCart } from '../utils/CartContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
-  const inStock = product.quantity > 0;
+  const inStock    = (product._branchQty || product.quantity || 0) > 0;
+  const branchName = product._branchName || null;
 
   // Calculate discounted price if discount exists
   const discountedPrice = product.discount
@@ -46,15 +47,11 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
         <Text style={styles.productName} numberOfLines={2}>{product.product_name}</Text>
         {product.brand ? <Text style={styles.productBrand}>{product.brand}</Text> : null}
         <Text style={styles.productCat}>{product.category}</Text>
-        {(() => {
-          const bs = (product.branch_stock || []).find(b => b.quantity > 0);
-          const branchName = bs?.branch?.branch_name;
-          return branchName ? (
-            <View style={styles.branchTag}>
-              <Text style={styles.branchTagText}>🏪 {branchName}</Text>
-            </View>
-          ) : null;
-        })()}
+{branchName ? (
+          <View style={styles.branchTag}>
+            <Text style={styles.branchTagText}>🏪 {branchName}</Text>
+          </View>
+        ) : null}
 
         {/* Sold Count */}
         <Text style={styles.soldCount}>
@@ -155,8 +152,26 @@ export default function HomeScreen({ navigation }) {
     try {
       // Always fetch ALL products — filter client-side to preserve chip list
       const data = await getProducts('');
-      setAllProducts(data);
-      setProducts(data);
+      // Expand products by branch — one card per branch with stock
+      const expanded = [];
+      data.forEach(p => {
+        const branches = (p.branch_stock || []).filter(bs => bs.quantity > 0);
+        if (branches.length === 0) {
+          expanded.push({ ...p, _branchId: null, _branchName: null, _branchQty: 0 });
+        } else {
+          branches.forEach(bs => {
+            expanded.push({
+              ...p,
+              _branchId:   bs.branch_id,
+              _branchName: bs.branch?.branch_name || null,
+              _branchQty:  bs.quantity,
+              quantity:    bs.quantity,
+            });
+          });
+        }
+      });
+      setAllProducts(expanded);
+      setProducts(expanded);
 
       // Build category and brand lists from full dataset
       const cats   = [...new Set(data.map(p => p.category?.trim()).filter(Boolean))].sort();
@@ -173,7 +188,7 @@ export default function HomeScreen({ navigation }) {
 
   // Apply filters client-side — never loses chip list
   function applyFilters(cat, brand, q) {
-    let filtered = allProducts;
+    let filtered = allProducts; // already expanded by branch
     if (cat)   filtered = filtered.filter(p => p.category?.trim() === cat);
     if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand);
     if (q)     filtered = filtered.filter(p =>
@@ -372,7 +387,7 @@ export default function HomeScreen({ navigation }) {
         <View style={styles.searchOverlay}>
           <FlatList
             data={suggestions}
-            keyExtractor={item => item.product_id}
+            keyExtractor={item => `${item.product_id}_${item._branchId || 'none'}`}
             keyboardShouldPersistTaps="handled"
             numColumns={2}
             columnWrapperStyle={{ gap: SPACING.sm, paddingHorizontal: SPACING.md }}
@@ -532,7 +547,10 @@ export default function HomeScreen({ navigation }) {
           renderItem={({ item }) => (
             <ProductCard
               product={item}
-              onPress={p => navigation.navigate('ProductDetail', { product: p, branchId: (p.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null })}
+              onPress={p => navigation.navigate('ProductDetail', {
+                product:  p,
+                branchId: p._branchId || (p.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null
+              })}
               onAddToCart={handleAddToCart}
               onBuyNow={handleBuyNow}
             />

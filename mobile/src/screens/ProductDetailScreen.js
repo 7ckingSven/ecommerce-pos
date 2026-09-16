@@ -18,7 +18,13 @@ function getDiscountedPrice(product) {
 }
 
 export default function ProductDetailScreen({ route, navigation }) {
-  const { product, branchId } = route.params;
+  const { product, branchId, fromSearch } = route.params;
+  // Get branch-specific stock
+  const branchStock = branchId
+    ? (product.branch_stock || []).find(b => b.branch_id === branchId)
+    : (product.branch_stock || [])[0];
+  const branchQty  = branchStock?.quantity ?? product._branchQty ?? product.quantity ?? 0;
+  const branchName = branchStock?.branch?.branch_name || product._branchName || null;
   const [quantity, setQty]   = useState(1);
   const [loadingCart, setLoadingCart] = useState(false);
   const [loadingBuy,  setLoadingBuy]  = useState(false);
