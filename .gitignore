@@ -76,6 +76,3 @@ backend/static/apk/
 
 # Supabase local
 .supabase/
-
-# Firebase
-backend/tefc-ecommerce-firebase-adminsdk-fbsvc-68826d1480.json
