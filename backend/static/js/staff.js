@@ -1527,7 +1527,7 @@ function renderSummaryForDate(dateStr) {
   if (tableTitle)   tableTitle.textContent   = `${label}'s Transactions`;
 
   const labelEl = document.getElementById('summaryDateLabel');
-  if (labelEl) labelEl.textContent = isToday ? '📅 Today' : `📅 ${label}`;
+  if (labelEl) labelEl.textContent = isToday ? 'Today' : `${label}`;
 
   // Filter orders by date — PH timezone
   const filtered = allSummaryOrders.filter(o => {

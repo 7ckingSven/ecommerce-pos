@@ -2408,14 +2408,14 @@ function printSalesReport() {
     <div class="section-title">Branch Sales Breakdown</div>
     <div class="branch-grid">
       <div class="branch-box">
-        <div class="branch-name">🏪 Triple E</div>
+        <div class="branch-name">Triple E</div>
         <div class="branch-row"><span>Total Revenue</span><span><b>${teRev}</b></span></div>
         <div class="branch-row"><span>Total Orders</span><span>${teOrders}</span></div>
         <div class="branch-row"><span>Walk-in Orders</span><span>${teWalkin}</span></div>
         <div class="branch-row"><span>Online Orders</span><span>${teOnline}</span></div>
       </div>
       <div class="branch-box">
-        <div class="branch-name">🏪 Fiel Collince</div>
+        <div class="branch-name">Fiel Collince</div>
         <div class="branch-row"><span>Total Revenue</span><span><b>${fcRev}</b></span></div>
         <div class="branch-row"><span>Total Orders</span><span>${fcOrders}</span></div>
         <div class="branch-row"><span>Walk-in Orders</span><span>${fcWalkin}</span></div>
