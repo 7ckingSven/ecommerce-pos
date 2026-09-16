@@ -837,16 +837,16 @@ function showReceipt(data, items, received, payment, refNo, customerName = '') {
     </div>
     <hr class="receipt-divider"/>
     <div class="receipt-row">
-      <span>VAT Exclusive Amount</span>
+      <span>VATable Sales</span>
       <span>${peso(baseAmt)}</span>
     </div>
     <div class="receipt-row">
-      <span>VAT (12%)</span>
+      <span>VAT Amount (12%)</span>
       <span>${peso(vatAmount)}</span>
     </div>
     <hr class="receipt-divider"/>
     <div class="receipt-row receipt-total">
-      <span>TOTAL (VAT Inclusive)</span>
+      <span>Total Sales (VAT Inc.)</span>
       <span>${peso(total)}</span>
     </div>
     ${payment === 'walk_in_cash' ? `
