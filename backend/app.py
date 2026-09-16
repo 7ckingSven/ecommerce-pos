@@ -2,7 +2,8 @@ import json
 import random
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_cors import CORS
-from flask_mail import Mail, Message
+# Resend email API (replaces Flask-Mail)
+import requests as resend_requests
 from supabase import create_client
 from dotenv import load_dotenv
 from datetime import timedelta, datetime, timezone
@@ -43,15 +44,32 @@ def supabase_retry(fn, retries=3, delay=0.3):
                 continue
             raise e
 
-# Configure Flask-Mail
-app.config['MAIL_SERVER']  = os.getenv('MAIL_SERVER', 'smtp.gmail.com')
-app.config['MAIL_PORT']    = int(os.getenv('MAIL_PORT', 465))
-app.config['MAIL_USE_TLS'] = os.getenv('MAIL_USE_TLS', 'False').lower() in ('true', '1', 'yes')
-app.config['MAIL_USE_SSL'] = os.getenv('MAIL_USE_SSL', 'True').lower() in ('true', '1', 'yes')
-app.config['MAIL_USERNAME'] = os.getenv('MAIL_USERNAME')
-app.config['MAIL_PASSWORD'] = os.getenv('MAIL_PASSWORD')
-app.config['MAIL_DEFAULT_SENDER'] = os.getenv('MAIL_DEFAULT_SENDER', os.getenv('MAIL_USERNAME'))
-mail = Mail(app)
+# Resend Email Config
+RESEND_API_KEY    = os.getenv('RESEND_API_KEY', '')
+RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+
+def send_email_resend(to_email, subject, html_body):
+    """Send email using Resend API."""
+    try:
+        response = resend_requests.post(
+            'https://api.resend.com/emails',
+            headers={
+                'Authorization': f'Bearer {RESEND_API_KEY}',
+                'Content-Type':  'application/json',
+            },
+            json={
+                'from':    RESEND_FROM_EMAIL,
+                'to':      [to_email],
+                'subject': subject,
+                'html':    html_body,
+            },
+            timeout=15
+        )
+        print(f'Resend response: {response.status_code} {response.text}')
+        return response.status_code == 200
+    except Exception as e:
+        print(f'Resend error: {e}')
+        return False
 
 # ══════════════════════════════════════════════════════
 # HELPER FUNCTIONS
@@ -350,9 +368,11 @@ def forgot_password():
             
             # Send OTP via email
             try:
-                msg = msg_obj = Message(subject='TEFC E-Commerce — Password Reset OTP', recipients=[email])
-                msg_obj.html = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
-                mail.send(msg_obj)
+                send_email_resend(
+                    to_email  = email,
+                    subject   = 'TEFC E-Commerce — Password Reset OTP',
+                    html_body = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
+                )
             except Exception as email_error:
                 print(f"WARNING: Failed to send email: {email_error}")
                 # Continue even if email fails - user can see OTP in console logs for testing
@@ -586,10 +606,12 @@ def api_auth_send_email_otp():
             'used':       False,
         }).execute()
 
-        # Send email
-        msg      = Message(subject='TEFC E-Commerce — Email Verification Code', recipients=[email])
-        msg.html = build_otp_email(otp_code, title='Verification Code', purpose='verify your email address')
-        mail.send(msg)
+        # Send email via Resend
+        send_email_resend(
+            to_email  = email,
+            subject   = 'TEFC E-Commerce — Email Verification Code',
+            html_body = build_otp_email(otp_code, title='Verification Code', purpose='verify your email address')
+        )
 
         return jsonify({'message': 'OTP sent successfully.'}), 200
     except Exception as e:
@@ -1620,12 +1642,17 @@ def admin_update_purchase_order(po_id):
 # ─── Email OTP Helper ─────────────────────────────────
 def send_otp_email(recipient_email, otp):
     import time
-    msg      = Message(subject='TEFC E-Commerce — Password Reset OTP', recipients=[recipient_email])
-    msg.html = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
+    html_body = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
     for attempt in range(3):
         try:
-            mail.send(msg)
-            return True
+            success = send_email_resend(
+                to_email  = recipient_email,
+                subject   = 'TEFC E-Commerce — Password Reset OTP',
+                html_body = html_body
+            )
+            if success:
+                return True
+            raise Exception('Resend API failed')
         except Exception as e:
             print(f'Email error (attempt {attempt+1}): {e}')
             if attempt < 2:
