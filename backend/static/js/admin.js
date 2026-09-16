@@ -1171,7 +1171,6 @@ function updateBranchStockSummary(products) {
     }).join('');
 
     html += '<div class="branch-stock-card">'
-      + '<div class="branch-stock-header"><span>🏪</span>'
       + '<span class="branch-stock-name">' + branch + '</span>'
       + '<span class="branch-stock-count">' + allItems.length + ' items</span></div>'
       + '<table class="data-table" style="margin:0;">'
@@ -2387,7 +2386,7 @@ function printSalesReport() {
 <body>
 
   <div class="header">
-    <h1>🏪 TEFC E-Commerce</h1>
+    <h1>TEFC E-Commerce</h1>
     <h2>Triple E &amp; Fiel Collince General Merchandise</h2>
     <p>SALES REPORT &nbsp;|&nbsp; <span class="badge-green">${filterLabel}</span></p>
     <p style="margin-top:6px;">Generated: ${now}</p>
