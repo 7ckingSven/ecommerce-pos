@@ -190,7 +190,7 @@ def init_firebase():
             import os, json as _json
             service_account_path = os.path.join(
                 os.path.dirname(__file__),
-                'tefc-ecommerce-firebase-adminsdk-fbsvc-68826d1480.json'
+                'tefc-ecommerce-firebase-adminsdk-fbsvc-4a0351865e.json'
             )
             if os.path.exists(service_account_path):
                 # Local development — use file
