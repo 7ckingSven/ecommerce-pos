@@ -187,22 +187,27 @@ def init_firebase():
     global _firebase_initialized
     if not _firebase_initialized:
         try:
-            import os
-            # Try service account file first, then env var
+            import os, json as _json
             service_account_path = os.path.join(
                 os.path.dirname(__file__),
                 'tefc-ecommerce-firebase-adminsdk-fbsvc-68826d1480.json'
             )
             if os.path.exists(service_account_path):
+                # Local development — use file
                 cred = credentials.Certificate(service_account_path)
             else:
-                # Fallback: use env var path
-                cred = credentials.Certificate(
-                    os.environ.get('FIREBASE_SERVICE_ACCOUNT', service_account_path)
-                )
+                # Render — use environment variable JSON content
+                sa_json = os.environ.get('FIREBASE_SERVICE_ACCOUNT_JSON', '')
+                if sa_json:
+                    sa_dict = _json.loads(sa_json)
+                    cred    = credentials.Certificate(sa_dict)
+                else:
+                    print('Firebase init error: No service account file or env var found')
+                    return
             if not firebase_admin._apps:
                 firebase_admin.initialize_app(cred)
             _firebase_initialized = True
+            print('Firebase initialized successfully!')
         except Exception as e:
             print(f'Firebase init error: {e}')
 
