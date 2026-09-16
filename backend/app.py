@@ -1218,41 +1218,6 @@ def api_place_order():
 
         # Deduct variant stock + log stock movement for each item
         import time as _mt
-        for item in cart_items:
-            pid  = item['product_id']
-            qty  = item['quantity']
-            opts = item.get('selected_options', {})
-
-            # Variant stock deduction
-            if opts and branch_id:
-                try:
-                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
-                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                    if match:
-                        new_vs_qty = max(0, match[0]['quantity'] - qty)
-                        supabase.table('variant_stock').update({'quantity': new_vs_qty, 'updated_at': 'now()'}).eq('id', match[0]['id']).execute()
-                except Exception as vs_err:
-                    print(f'Variant stock deduct warning: {vs_err}')
-
-            # Log stock movement (OUT) for inventory history
-            if branch_id:
-                try:
-                    _mt.sleep(0.05)
-                    bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
-                    qty_after  = bs.data[0]['quantity'] if bs.data else 0
-                    qty_before = qty_after + qty
-                    supabase.table('inventory').insert({
-                        'product_id':      pid,
-                        'quantity_added':  -qty,
-                        'quantity_before': qty_before,
-                        'quantity_after':  qty_after,
-                        'to_branch_id':    branch_id,
-                        'variant_options': opts if opts else None,
-                        'note':            f'Sale — Order #{order_id[:8].upper()}',
-                    }).execute()
-                except Exception as log_err:
-                    print(f'Inventory log warning: {log_err}')
-
         supabase.table('order_item').insert(order_items).execute()
 
         payment_res = supabase.table('payment').insert({
@@ -2398,14 +2363,15 @@ def admin_update_order(order_id):
         # If cancelled — return stock to branch
         if status == 'cancelled':
             order_res = supabase.table('order').select(
-                'branch_id, order_item(product_id, qty)'
+                'branch_id, order_item(product_id, qty, selected_options)'
             ).eq('order_id', order_id).execute()
             if order_res.data:
                 order_data = order_res.data[0]
                 br_id      = order_data.get('branch_id')
                 for item in order_data.get('order_item', []):
-                    pid = item.get('product_id')
-                    qty = int(item.get('qty', 0))
+                    pid  = item.get('product_id')
+                    qty  = int(item.get('qty', 0))
+                    opts = item.get('selected_options', {})
                     if not pid or not qty:
                         continue
                     # Return to branch_stock
@@ -2415,12 +2381,37 @@ def admin_update_order(order_id):
                             supabase.table('branch_stock').update({
                                 'quantity': bs.data[0]['quantity'] + qty
                             }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    # Return to variant stock
+                    if opts and br_id:
+                        try:
+                            all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
+                            match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                            if match:
+                                supabase.table('variant_stock').update({
+                                    'quantity': match[0]['quantity'] + qty
+                                }).eq('id', match[0]['id']).execute()
+                        except Exception as vs_err:
+                            print(f'Variant stock restore warning: {vs_err}')
                     # Return to product total
                     pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
                     if pr.data:
                         supabase.table('product').update({
                             'quantity': pr.data[0]['quantity'] + qty
                         }).eq('product_id', pid).execute()
+                    # Log stock movement (IN) for inventory history
+                    try:
+                        supabase.table('inventory').insert({
+                            'product_id':      pid,
+                            'staff_id':        None,
+                            'quantity_added':  qty,
+                            'quantity_before': (bs.data[0]['quantity'] if br_id and bs.data else 0),
+                            'quantity_after':  (bs.data[0]['quantity'] + qty if br_id and bs.data else qty),
+                            'to_branch_id':    br_id,
+                            'variant_options': opts if opts else None,
+                            'note':            f'Cancelled — Order #{order_id[:8].upper()}',
+                        }).execute()
+                    except Exception as log_err:
+                        print(f'Cancel inventory log warning: {log_err}')
 
         return jsonify({'message': f'Order status updated to {status}.'}), 200
     except Exception as e:
