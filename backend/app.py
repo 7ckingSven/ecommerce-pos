@@ -2382,24 +2382,31 @@ def admin_update_order(order_id):
                                 'quantity': bs.data[0]['quantity'] + qty
                             }).eq('product_id', pid).eq('branch_id', br_id).execute()
                     # Return to variant stock
-                    print(f'Cancel debug - opts: {opts}, br_id: {br_id}, pid: {pid}')
                     if opts and br_id:
                         try:
+                            import json as _json
+                            # Normalize opts for comparison
+                            def normalize(o):
+                                if isinstance(o, str):
+                                    try: return _json.loads(o)
+                                    except: return o
+                                return o
+                            opts_norm = normalize(opts)
                             all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
-                            print(f'Cancel debug - all_vs: {all_vs.data}')
-                            match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                            print(f'Cancel debug - match: {match}')
+                            match = []
+                            for v in (all_vs.data or []):
+                                v_opts = normalize(v.get('options', {}))
+                                if v_opts == opts_norm:
+                                    match.append(v)
                             if match:
                                 supabase.table('variant_stock').update({
                                     'quantity': match[0]['quantity'] + qty
                                 }).eq('id', match[0]['id']).execute()
                                 print(f'Variant stock restored: {match[0]["id"]} +{qty}')
                             else:
-                                print(f'Cancel debug - NO MATCH found for opts: {opts}')
+                                print(f'Cancel - no variant match for opts: {opts_norm}')
                         except Exception as vs_err:
                             print(f'Variant stock restore warning: {vs_err}')
-                    else:
-                        print(f'Cancel debug - skipped variant restore: opts={opts}, br_id={br_id}')
                     # Return to product total
                     pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
                     if pr.data:
