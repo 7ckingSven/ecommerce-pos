@@ -169,7 +169,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     <View style={styles.container}>
 
       {/* Back Button */}
-      <TouchableOpacity style={styles.backBtn} onPress={() => navigation.goBack()}>
+      <TouchableOpacity style={styles.backBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeMain')}>
         <Feather name="arrow-left" size={22} color={COLORS.white}/>
       </TouchableOpacity>
 

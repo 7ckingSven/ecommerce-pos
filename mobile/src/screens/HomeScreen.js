@@ -1,8 +1,8 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, RefreshControl, Image, Alert,
-  StatusBar,
+  StatusBar, Keyboard,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getProducts, searchProducts } from '../services/productService';
@@ -11,6 +11,7 @@ import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCart } from '../utils/CartContext';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const inStock = product.quantity > 0;
@@ -113,7 +114,14 @@ export default function HomeScreen({ navigation }) {
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const { cartCount, refreshCartCount } = useCart();
-  const [loggedIn,    setLoggedIn]    = useState(false);
+  const [loggedIn,      setLoggedIn]      = useState(false);
+  const [searchFocused,  setSearchFocused]  = useState(false);
+  const [searchHistory,  setSearchHistory]  = useState([]);
+  const [suggestions,    setSuggestions]    = useState([]);
+  const [suggPage,       setSuggPage]       = useState(1);
+  const [suggLoading,    setSuggLoading]    = useState(false);
+  const SUGG_PER_PAGE = 10;
+  const searchRef = useRef(null);
 
   // Auto-refresh every 10 seconds when screen is focused
   useFocusEffect(
@@ -176,9 +184,100 @@ export default function HomeScreen({ navigation }) {
     setProducts(filtered);
   }
 
+
+  function updateSuggestions(q, page = 1) {
+    const filtered = q.trim()
+      ? allProducts.filter(p =>
+          p.product_name?.toLowerCase().includes(q.toLowerCase()) ||
+          p.brand?.toLowerCase().includes(q.toLowerCase()) ||
+          p.category?.toLowerCase().includes(q.toLowerCase())
+        )
+      : allProducts;
+    setSuggestions(filtered.slice(0, page * 10));
+    setSuggPage(page);
+  }
+
+  function loadMoreSuggestions() {
+    if (suggLoading) return;
+    const filtered = search.trim()
+      ? allProducts.filter(p =>
+          p.product_name?.toLowerCase().includes(search.toLowerCase()) ||
+          p.brand?.toLowerCase().includes(search.toLowerCase()) ||
+          p.category?.toLowerCase().includes(search.toLowerCase())
+        )
+      : allProducts;
+    if (suggestions.length >= filtered.length) return;
+    setSuggLoading(true);
+    setTimeout(() => {
+      const nextPage = suggPage + 1;
+      setSuggestions(filtered.slice(0, nextPage * 10));
+      setSuggPage(nextPage);
+      setSuggLoading(false);
+    }, 600);
+  }
+
+  async function loadSearchHistory() {
+    try {
+      const history = await AsyncStorage.getItem('search_history');
+      if (history) setSearchHistory(JSON.parse(history));
+    } catch (e) {}
+  }
+
+  async function saveSearchTerm(term) {
+    if (!term.trim()) return;
+    try {
+      const prev    = [...searchHistory];
+      const updated = [term, ...prev.filter(h => h !== term)].slice(0, 8);
+      setSearchHistory(updated);
+      await AsyncStorage.setItem('search_history', JSON.stringify(updated));
+    } catch (e) {}
+  }
+
+  async function deleteHistoryItem(term) {
+    try {
+      const updated = searchHistory.filter(h => h !== term);
+      setSearchHistory(updated);
+      await AsyncStorage.setItem('search_history', JSON.stringify(updated));
+    } catch (e) {}
+  }
+
+  async function clearHistory() {
+    try {
+      setSearchHistory([]);
+      await AsyncStorage.removeItem('search_history');
+    } catch (e) {}
+  }
+
   function handleSearch(q) {
     setSearch(q);
     applyFilters(selectedCat, selectedBrand, q);
+    updateSuggestions(q, 1);
+  }
+
+  function handleSearchSubmit() {
+    if (search.trim()) {
+      saveSearchTerm(search.trim());
+      setSearchFocused(false);
+      Keyboard.dismiss();
+    }
+  }
+
+  function handleHistoryTap(term) {
+    setSearch(term);
+    applyFilters(selectedCat, selectedBrand, term);
+    updateSuggestions(term, 1);
+    saveSearchTerm(term);
+  }
+
+  function handleSuggestionTap(prod) {
+    saveSearchTerm(prod.product_name);
+    Keyboard.dismiss();
+    // Keep searchFocused=true so back button returns to search
+    navigation.navigate('ProductDetail', {
+      product: prod,
+      branchId:       (prod.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null,
+      fromSearch:     true,
+    });
   }
 
   function selectCategory(cat) {
@@ -226,25 +325,143 @@ export default function HomeScreen({ navigation }) {
       {/* Header — Compact */}
       <View style={styles.header}>
         <View style={styles.headerTop}>
-          <Text style={styles.headerTitle}>TEFC</Text>
-          {/* Search Bar inline */}
-          <View style={styles.searchWrap}>
+          {searchFocused ? (
+            <TouchableOpacity onPress={() => {
+              setSearchFocused(false);
+              setSearch('');
+              setSuggestions([]);
+              Keyboard.dismiss();
+              loadProducts(selectedCat);
+            }} style={{ padding: 4, marginRight: 4 }}>
+              <Feather name="arrow-left" size={20} color="#fff"/>
+            </TouchableOpacity>
+          ) : (
+            <Text style={styles.headerTitle}>TEFC</Text>
+          )}
+          <View style={[styles.searchWrap, searchFocused && styles.searchWrapFocused]}>
             <Feather name="search" size={14} color={COLORS.textMuted} style={{ marginRight: 4 }}/>
             <TextInput
+              ref={searchRef}
               style={styles.searchInput}
               placeholder="Search products..."
               placeholderTextColor={COLORS.textMuted}
               value={search}
               onChangeText={handleSearch}
+              onFocus={() => {
+                setSearchFocused(true);
+                updateSuggestions(search, 1);
+              }}
+              onSubmitEditing={handleSearchSubmit}
+              returnKeyType="search"
             />
             {search !== '' && (
-              <TouchableOpacity onPress={() => { setSearch(''); loadProducts(selectedCat); }}>
+              <TouchableOpacity onPress={() => {
+                setSearch('');
+                setSuggestions([]);
+                loadProducts(selectedCat);
+              }}>
                 <Feather name="x" size={14} color={COLORS.textMuted}/>
               </TouchableOpacity>
             )}
           </View>
         </View>
       </View>
+
+      {/* Search Overlay */}
+      {searchFocused && (
+        <View style={styles.searchOverlay}>
+          <FlatList
+            data={suggestions}
+            keyExtractor={item => item.product_id}
+            keyboardShouldPersistTaps="handled"
+            numColumns={2}
+            columnWrapperStyle={{ gap: SPACING.sm, paddingHorizontal: SPACING.md }}
+            contentContainerStyle={{ paddingBottom: SPACING.xl }}
+            onEndReached={loadMoreSuggestions}
+            onEndReachedThreshold={0.5}
+            ListHeaderComponent={
+              <View>
+                {/* Search History */}
+                {searchHistory.length > 0 && (
+                  <View>
+                    <View style={styles.historyHeader}>
+                      <Text style={styles.historyTitle}>Recent Searches</Text>
+                      <TouchableOpacity onPress={clearHistory}>
+                        <Text style={styles.clearAll}>Clear All</Text>
+                      </TouchableOpacity>
+                    </View>
+                    {searchHistory.map((term, i) => (
+                      <TouchableOpacity
+                        key={i}
+                        style={styles.historyItem}
+                        onPress={() => handleHistoryTap(term)}
+                      >
+                        <Feather name="clock" size={14} color={COLORS.textMuted} style={{ marginRight: 10 }}/>
+                        <Text style={styles.historyText}>{term}</Text>
+                        <TouchableOpacity onPress={() => deleteHistoryItem(term)} style={{ marginLeft: 'auto' }}>
+                          <Feather name="x" size={14} color={COLORS.textMuted}/>
+                        </TouchableOpacity>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
+                )}
+                {/* Suggestions Title */}
+                <View style={styles.historyHeader}>
+                  <Text style={styles.historyTitle}>
+                    {search.trim() ? `Results for "${search}"` : 'Suggestions'}
+                  </Text>
+                </View>
+              </View>
+            }
+            ListEmptyComponent={
+              <View style={styles.noHistory}>
+                <Feather name="search" size={32} color={COLORS.grayLight}/>
+                <Text style={styles.noHistoryText}>No results for "{search}"</Text>
+              </View>
+            }
+            ListFooterComponent={
+              suggLoading ? (
+                <View style={{ padding: 16, alignItems: 'center' }}>
+                  <ActivityIndicator color={COLORS.primary} size="small"/>
+                  <Text style={{ fontSize: 12, color: COLORS.textMuted, marginTop: 4 }}>Loading...</Text>
+                </View>
+              ) : null
+            }
+            renderItem={({ item }) => {
+              const discount  = item.discount;
+              const dispPrice = discount
+                ? item.price * (1 - discount.percentage / 100)
+                : item.price;
+              return (
+                <TouchableOpacity
+                  style={styles.suggCard}
+                  onPress={() => handleSuggestionTap(item)}
+                >
+                  {item.image_url ? (
+                    <Image source={{ uri: item.image_url }} style={styles.suggCardImg}/>
+                  ) : (
+                    <View style={[styles.suggCardImg, { backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }]}>
+                      <Feather name="image" size={24} color={COLORS.grayLight}/>
+                    </View>
+                  )}
+                  <View style={{ padding: 8 }}>
+                    <Text style={styles.suggName} numberOfLines={2}>{item.product_name}</Text>
+                    <Text style={styles.suggBrand} numberOfLines={1}>{item.brand}</Text>
+                    <Text style={styles.suggPrice}>
+                      ₱{Number(dispPrice).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                    </Text>
+                    {discount && (
+                      <Text style={{ fontSize: 10, color: COLORS.textMuted, textDecorationLine: 'line-through' }}>
+                        ₱{Number(item.price).toLocaleString('en-PH', { minimumFractionDigits: 2 })}
+                      </Text>
+                    )}
+                  </View>
+                </TouchableOpacity>
+              );
+            }}
+          />
+        </View>
+      )}
 
       {/* Category Filter */}
       <View style={styles.filterSection}>
@@ -342,6 +559,22 @@ const styles = StyleSheet.create({
 
   // Search
   searchWrap:             { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, borderRadius: 10, paddingHorizontal: SPACING.sm, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  searchWrapFocused:      { borderColor: COLORS.primary, borderWidth: 1.5 },
+  searchOverlay:          { position: 'absolute', top: 50, left: 0, right: 0, bottom: 0, backgroundColor: COLORS.white, zIndex: 999, paddingTop: 8 },
+  historyHeader:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
+  historyTitle:           { fontSize: 13, fontWeight: '700', color: COLORS.dark },
+  clearAll:               { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
+  historyItem:            { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
+  historyText:            { fontSize: 13, color: COLORS.dark, flex: 1 },
+  noHistory:              { alignItems: 'center', paddingTop: SPACING.xxl, gap: SPACING.sm },
+  noHistoryText:          { fontSize: 13, color: COLORS.textMuted },
+  suggItem:               { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder, gap: 12 },
+  suggImg:                { width: 48, height: 48, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg },
+  suggCard:               { flex: 1, backgroundColor: COLORS.white, borderRadius: RADIUS.md, overflow: 'hidden', marginBottom: SPACING.sm, ...SHADOW.sm },
+  suggCardImg:            { width: '100%', height: 110 },
+  suggName:               { fontSize: 13, fontWeight: '600', color: COLORS.dark },
+  suggBrand:              { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
+  suggPrice:              { fontSize: 13, fontWeight: '700', color: COLORS.primary, marginTop: 2 },
   searchInput:            { flex: 1, paddingVertical: 4, paddingHorizontal: 4, fontSize: 13, color: COLORS.dark },
 
   // Categories
