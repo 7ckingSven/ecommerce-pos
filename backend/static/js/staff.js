@@ -1237,7 +1237,7 @@ function viewStaffOrderItems(order) {
 
   const addrHtml = (order.order_type === 'online')
     ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
-      + '<div style="color:var(--text-muted);margin-bottom:2px;">📍 Delivery Address</div>'
+      + '<div style="color:var(--text-muted);margin-bottom:2px;">Delivery Address</div>'
       + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
       + shippingHtml
       + '</div>'
@@ -1252,7 +1252,7 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
     + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
-    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ' + branch + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>' + branch + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
     + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
@@ -1404,7 +1404,7 @@ function viewStaffOrderItems(order) {
 
   const addrHtml = (order.order_type === 'online')
     ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
-      + '<div style="color:var(--text-muted);margin-bottom:2px;">📍 Delivery Address</div>'
+      + '<div style="color:var(--text-muted);margin-bottom:2px;">Delivery Address</div>'
       + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
       + shippingHtml
       + '</div>'
@@ -1419,7 +1419,7 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
     + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
-    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>🏪 ' + branch + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>' + branch + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
     + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
