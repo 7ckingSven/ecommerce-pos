@@ -44,31 +44,32 @@ def supabase_retry(fn, retries=3, delay=0.3):
                 continue
             raise e
 
-# Resend Email Config
-RESEND_API_KEY    = os.getenv('RESEND_API_KEY', '')
-RESEND_FROM_EMAIL = os.getenv('RESEND_FROM_EMAIL', 'onboarding@resend.dev')
+# Brevo (Sendinblue) Email Config
+BREVO_API_KEY    = os.getenv('BREVO_API_KEY', '')
+BREVO_FROM_EMAIL = os.getenv('BREVO_FROM_EMAIL', 'noreply@tefcecommerce.com')
+BREVO_FROM_NAME  = os.getenv('BREVO_FROM_NAME', 'TEFC E-Commerce')
 
 def send_email_resend(to_email, subject, html_body):
-    """Send email using Resend API."""
+    """Send email using Brevo API."""
     try:
         response = resend_requests.post(
-            'https://api.resend.com/emails',
+            'https://api.brevo.com/v3/smtp/email',
             headers={
-                'Authorization': f'Bearer {RESEND_API_KEY}',
-                'Content-Type':  'application/json',
+                'api-key':      BREVO_API_KEY,
+                'Content-Type': 'application/json',
             },
             json={
-                'from':    RESEND_FROM_EMAIL,
-                'to':      [to_email],
-                'subject': subject,
-                'html':    html_body,
+                'sender':      { 'name': BREVO_FROM_NAME, 'email': BREVO_FROM_EMAIL },
+                'to':          [{ 'email': to_email }],
+                'subject':     subject,
+                'htmlContent': html_body,
             },
             timeout=15
         )
-        print(f'Resend response: {response.status_code} {response.text}')
-        return response.status_code == 200
+        print(f'Brevo response: {response.status_code} {response.text}')
+        return response.status_code in [200, 201]
     except Exception as e:
-        print(f'Resend error: {e}')
+        print(f'Brevo error: {e}')
         return False
 
 # ══════════════════════════════════════════════════════
