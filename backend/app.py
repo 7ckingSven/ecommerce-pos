@@ -243,7 +243,7 @@ def download_apk():
         apk_path,
         mimetype='application/vnd.android.package-archive',
         as_attachment=True,
-        download_name='TripleE-FielCollince-App.apk'
+        download_name='TEFC-ECommerce-App.apk'
     )
 
 # ─── UNIFIED LOGIN ────────────────────────────────────
