@@ -1171,6 +1171,7 @@ function updateBranchStockSummary(products) {
     }).join('');
 
     html += '<div class="branch-stock-card">'
+      + '<div class="branch-stock-header"><span> </span>'
       + '<span class="branch-stock-name">' + branch + '</span>'
       + '<span class="branch-stock-count">' + allItems.length + ' items</span></div>'
       + '<table class="data-table" style="margin:0;">'
