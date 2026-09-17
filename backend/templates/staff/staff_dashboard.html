@@ -66,7 +66,7 @@
           <span class="sidebar-user-name">{{ session.name or 'Staff' }}</span>
           <span class="sidebar-user-role">Staff</span>
         </div>
-        <a href="{{ url_for('logout') }}" class="sidebar-logout" title="Logout">
+        <a href="#" onclick="openLogoutModal('{{ url_for(\'logout\') }}')" class="sidebar-logout" title="Logout">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </a>
       </div>
@@ -460,5 +460,32 @@
       <button onclick="closeReceiptModal()" class="btn btn-solid-green" style="flex:1;">Done</button>
     </div>
   </div>
+
+  <!-- Logout Confirmation Modal -->
+  <div id="logoutModalOverlay" onclick="closeLogoutModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;"></div>
+  <div id="logoutModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:10000;width:90%;max-width:360px;background:var(--surface);border-radius:16px;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3);padding:24px;">
+    <h3 style="margin:0 0 8px;font-size:16px;font-weight:700;color:var(--text);">Log Out</h3>
+    <p style="margin:0 0 20px;font-size:13px;color:var(--text-muted);">Are you sure you want to log out?</p>
+    <div style="display:flex;gap:10px;justify-content:flex-end;">
+      <button onclick="closeLogoutModal()" style="padding:8px 20px;border-radius:8px;border:1.5px solid var(--border);background:transparent;color:var(--text-muted);font-size:13px;font-weight:600;cursor:pointer;font-family:'Sora',sans-serif;">No</button>
+      <button onclick="confirmLogout()" style="padding:8px 20px;border-radius:8px;border:none;background:#ef4444;color:#fff;font-size:13px;font-weight:600;cursor:pointer;font-family:'Sora',sans-serif;">Yes, Log Out</button>
+    </div>
+  </div>
+  <script>
+    var _logoutUrl = '';
+    function openLogoutModal(url) {
+      _logoutUrl = url;
+      document.getElementById('logoutModalOverlay').style.display = 'block';
+      document.getElementById('logoutModal').style.display        = 'block';
+    }
+    function closeLogoutModal() {
+      document.getElementById('logoutModalOverlay').style.display = 'none';
+      document.getElementById('logoutModal').style.display        = 'none';
+    }
+    function confirmLogout() {
+      window.location.href = _logoutUrl;
+    }
+  </script>
+
 </body>
 </html>
