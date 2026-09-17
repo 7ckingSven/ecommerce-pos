@@ -8,6 +8,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import { getCustomer, logout, isLoggedIn } from '../services/authService';
 import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import PSGCAddressPicker, { psgcToAddressString, addressStringToParts } from '../components/PSGCAddressPicker';
 
 function InfoRow({ icon, label, value }) {
@@ -54,6 +55,7 @@ export default function ProfileScreen({ navigation }) {
   const [showNewPass,    setShowNewPass]    = useState(false);
   const [showConfirmPass,setShowConfirmPass]= useState(false);
   const [legalModal,     setLegalModal]     = useState(null);
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
   useEffect(() => { loadProfile(); }, []);
 
@@ -206,13 +208,18 @@ export default function ProfileScreen({ navigation }) {
 
   // ─── Logout ───────────────────────────────────────────
   async function handleLogout() {
-    Alert.alert('Log Out', 'Are you sure you want to log out?', [
-      { text: 'Cancel' },
-      { text: 'Log Out', style: 'destructive', onPress: async () => {
-        await logout();
-        navigation.replace('Login');
-      }}
-    ]);
+    showAlert({
+      type:    'confirm',
+      title:   'Log Out',
+      message: 'Are you sure you want to log out?',
+      buttons: [
+        { text: 'Cancel' },
+        { text: 'Log Out', style: 'danger', onPress: async () => {
+          await logout();
+          navigation.replace('Login');
+        }},
+      ]
+    });
   }
 
   if (loading) return (
@@ -534,6 +541,7 @@ export default function ProfileScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+      <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }

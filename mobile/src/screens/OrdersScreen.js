@@ -10,6 +10,7 @@ import api from '../services/api';
 import { getCustomerId } from '../services/authService';
 import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 // ─── Delivery Estimate Helper ────────────────────────
 function getDeliveryEstimate(order) {
@@ -41,6 +42,8 @@ function statusColor(s) {
 }
 
 export default function OrdersScreen({ navigation }) {
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+
   const [orders,       setOrders]       = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [loggedIn,     setLoggedIn]     = useState(false);
@@ -81,11 +84,11 @@ export default function OrdersScreen({ navigation }) {
       const res = await api.post(`/orders/${orderId}/received`, {}, {
         headers: { 'X-Customer-ID': customerId }
       });
-      Alert.alert('Thank you!', 'Your order has been marked as received! 🎉');
+      showAlert({ type: 'success', title: 'Thank You!', message: 'Your order has been marked as received!' });
       setSelectedOrder(prev => prev ? { ...prev, status: 'completed' } : null);
       await loadOrders();
     } catch (e) {
-      Alert.alert('Error', e.response?.data?.error || 'Failed to update order.');
+      showAlert({ type: 'error', title: 'Error', message: e.response?.data?.error || 'Failed to update order.' });
     } finally {
       setMarkingReceived(false);
     }
@@ -240,7 +243,7 @@ export default function OrdersScreen({ navigation }) {
                 <View style={styles.paymentRow}>
                   <Feather name="credit-card" size={12} color={COLORS.textMuted}/>
                   <Text style={styles.paymentText}>
-                    {item.payment.payment_method?.replace(/_/g,' ')} · {item.payment.status}
+                    {item.payment.payment_method?.replace(/_/g,' ')} · {item.status?.replace(/_/g,' ')}
                   </Text>
                 </View>
               )}
@@ -375,10 +378,7 @@ export default function OrdersScreen({ navigation }) {
                     <Text style={styles.detailLabel}>Method</Text>
                     <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.payment_method?.replace(/_/g,' ')}</Text>
                   </View>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Status</Text>
-                    <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.status}</Text>
-                  </View>
+
                   {(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no && (
                     <View style={styles.detailRow}>
                       <Text style={styles.detailLabel}>Ref No.</Text>
@@ -415,6 +415,7 @@ export default function OrdersScreen({ navigation }) {
         </View>
       </Modal>
 
+      <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }

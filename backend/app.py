@@ -1143,6 +1143,17 @@ def api_place_order():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
 
+    # ── Prevent duplicate orders within 10 seconds ──────────────────────────
+    try:
+        from datetime import datetime, timezone, timedelta
+        recent = supabase.table('order').select('order_id, created_at').eq('customer_id', customer_id).order('created_at', desc=True).limit(1).execute()
+        if recent.data:
+            last_time = datetime.fromisoformat(recent.data[0]['created_at'].replace('Z', '+00:00'))
+            if datetime.now(timezone.utc) - last_time < timedelta(seconds=10):
+                return jsonify({'error': 'Duplicate order detected. Please wait a moment.'}), 429
+    except Exception as dup_err:
+        print(f'Duplicate check warning: {dup_err}')
+
     data           = request.get_json()
     cart_items     = data.get('cart_items', [])
     payment_method = data.get('payment_method', '')

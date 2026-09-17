@@ -10,6 +10,7 @@ import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddres
 import { getCustomerId, getCustomer } from '../services/authService';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 const PAYMENT_METHODS = [
   { id: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'truck',      sub: 'Pay when your order arrives' },
@@ -18,6 +19,8 @@ const PAYMENT_METHODS = [
 
 export default function CheckoutScreen({ route, navigation }) {
   const { cartItems, total, branchId } = route.params;
+
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
   const [payment,       setPayment]       = useState('cash_on_delivery');
   const [refNo,         setRefNo]         = useState('');
@@ -128,9 +131,7 @@ export default function CheckoutScreen({ route, navigation }) {
       const id = await getCustomerId();
       console.log('CheckoutScreen — Customer ID:', id);
       if (!id) {
-        Alert.alert('Session Expired', 'Please log in again.', [
-          { text: 'OK', onPress: () => navigation.replace('Login') }
-        ]);
+        showAlert({ type: 'warning', title: 'Session Expired', message: 'Please log in again.', buttons: [{ text: 'OK', style: 'primary', onPress: () => navigation.replace('Login') }] });
         return;
       }
       loadProfile();
@@ -198,7 +199,7 @@ export default function CheckoutScreen({ route, navigation }) {
   async function saveAddress() {
     const combined = psgcToAddressString(psgcAddress) || editAddress;
     if (!combined) {
-      Alert.alert('Required', 'Please enter your delivery address.');
+      showAlert({ type: 'warning', title: 'Required', message: 'Please enter your delivery address.' });
       return;
     }
     setSavingAddr(true);
@@ -207,9 +208,9 @@ export default function CheckoutScreen({ route, navigation }) {
       setAddress(combined);
       setShippingFee(calculateShipping(combined, cartItems));
       setShowAddrModal(false);
-      Alert.alert('Success', 'Address updated successfully!');
+      showAlert({ type: 'success', title: 'Success', message: 'Address updated successfully!' });
     } catch (e) {
-      Alert.alert('Error', 'Failed to save address. Please try again.');
+      showAlert({ type: 'error', title: 'Error', message: 'Failed to save address. Please try again.' });
     } finally {
       setSavingAddr(false);
     }
@@ -217,31 +218,29 @@ export default function CheckoutScreen({ route, navigation }) {
 
   // ─── Remove Address ───────────────────────────────────
   function removeAddress() {
-    Alert.alert('Remove Address', 'Are you sure you want to remove your delivery address?', [
-      { text: 'Cancel' },
-      {
-        text: 'Remove', style: 'destructive',
-        onPress: async () => {
+    showAlert({ type: 'confirm', title: 'Remove Address',
+      message: 'Are you sure you want to remove your delivery address?',
+      buttons: [
+        { text: 'Cancel' },
+        { text: 'Remove', style: 'danger', onPress: async () => {
           try {
             await updateProfile({ address: '' });
             setAddress('');
           } catch (e) {
-            Alert.alert('Error', 'Failed to remove address.');
+            showAlert({ type: 'error', title: 'Error', message: 'Failed to remove address.' });
           }
-        }
-      }
-    ]);
+        }},
+      ]
+    });
   }
 
   // ─── Place Order ──────────────────────────────────────
   async function handlePlaceOrder() {
     if (orderLoading || isSubmitting.current) return;
+    isSubmitting.current = true;
     setOrderLoading(true);
     if (!address.trim()) {
-      Alert.alert('Address Required', 'Please add a delivery address before placing your order.', [
-        { text: 'Add Address', onPress: openAddressModal },
-        { text: 'Cancel' }
-      ]);
+      showAlert({ type: 'warning', title: 'Address Required', message: 'Please add a delivery address before placing your order.', buttons: [ { text: 'Add Address', style: 'primary', onPress: openAddressModal }, { text: 'Cancel' } ] });
       setOrderLoading(false);
       return;
     }
@@ -263,23 +262,18 @@ export default function CheckoutScreen({ route, navigation }) {
         if (hasError) { setOrderLoading(false); return; }
       } else {
         if (!receiptImage) {
-          Alert.alert('Required', 'Please upload your GCash receipt image.');
+          showAlert({ type: 'warning', title: 'Required', message: 'Please upload your GCash receipt image.' });
           setOrderLoading(false);
           return;
         }
       }
     }
 
-    Alert.alert(
-      'Confirm Order',
-      `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nGrand Total: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}\nDeliver to: ${address.split('|').map(s=>s.trim()).filter(Boolean).join(', ')}`,
-      [
-        { text: 'Cancel', onPress: () => setOrderLoading(false) },
-        {
-          text: 'Confirm',
-          onPress: async () => {
-            if (isSubmitting.current) return;
-            isSubmitting.current = true;
+    showAlert({ type: 'confirm', title: 'Confirm Order',
+      message: `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nGrand Total: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}`,
+      buttons: [
+        { text: 'Cancel', onPress: () => { setOrderLoading(false); isSubmitting.current = false; } },
+        { text: 'Confirm', style: 'primary', onPress: async () => {
             setLoading(true);
             try {
               const items = cartItems.map(i => {
@@ -304,38 +298,24 @@ export default function CheckoutScreen({ route, navigation }) {
                 gcashMethod === 'details' ? senderNo.trim() : '',
                 gcashMethod === 'image'   ? receiptImage   : null
               );
-              Alert.alert(
-                '🎉 Order Placed!',
-                `Your order has been placed successfully!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
-                [
-                  {
-                    text: 'View Orders',
-                    onPress: () => navigation.reset({
-                      index: 0,
-                      routes: [{ name: 'Main', params: { screen: 'Orders' } }],
-                    })
-                  },
-                  {
-                    text: 'Continue Shopping',
-                    onPress: () => navigation.reset({
-                      index: 0,
-                      routes: [{ name: 'Main', params: { screen: 'Home' } }],
-                    })
-                  },
-                ]
-              );
+              showAlert({ type: 'success', title: 'Order Placed!',
+                message: `Your order has been placed!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
+                buttons: [
+                  { text: 'View Orders', style: 'primary', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Orders' } }] }) },
+                  { text: 'Continue Shopping', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Home' } }] }) },
+                ] });
             } catch (e) {
               const msg = e.response?.data?.error || 'Failed to place order. Please try again.';
-              Alert.alert('Error', msg);
+              showAlert({ type: 'error', title: 'Error', message: msg });
             } finally {
               setLoading(false);
               setOrderLoading(false);
               isSubmitting.current = false;
             }
           }
-        }
+        },
       ]
-    );
+    });
   }
 
   return (
@@ -665,6 +645,7 @@ export default function CheckoutScreen({ route, navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+      <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }

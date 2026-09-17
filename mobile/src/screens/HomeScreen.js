@@ -12,6 +12,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCart } from '../utils/CartContext';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const inStock    = (product._branchQty || product.quantity || 0) > 0;
@@ -101,6 +102,8 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
 }
 
 export default function HomeScreen({ navigation }) {
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+
   const [products,    setProducts]    = useState([]);
   const [allProducts, setAllProducts] = useState([]); // store all for filtering
   const [categories,  setCategories]  = useState([]);
@@ -557,6 +560,7 @@ export default function HomeScreen({ navigation }) {
           )}
         />
       )}
+      <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }

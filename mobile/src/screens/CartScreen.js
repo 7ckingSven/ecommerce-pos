@@ -9,8 +9,11 @@ import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '
 import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 export default function CartScreen({ navigation }) {
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+
   const [cart,       setCart]       = useState([]);
   const [loading,    setLoading]    = useState(true);
   const [error,      setError]      = useState(false);
@@ -116,7 +119,7 @@ export default function CartScreen({ navigation }) {
       await updateCartItem(cartId, qty);
       setCart(prev => prev.map(i => i.cart_id === cartId ? { ...i, quantity: qty } : i));
     } catch (e) {
-      Alert.alert('Error', 'Failed to update quantity.');
+      showAlert({ type: 'error', title: 'Error', message: 'Failed to update quantity.' });
     }
   }
 
@@ -149,7 +152,7 @@ export default function CartScreen({ navigation }) {
               return s;
             });
           } catch (e) {
-            Alert.alert('Error', 'Failed to remove item.');
+            showAlert({ type: 'error', title: 'Error', message: 'Failed to remove item.' });
           }
         }
       }
@@ -296,7 +299,7 @@ export default function CartScreen({ navigation }) {
                             : 'Select options'}
                         </Text>
                         {variantWarnings[item.cart_item_id] === 0 && (
-                          <Text style={{ fontSize:10, color:'#ef4444', fontWeight:'600' }}>⚠️ Out of stock</Text>
+                          <Text style={{ fontSize:10, color:'#ef4444', fontWeight:'600' }}>Out of stock!</Text>
                         )}
                         <Feather name="chevron-down" size={11} color={COLORS.primary}/>
                       </TouchableOpacity>
@@ -449,6 +452,7 @@ export default function CartScreen({ navigation }) {
         </View>
       </Modal>
 
+      <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }

@@ -7,6 +7,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import { isLoggedIn } from '../services/authService';
 import { addToCart } from '../services/cartService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 // ─── Discount Helper ──────────────────────────────────
 function getDiscountedPrice(product) {
@@ -25,6 +26,8 @@ export default function ProductDetailScreen({ route, navigation }) {
     : (product.branch_stock || [])[0];
   const branchQty  = branchStock?.quantity ?? product._branchQty ?? product.quantity ?? 0;
   const branchName = branchStock?.branch?.branch_name || product._branchName || null;
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+
   const [quantity, setQty]   = useState(1);
   const [loadingCart, setLoadingCart] = useState(false);
   const [loadingBuy,  setLoadingBuy]  = useState(false);
@@ -51,7 +54,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   function increment() {
     if (quantity >= product.quantity) {
-      Alert.alert('Maximum Stock', `Only ${product.quantity} unit(s) available.`);
+      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${product.quantity} unit(s) available.` });
       return;
     }
     setQty(q => q + 1);
@@ -61,7 +64,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   function handleQtyInput(val) {
     const num = parseInt(val.replace(/[^0-9]/g, '')) || 1;
     if (num > product.quantity) {
-      Alert.alert('Maximum Stock', `Only ${product.quantity} unit(s) available.`);
+      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${product.quantity} unit(s) available.` });
       setQty(product.quantity);
     } else if (num < 1) {
       setQty(1);
@@ -73,29 +76,23 @@ export default function ProductDetailScreen({ route, navigation }) {
   async function handleAddToCart() {
     const loggedIn = await isLoggedIn();
     if (!loggedIn) {
-      Alert.alert('Login Required', 'Please log in to add items to your cart.', [
-        { text: 'Cancel' },
-        { text: 'Log In', onPress: () => navigation.navigate('Login') }
-      ]);
+      showAlert({ type: 'warning', title: 'Login Required', message: 'Please log in to add items to your cart.', buttons: [ { text: 'Cancel' }, { text: 'Log In', style: 'primary', onPress: () => navigation.navigate('Login') } ] });
       return;
     }
     // Validate all option groups selected
     for (const g of (product.option_groups || [])) {
       if (!selectedOptions[g.label]) {
-        Alert.alert('Required', `Please select a ${g.label}.`);
+        showAlert({ type: 'warning', title: 'Required', message: `Please select a ${g.label}.` });
         return;
       }
     }
     setLoadingCart(true);
     try {
       await addToCart(product.product_id, quantity, branchId || null, selectedOptions);
-      Alert.alert('Added to Cart', `${product.product_name} (x${quantity}) added to your cart.`, [
-        { text: 'Continue Shopping', onPress: () => navigation.goBack() },
-        { text: 'View Cart', onPress: () => navigation.navigate('Cart') }
-      ]);
+      showAlert({ type: 'success', title: 'Added to Cart!', message: `${product.product_name} (x${quantity}) added to your cart.`, buttons: [ { text: 'Continue Shopping', onPress: () => navigation.goBack() }, { text: 'View Cart', style: 'primary', onPress: () => navigation.navigate('Cart') } ] });
     } catch (e) {
       console.error('Add to cart error:', e);
-      Alert.alert('Error', 'Failed to add to cart. Please try again.');
+      showAlert({ type: 'error', title: 'Error', message: 'Failed to add to cart. Please try again.' });
     } finally {
       setLoadingCart(false);
     }
@@ -104,16 +101,13 @@ export default function ProductDetailScreen({ route, navigation }) {
   async function handleBuyNow() {
     const loggedIn = await isLoggedIn();
     if (!loggedIn) {
-      Alert.alert('Login Required', 'Please log in to complete your purchase.', [
-        { text: 'Cancel' },
-        { text: 'Log In', onPress: () => navigation.navigate('Login') }
-      ]);
+      showAlert({ type: 'warning', title: 'Login Required', message: 'Please log in to complete your purchase.', buttons: [ { text: 'Cancel' }, { text: 'Log In', style: 'primary', onPress: () => navigation.navigate('Login') } ] });
       return;
     }
     // Validate all option groups selected
     for (const g of (product.option_groups || [])) {
       if (!selectedOptions[g.label]) {
-        Alert.alert('Required', `Please select a ${g.label}.`);
+        showAlert({ type: 'warning', title: 'Required', message: `Please select a ${g.label}.` });
         return;
       }
     }
@@ -236,7 +230,7 @@ export default function ProductDetailScreen({ route, navigation }) {
               const branchName = bs?.branch?.branch_name;
               return branchName ? (
                 <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
-                <Text style={styles.tagText}>🏪 {branchName}</Text>
+                <Text style={styles.tagText}>{branchName}</Text>
                 </View>
               ) : null;
             })()}
@@ -427,6 +421,7 @@ export default function ProductDetailScreen({ route, navigation }) {
           </TouchableOpacity>
         </View>
       </View>
+      <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }
