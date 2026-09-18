@@ -1202,6 +1202,7 @@ function viewStaffOrderItems(order) {
   const addrString = addrParts.length > 1
     ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
     : order.address || '';
+  const addrNote   = order.address_note || '';
 
   const itemsHtml = items.length
     ? items.map(i => {
@@ -1369,6 +1370,7 @@ function viewStaffOrderItems(order) {
   const addrString = addrParts.length > 1
     ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
     : order.address || '';
+  const addrNote   = order.address_note || '';
 
   const itemsHtml = items.length
     ? items.map(i => {

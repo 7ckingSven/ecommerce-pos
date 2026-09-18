@@ -35,10 +35,12 @@ export default function CheckoutScreen({ route, navigation }) {
   const isSubmitting = React.useRef(false); // prevent double order
   const [profileLoading,setProfileLoading]= useState(true);
   const [address,       setAddress]       = useState('');
+  const [addressNote,    setAddressNote]    = useState('');
   const [customerName,  setCustomerName]  = useState('');
   const [showAddrModal, setShowAddrModal] = useState(false);
   const [psgcAddress,   setPsgcAddress]   = useState({});
-  const [editAddress,   setEditAddress]   = useState('');
+  const [editAddress,    setEditAddress]    = useState('');
+  const [editAddressNote, setEditAddressNote] = useState('');
   // Address handled via PSGCAddressPicker
   const [savingAddr,    setSavingAddr]    = useState(false);
 
@@ -152,6 +154,7 @@ export default function CheckoutScreen({ route, navigation }) {
       const cached = await getCustomer();
       if (cached && typeof cached === 'object') {
         setAddress(cached.address || '');
+        setAddressNote(cached.address_note || '');
         setCustomerName(
           ((cached.fname || '') + ' ' + (cached.lname || '')).trim()
         );
@@ -164,6 +167,7 @@ export default function CheckoutScreen({ route, navigation }) {
         if (fresh && typeof fresh === 'object') {
           const freshAddr = fresh.address || '';
           setAddress(freshAddr);
+          setAddressNote(fresh.address_note || '');
           setCustomerName(
             ((fresh.fname || '') + ' ' + (fresh.lname || '')).trim()
           );
@@ -183,6 +187,7 @@ export default function CheckoutScreen({ route, navigation }) {
   // ─── Open Address Edit Modal ──────────────────────────
   function openAddressModal() {
     setEditAddress(address);
+    setEditAddressNote(addressNote || '');
     const parts = address.split('|');
     setPsgcAddress({
       street:       parts[0]?.trim() || '',
@@ -204,8 +209,9 @@ export default function CheckoutScreen({ route, navigation }) {
     }
     setSavingAddr(true);
     try {
-      await updateProfile({ address: combined });
+      await updateProfile({ address: combined, address_note: editAddressNote.trim() });
       setAddress(combined);
+      setAddressNote(editAddressNote.trim());
       setShippingFee(calculateShipping(combined, cartItems));
       setShowAddrModal(false);
       showAlert({ type: 'success', title: 'Success', message: 'Address updated successfully!' });
@@ -295,6 +301,7 @@ export default function CheckoutScreen({ route, navigation }) {
                 branchId || cartItems[0]?.branch_id || null,
                 shippingFee,
                 address,
+                addressNote,
                 gcashMethod === 'details' ? senderNo.trim() : '',
                 gcashMethod === 'image'   ? receiptImage   : null
               );
@@ -346,6 +353,11 @@ export default function CheckoutScreen({ route, navigation }) {
               <View style={styles.addressInfo}>
                 <Text style={styles.addressName}>{customerName}</Text>
                 <Text style={styles.addressText}>{address.split('|').map(s => s.trim()).filter(Boolean).join(', ')}</Text>
+                {addressNote ? (
+                  <Text style={[styles.addressText, { color: COLORS.textMuted, fontSize: 12, marginTop: 2 }]}>
+                    📍 {addressNote}
+                  </Text>
+                ) : null}
               </View>
               <View style={styles.addressActions}>
                 <TouchableOpacity style={styles.addrActionBtn} onPress={openAddressModal}>
@@ -622,6 +634,22 @@ export default function CheckoutScreen({ route, navigation }) {
                 setEditAddress(psgcToAddressString(addr));
               }}
             />
+
+            {/* Landmark / Notes */}
+            <View style={{ marginTop: 12 }}>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 6 }}>
+                Landmark / Notes <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>(Optional)</Text>
+              </Text>
+              <TextInput
+                style={{ borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: 8, padding: 10, fontSize: 13, color: COLORS.dark, minHeight: 48 }}
+                placeholder="e.g. Near Jollibee, Blue Gate House"
+                placeholderTextColor={COLORS.textMuted}
+                value={editAddressNote}
+                onChangeText={setEditAddressNote}
+                multiline
+                numberOfLines={2}
+              />
+            </View>
 
             <View style={styles.modalBtns}>
               <TouchableOpacity

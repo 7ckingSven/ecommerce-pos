@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, RefreshControl, Image, Alert,
-  StatusBar, Keyboard,
+  StatusBar, Keyboard, Modal, ScrollView,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getProducts, searchProducts } from '../services/productService';
@@ -120,6 +120,9 @@ export default function HomeScreen({ navigation }) {
   const [suggestions,    setSuggestions]    = useState([]);
   const [suggPage,       setSuggPage]       = useState(1);
   const [suggLoading,    setSuggLoading]    = useState(false);
+  const [filterVisible,  setFilterVisible]  = useState(false);
+  const [tempCat,        setTempCat]        = useState('');
+  const [tempBrand,      setTempBrand]      = useState('');
   const SUGG_PER_PAGE = 10;
   const searchRef = useRef(null);
 
@@ -130,7 +133,8 @@ export default function HomeScreen({ navigation }) {
       loadProducts();
 
       const timer = setInterval(() => {
-        loadProducts();
+        // Re-load but preserve current filters
+        loadProductsSilent();
       }, 10000); // 10 seconds
 
       return () => clearInterval(timer); // cleanup on blur
@@ -190,8 +194,38 @@ export default function HomeScreen({ navigation }) {
   }
 
   // Apply filters client-side — never loses chip list
-  function applyFilters(cat, brand, q) {
-    let filtered = allProducts; // already expanded by branch
+  // Silent refresh - preserves filters
+  async function loadProductsSilent() {
+    try {
+      const res  = await api.get('/products');
+      const data = res.data || [];
+      const expanded = [];
+      data.forEach(p => {
+        const branches = (p.branch_stock || []).filter(bs => bs.quantity > 0);
+        if (branches.length === 0) {
+          expanded.push({ ...p, _branchId: null, _branchName: null, _branchQty: 0 });
+        } else {
+          branches.forEach(bs => {
+            expanded.push({
+              ...p,
+              _branchId:   bs.branch_id,
+              _branchName: bs.branch?.branch_name || null,
+              _branchQty:  bs.quantity,
+              quantity:    bs.quantity,
+            });
+          });
+        }
+      });
+      setAllProducts(expanded);
+      // Re-apply current filters silently
+      applyFilters(selectedCat, selectedBrand, search, expanded);
+    } catch (e) {
+      // Silent fail - don't disrupt user
+    }
+  }
+
+  function applyFilters(cat, brand, q, sourceProducts) {
+    let filtered = sourceProducts || allProducts; // already expanded by branch
     if (cat)   filtered = filtered.filter(p => p.category?.trim() === cat);
     if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand);
     if (q)     filtered = filtered.filter(p =>
@@ -382,6 +416,17 @@ export default function HomeScreen({ navigation }) {
               </TouchableOpacity>
             )}
           </View>
+          {!searchFocused && (
+            <TouchableOpacity
+              onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(true); }}
+              style={styles.filterIconBtn}
+            >
+              <Feather name="sliders" size={18} color="#fff"/>
+              {(selectedCat || selectedBrand) && (
+                <View style={styles.filterDot}/>
+              )}
+            </TouchableOpacity>
+          )}
         </View>
       </View>
 
@@ -481,49 +526,24 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
-      {/* Category Filter */}
-      <View style={styles.filterSection}>
-        <Text style={styles.filterLabel}>Category</Text>
-        <FlatList
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          data={[{ id: '', name: 'All' }, ...categories.map(c => ({ id: c, name: c }))]}
-          keyExtractor={item => item.id}
-          contentContainerStyle={styles.catContent}
-          renderItem={({ item }) => (
-            <TouchableOpacity
-              style={[styles.catChip, selectedCat === item.id && styles.catChipActive]}
-              onPress={() => selectCategory(item.id)}
-            >
-              <Text style={[styles.catText, selectedCat === item.id && styles.catTextActive]}>
-                {item.name}
-              </Text>
+      {/* Active Filter Tags */}
+      {(selectedCat || selectedBrand) && (
+        <View style={styles.activeFiltersRow}>
+          {selectedCat && (
+            <TouchableOpacity style={styles.activeTag} onPress={() => { setSelectedCat(''); applyFilters('', selectedBrand, search); }}>
+              <Text style={styles.activeTagText}>{selectedCat}</Text>
+              <Feather name="x" size={11} color={COLORS.primary}/>
             </TouchableOpacity>
           )}
-        />
-      </View>
-
-      {/* Brand Filter */}
-      {brands.length > 0 && (
-        <View style={styles.filterSection}>
-          <Text style={styles.filterLabel}>Brand</Text>
-          <FlatList
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            data={[{ id: '', name: 'All' }, ...brands.map(b => ({ id: b, name: b }))]}
-            keyExtractor={item => item.id}
-            contentContainerStyle={styles.catContent}
-            renderItem={({ item }) => (
-              <TouchableOpacity
-                style={[styles.catChip, selectedBrand === item.id && styles.catChipActive]}
-                onPress={() => selectBrand(item.id)}
-              >
-                <Text style={[styles.catText, selectedBrand === item.id && styles.catTextActive]}>
-                  {item.name}
-                </Text>
-              </TouchableOpacity>
-            )}
-          />
+          {selectedBrand && (
+            <TouchableOpacity style={styles.activeTag} onPress={() => { setSelectedBrand(''); applyFilters(selectedCat, '', search); }}>
+              <Text style={styles.activeTagText}>{selectedBrand}</Text>
+              <Feather name="x" size={11} color={COLORS.primary}/>
+            </TouchableOpacity>
+          )}
+          <TouchableOpacity onPress={() => { setSelectedCat(''); setSelectedBrand(''); applyFilters('', '', search); }}>
+            <Text style={{ fontSize: 11, color: COLORS.error, fontWeight: '600' }}>Clear All</Text>
+          </TouchableOpacity>
         </View>
       )}
 
@@ -561,6 +581,111 @@ export default function HomeScreen({ navigation }) {
         />
       )}
       <CustomAlert config={alertConfig} onHide={hideAlert}/>
+
+      {/* ─── Filter Modal ─── */}
+      <Modal visible={filterVisible} transparent animationType="slide" onRequestClose={() => setFilterVisible(false)}>
+        <TouchableOpacity style={styles.filterOverlay} activeOpacity={1} onPress={() => setFilterVisible(false)}/>
+        <View style={styles.filterModal}>
+          {/* Handle */}
+          <View style={styles.filterHandle}/>
+
+          {/* Title */}
+          <View style={styles.filterModalHeader}>
+            <Text style={styles.filterModalTitle}>Filters</Text>
+            <TouchableOpacity onPress={() => { setTempCat(''); setTempBrand(''); }}>
+              <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600' }}>Reset</Text>
+            </TouchableOpacity>
+            <TouchableOpacity onPress={() => setFilterVisible(false)}>
+              <Feather name="x" size={20} color={COLORS.textMuted}/>
+            </TouchableOpacity>
+          </View>
+
+          {/* Category Dropdown — filtered by selected brand */}
+          {(() => {
+            const availableCats = tempBrand
+              ? [...new Set(allProducts.filter(p => p.brand?.trim() === tempBrand).map(p => p.category?.trim()).filter(Boolean))].sort()
+              : categories;
+            return (
+              <>
+                <Text style={styles.filterDropLabel}>
+                  Category {tempBrand ? <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>({availableCats.length} available)</Text> : null}
+                </Text>
+                <ScrollView style={styles.filterDropBox} nestedScrollEnabled>
+                  {[{ id: '', name: 'All Categories' }, ...availableCats.map(c => ({ id: c, name: c }))].map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.filterDropItem, tempCat === item.id && styles.filterDropItemActive]}
+                      onPress={() => setTempCat(item.id)}
+                    >
+                      <Text style={[styles.filterDropItemText, tempCat === item.id && styles.filterDropItemTextActive]}>
+                        {item.name}
+                      </Text>
+                      {tempCat === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            );
+          })()}
+
+          {/* Brand Dropdown — filtered by selected category */}
+          {(() => {
+            const availableBrands = tempCat
+              ? [...new Set(allProducts.filter(p => p.category?.trim() === tempCat).map(p => p.brand?.trim()).filter(Boolean))].sort()
+              : brands;
+            return (
+              <>
+                <Text style={styles.filterDropLabel}>
+                  Brand {tempCat ? <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>({availableBrands.length} available)</Text> : null}
+                </Text>
+                <ScrollView style={styles.filterDropBox} nestedScrollEnabled>
+                  {[{ id: '', name: 'All Brands' }, ...availableBrands.map(b => ({ id: b, name: b }))].map(item => (
+                    <TouchableOpacity
+                      key={item.id}
+                      style={[styles.filterDropItem, tempBrand === item.id && styles.filterDropItemActive]}
+                      onPress={() => {
+                        setTempBrand(item.id);
+                        // Reset category if it's not available for this brand
+                        if (item.id && tempCat) {
+                          const catsForBrand = [...new Set(allProducts.filter(p => p.brand?.trim() === item.id).map(p => p.category?.trim()).filter(Boolean))];
+                          if (!catsForBrand.includes(tempCat)) setTempCat('');
+                        }
+                      }}
+                    >
+                      <Text style={[styles.filterDropItemText, tempBrand === item.id && styles.filterDropItemTextActive]}>
+                        {item.name}
+                      </Text>
+                      {tempBrand === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </>
+            );
+          })()}
+
+          {/* Buttons */}
+          <View style={styles.filterBtnRow}>
+            <TouchableOpacity
+              style={styles.filterCancelBtn}
+              onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(false); }}
+            >
+              <Text style={styles.filterCancelText}>Cancel</Text>
+            </TouchableOpacity>
+            <TouchableOpacity
+              style={styles.filterApplyBtn}
+              onPress={() => {
+                setSelectedCat(tempCat);
+                setSelectedBrand(tempBrand);
+                applyFilters(tempCat, tempBrand, search);
+                setFilterVisible(false);
+              }}
+            >
+              <Text style={styles.filterApplyText}>Apply</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </View>
   );
 }
@@ -603,6 +728,27 @@ const styles = StyleSheet.create({
   catScroll:              { maxHeight: 44 }, // kept for compatibility
   catContent:             { paddingHorizontal: SPACING.md, gap: 8, alignItems: 'center' },
   filterSection:          { marginBottom: 6, marginTop: SPACING.sm },
+  filterIconBtn:          { padding: 6, marginLeft: 6, position: 'relative' },
+  filterDot:              { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
+  activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6 },
+  activeTag:              { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.primaryBorder },
+  activeTagText:          { fontSize: 11, color: COLORS.primary, fontWeight: '600' },
+  filterOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
+  filterModal:            { backgroundColor: COLORS.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: SPACING.md, paddingBottom: 32, maxHeight: '80%' },
+  filterHandle:           { width: 40, height: 4, backgroundColor: COLORS.grayBorder, borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.sm },
+  filterModalHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
+  filterModalTitle:       { fontSize: 16, fontWeight: '700', color: COLORS.dark },
+  filterDropLabel:        { fontSize: 12, fontWeight: '700', color: COLORS.dark, marginBottom: 6, marginTop: SPACING.sm },
+  filterDropBox:          { maxHeight: 150, borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, marginBottom: 8 },
+  filterDropItem:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.sm, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
+  filterDropItemActive:   { backgroundColor: COLORS.primaryBg },
+  filterDropItemText:     { fontSize: 13, color: COLORS.dark },
+  filterDropItemTextActive: { color: COLORS.primary, fontWeight: '600' },
+  filterBtnRow:           { flexDirection: 'row', gap: 12, marginTop: SPACING.md },
+  filterCancelBtn:        { flex: 1, paddingVertical: 12, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.primary, alignItems: 'center' },
+  filterCancelText:       { fontSize: 14, fontWeight: '600', color: COLORS.primary },
+  filterApplyBtn:         { flex: 1, paddingVertical: 12, borderRadius: RADIUS.sm, backgroundColor: COLORS.primary, borderWidth: 1.5, borderColor: COLORS.primary, alignItems: 'center' },
+  filterApplyText:        { fontSize: 14, fontWeight: '600', color: '#fff' },
   filterLabel:            { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, paddingHorizontal: SPACING.md, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   catChip:                { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: COLORS.grayBorder },
   catChipActive:          { backgroundColor: COLORS.primary, borderColor: COLORS.primary },

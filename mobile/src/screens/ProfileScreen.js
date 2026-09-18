@@ -102,19 +102,19 @@ export default function ProfileScreen({ navigation }) {
         gender: customer?.gender || '',
       });
     } else if (type === 'contact') {
-      // Parse existing address into separate fields
-      const addr   = customer?.address || '';
-      const parts  = addr.split(', ');
+      // Only pre-fill street, zip_code, notes (PSGC dropdowns need codes)
+      const parts = addressStringToParts(customer?.address || '');
       setEditForm({
         email:        customer?.email        || '',
         phone_number: customer?.phone_number || '',
         username:     customer?.username     || '',
-        street:       parts[0] || '',
-        barangay:     parts[1] || '',
-        city:         parts[2] || '',
-        province:     parts[3] || '',
-        region:       parts[4] || '',
-        zip_code:     parts[5] || '',
+        street:       parts.street           || '',
+        barangay:     '',
+        city:         '',
+        province:     '',
+        region:       '',
+        zip_code:     parts.zip_code         || '',
+        address_note: customer?.address_note || '',
       });
     } else if (type === 'password') {
       setEditForm({ old_password: '', new_password: '', confirm_password: '' });
@@ -180,6 +180,8 @@ export default function ProfileScreen({ navigation }) {
           email:        editForm.email.trim(),
           phone_number: editForm.phone_number.trim(),
           address:      addressParts.join(', '),
+          address_note: editForm.address_note?.trim() || '',
+          address_note: editForm.address_note?.trim() || '',
           username:     editForm.username.trim(),
         };
       } else if (editType === 'password') {
@@ -291,6 +293,9 @@ export default function ProfileScreen({ navigation }) {
           <InfoRow icon="mail"    label="Email"        value={customer?.email}/>
           <InfoRow icon="phone"   label="Phone Number" value={customer?.phone_number}/>
           <InfoRow icon="map-pin" label="Address"      value={customer?.address}/>
+        {customer?.address_note ? (
+          <InfoRow icon="navigation" label="Landmark/Notes" value={customer?.address_note}/>
+        ) : null}
         </View>
 
         {/* Security */}
@@ -470,12 +475,8 @@ export default function ProfileScreen({ navigation }) {
                   <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Address</Text>
                   <PSGCAddressPicker
                     value={{
-                      street:       editForm.street    || '',
-                      barangayName: editForm.barangay  || '',
-                      cityName:     editForm.city      || '',
-                      provinceName: editForm.province  || '',
-                      regionName:   editForm.region    || '',
-                      zip_code:     editForm.zip_code  || '',
+                      street:   editForm.street   || '',
+                      zip_code: editForm.zip_code || '',
                     }}
                     onChange={addr => {
                       setPsgcAddress(addr);
@@ -486,6 +487,19 @@ export default function ProfileScreen({ navigation }) {
                       updateField('region',   addr.regionName   || '');
                       updateField('zip_code', addr.zip_code     || '');
                     }}
+                  />
+                  {/* Landmark / Notes */}
+                  <Text style={[styles.fieldLabel, { marginTop: 12 }]}>
+                    Landmark / Notes <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>(Optional)</Text>
+                  </Text>
+                  <TextInput
+                    style={styles.fieldInput}
+                    placeholder="e.g. Near Jollibee, Blue Gate House"
+                    placeholderTextColor={COLORS.textMuted}
+                    value={editForm.address_note || ''}
+                    onChangeText={v => updateField('address_note', v)}
+                    multiline
+                    numberOfLines={2}
                   />
                 </View>
               )}

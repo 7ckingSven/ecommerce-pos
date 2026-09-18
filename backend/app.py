@@ -1172,6 +1172,7 @@ def api_place_order():
         branch_id    = data.get('branch_id')
         shipping_fee = float(data.get('shipping_fee', 0) or 0)
         address           = data.get('address', '')
+        address_note      = data.get('address_note', '')
         sender_number     = data.get('sender_number', '')
         receipt_image_url = data.get('receipt_image_url', '')
         order_res = supabase.table('order').insert({
@@ -1183,6 +1184,7 @@ def api_place_order():
             'branch_id':    branch_id,
             'shipping_fee': shipping_fee,
             'address':      address,
+            'address_note': address_note,
             'date':         'now()',
         }).execute()
 

@@ -1953,6 +1953,7 @@ function viewOrderItems(order) {
         <div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">
           <div style="color:var(--text-muted);margin-bottom:2px;">Delivery Address</div>
           <strong>${addrString && addrString.trim() ? addrString : 'No address provided'}</strong>
+          ${order.address_note ? `<div style="color:var(--text-muted);margin-top:4px;font-size:11px;">📍 ${order.address_note}</div>` : ''}
           ${order.shipping_fee != null ? `<span style="margin-left:8px;color:var(--text-muted);">· Shipping: ${Number(order.shipping_fee) === 0 ? 'FREE' : peso(order.shipping_fee)}</span>` : ''}
         </div>` : ''}
 
