@@ -1701,8 +1701,9 @@ def api_auth_verify_otp():
             return jsonify({'error': 'Invalid OTP. Please try again.'}), 400
 
         otp_record = res.data[0]
-        expires_at = datetime.fromisoformat(otp_record['expires_at'])
-        if datetime.now() > expires_at:
+        expires_at_str = otp_record['expires_at'].replace('Z', '+00:00')
+        expires_at = datetime.fromisoformat(expires_at_str)
+        if datetime.now(timezone.utc) > expires_at:
             return jsonify({'error': 'OTP has expired. Please request a new one.'}), 400
 
         supabase.table('otp_codes').update({'used': True}).eq('id', otp_record['id']).execute()
