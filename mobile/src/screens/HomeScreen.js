@@ -11,6 +11,7 @@ import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCart } from '../utils/CartContext';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
@@ -375,7 +376,7 @@ export default function HomeScreen({ navigation }) {
       <StatusBar backgroundColor="#16a34a" barStyle="light-content" translucent={false}/>
 
       {/* Header — Compact */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <View style={styles.headerTop}>
           {searchFocused ? (
             <TouchableOpacity onPress={() => {
