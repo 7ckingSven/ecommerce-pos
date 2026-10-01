@@ -7,7 +7,7 @@ const ENV = 'render'; // ← change this line only
 
 export const API_BASE_URL = ENV === 'emulator'
   ? 'http://10.0.2.2:5000/api'                     // Android emulator → local Flask
-  : 'https://ecommerce-pos-8rsf.onrender.com/api'; // Real phone → Render
+  : 'https://api.tefcecommerce.shop/api';           // Real phone → Render (custom domain)
 
 // ─── App Info ─────────────────────────────────────────
 export const APP_NAME     = 'Triple E & Fiel Collince';
