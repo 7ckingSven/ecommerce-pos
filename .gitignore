@@ -70,10 +70,6 @@ mobile/ios/Pods/
 backend/.env
 backend/venv/
 
-# APK files
-*.apk
-backend/static/apk/
-
 # Supabase local
 .supabase/
 

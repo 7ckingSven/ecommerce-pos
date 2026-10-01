@@ -14,6 +14,7 @@ import { useCart } from '../utils/CartContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
+import api from '../services/api';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const inStock    = (product._branchQty || product.quantity || 0) > 0;
@@ -104,6 +105,7 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
 
 export default function HomeScreen({ navigation }) {
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+  const insets = useSafeAreaInsets();
 
   const [products,    setProducts]    = useState([]);
   const [allProducts, setAllProducts] = useState([]); // store all for filtering
@@ -417,7 +419,7 @@ export default function HomeScreen({ navigation }) {
               </TouchableOpacity>
             )}
           </View>
-          {!searchFocused && (
+          {searchFocused && (
             <TouchableOpacity
               onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(true); }}
               style={styles.filterIconBtn}
