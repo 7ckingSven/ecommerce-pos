@@ -97,7 +97,7 @@ const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
 // ─── Preserve expanded rows + filter states across refresh ─────────────────
 function saveStaffExpandedRows() {
   const expanded = [];
-  document.querySelectorAll('[id^="invVarRow_"]').forEach(row => {
+  document.querySelectorAll('[id^="staffVarRow_"]').forEach(row => {
     if (row.style.display !== 'none') expanded.push(row.id);
   });
   return expanded;
@@ -106,13 +106,45 @@ function saveStaffExpandedRows() {
 function restoreStaffExpandedRows(expanded) {
   expanded.forEach(id => {
     const row = document.getElementById(id);
-    if (row) {
-      row.style.display = '';
-      const parts     = id.split('_');
-      const productId = parts[1];
-      const branchId  = parts[2];
-      const btn = document.querySelector('[onclick*="' + productId + '"]');
-      if (btn) btn.textContent = '▼';
+    if (!row) return;
+
+    // id format: staffVarRow_<productId>
+    const productId = id.replace('staffVarRow_', '');
+
+    row.style.display = '';
+
+    // Update arrow button
+    const btn = row.previousElementSibling?.querySelector('.inv-expand-btn');
+    if (btn) btn.textContent = '▼';
+
+    // Re-fetch variant content (was loaded async — empty after DOM rebuild)
+    const cont = row.querySelector('.staff-variant-content');
+    if (cont) {
+      cont.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Loading variants...</span>';
+      const url = staffBranchId
+        ? '/api/variant-stock/' + productId + '?branch_id=' + staffBranchId
+        : '/api/variant-stock/' + productId;
+      fetch(url)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.length) {
+            cont.innerHTML = '<tr><td colspan="6" style="padding:8px 16px;font-size:12px;color:var(--text-muted);">No variant stock recorded yet.</td></tr>';
+            return;
+          }
+          var chips = data.map(function(vs) {
+            var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
+            var qty   = vs.quantity || 0;
+            var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
+            var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+            return '<div style="padding:6px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
+              + '<span style="color:var(--text-primary);font-weight:500;">' + opts + '</span>'
+              + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
+              + (qty === 0 ? ' ⚠️' : '')
+              + '</div>';
+          }).join('');
+          cont.innerHTML = '<tr><td colspan="6" style="padding:8px 16px;">' + chips + '</td></tr>';
+        })
+        .catch(() => { cont.innerHTML = '<tr><td colspan="6" style="padding:8px 16px;color:#ef4444;font-size:12px;">Failed to load variant stock.</td></tr>'; });
     }
   });
 }
@@ -1018,10 +1050,8 @@ function renderInvHistory(data) {
 }
 
 async function loadInventory() {
-  // Save expanded variant rows before refresh
-  const expandedRows = new Set([...document.querySelectorAll('[id^="staffVarRow_"]')]
-    .filter(r => r.style.display !== 'none')
-    .map(r => r.id.replace('staffVarRow_', '')));
+  // Save expanded variant rows before DOM rebuild
+  const expandedRows = saveStaffExpandedRows();
 
   try {
     // Sequential requests to avoid WinError 10035
@@ -1038,13 +1068,19 @@ async function loadInventory() {
     const invDataRaw = await invRes.json();
     const invData   = Array.isArray(invDataRaw) ? invDataRaw : [];
 
-    // Stats
+    // Helper: get branch-specific quantity for a product
+    const branchQty = p => {
+      const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+      return bs ? bs.quantity : 0;
+    };
+
+    // Stats — use branch stock quantity, not overall product quantity
     document.getElementById('invTotalProducts').textContent = invProducts.length;
-    document.getElementById('invLowStock').textContent      = invProducts.filter(p => p.quantity > 0 && p.quantity <= 10).length;
-    document.getElementById('invOutOfStock').textContent    = invProducts.filter(p => p.quantity <= 0).length;
+    document.getElementById('invLowStock').textContent      = invProducts.filter(p => { const q = branchQty(p); return q > 0 && q <= 10; }).length;
+    document.getElementById('invOutOfStock').textContent    = invProducts.filter(p => branchQty(p) <= 0).length;
 
     // Low stock banner
-    const lowCount  = invProducts.filter(p => p.status === 'active' && p.quantity <= 10).length;
+    const lowCount  = invProducts.filter(p => { const q = branchQty(p); return p.status === 'active' && q > 0 && q <= 10; }).length;
     const banner    = document.getElementById('staffLowStockBanner');
     const bannerTxt = document.getElementById('staffLowStockText');
     if (banner && lowCount > 0) {
@@ -1057,7 +1093,7 @@ async function loadInventory() {
     // Update inventory nav badge (low stock + out of stock)
     const invBadge = document.getElementById('invLowStockBadge');
     if (invBadge) {
-      const totalAlert = invProducts.filter(p => p.quantity <= 10).length;
+      const totalAlert = invProducts.filter(p => branchQty(p) <= 10).length;
       invBadge.textContent   = totalAlert > 99 ? '99+' : totalAlert;
       invBadge.style.display = totalAlert > 0 ? 'inline-block' : 'none';
     }
@@ -1070,6 +1106,9 @@ async function loadInventory() {
 
     // History — read nested branch names from FK join
     renderInvHistory(invData);
+
+    // Restore expanded variant rows after DOM rebuild
+    restoreStaffExpandedRows(expandedRows);
 
   } catch (e) { console.error('Inventory error:', e); }
 }

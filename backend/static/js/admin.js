@@ -176,13 +176,42 @@ function saveExpandedRows() {
 function restoreExpandedRows(expanded) {
   expanded.forEach(id => {
     const row = document.getElementById(id);
-    if (row) {
-      row.style.display = '';
-      // Update arrow icon
-      const productId = id.split('_')[1];
-      const branchId  = id.split('_')[2];
-      const btn = document.querySelector('[onclick*="' + productId + '"][onclick*="' + branchId + '"]');
-      if (btn) btn.textContent = '▼';
+    if (!row) return;
+
+    // id format: invVarRow_<productId>_<branchId>
+    const parts     = id.split('_');
+    const productId = parts[1];
+    const branchId  = parts[2];
+
+    row.style.display = '';
+
+    // Update arrow button text
+    const btn = row.previousElementSibling?.querySelector('.inv-expand-btn');
+    if (btn) btn.textContent = '▼';
+
+    // Re-fetch variant content (was loaded async — empty after DOM rebuild)
+    const cont = row.querySelector('.inv-variant-content');
+    if (cont) {
+      cont.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">Loading variants...</span>';
+      fetch('/api/variant-stock/' + productId + '?branch_id=' + branchId)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.length) {
+            cont.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">No variant stock recorded yet.</span>';
+            return;
+          }
+          cont.innerHTML = data.map(vs => {
+            const opts  = Object.entries(vs.options || {}).map(e => e[0] + ': ' + e[1]).join(', ');
+            const qty   = vs.quantity || 0;
+            const color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
+            const bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+            return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 8px;border-radius:4px;background:' + bg + ';border:1px solid ' + color + ';margin:2px;">'
+              + '<span style="color:var(--text-muted);">' + opts + '</span>'
+              + '<strong style="color:' + color + ';">' + qty + '</strong>'
+              + '</span>';
+          }).join('');
+        })
+        .catch(() => { cont.innerHTML = '<span style="font-size:12px;color:#ef4444;">Failed to load variants.</span>'; });
     }
   });
 }
