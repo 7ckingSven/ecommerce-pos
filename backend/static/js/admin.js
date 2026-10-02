@@ -1355,7 +1355,14 @@ function renderInventory(data) {
           <td>${i.quantity_after}</td>
           <td>${i.from_branch?.branch_name || '—'}</td>
           <td>${i.to_branch?.branch_name   || '—'}</td>
-          <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
+          <td>${(() => {
+            const raw = i.date || null;
+            if (!raw) return '—';
+            // i.date is a date-only field (no time) — parse as local date to avoid timezone shift
+            const [y, mo, day] = raw.toString().split('T')[0].split('-').map(Number);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            return `${months[mo - 1]} ${day}, ${y}`;
+          })()}</td>
           <td style="max-width:200px;font-size:12px;">${i.note || '—'}</td>
         </tr>`;
       }).join('')
@@ -1834,9 +1841,15 @@ async function loadOrders() {
   try {
     const res  = await fetch('/api/admin/orders?limit=80');
     const data = await res.json();
+    const parseTs = ts => {
+      if (!ts) return 0;
+      const normalized = ts.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+      const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+      return new Date(utcStr).getTime() || 0;
+    };
     allOrders  = data.sort((a, b) => {
-      const da = a.created_at ? new Date(a.created_at) : new Date(a.date || 0);
-      const db = b.created_at ? new Date(b.created_at) : new Date(b.date || 0);
+      const da = parseTs(a.created_at || a.date);
+      const db = parseTs(b.created_at || b.date);
       return db - da;
     });
     applyAdminOrderFilters();
@@ -1945,7 +1958,18 @@ function viewOrderItems(order) {
           ${order.payment.receipt_image_url ? `<div style="margin-top:8px;"><a href="${order.payment.receipt_image_url}" target="_blank" style="color:#3b82f6;font-size:12px;font-weight:600;">View Receipt Image</a></div>` : ''}
           ${!order.payment.ref_no && !order.payment.sender_number && !order.payment.receipt_image_url ? '<div style="font-size:12px;color:var(--text-muted);">No GCash details provided</div>' : ''}
         </div>` : ''}
-        <div><span style="color:var(--text-muted);">Date</span><br/><strong>${order.date || order.created_at ? new Date(order.date || order.created_at).toLocaleDateString('en-PH') : '—'}</strong></div>
+        <div><span style="color:var(--text-muted);">Date</span><br/><strong>${(() => {
+            const raw = order.created_at || order.date || null; // prefer created_at (timestamptz) over date (date-only)
+            if (!raw) return '—';
+            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+            const h = d.getUTCHours(), m = d.getUTCMinutes();
+            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+            return `${date} ${time}`;
+          })()}</strong></div>
       </div>
 
       <!-- Delivery Address (online orders only) -->
@@ -1981,7 +2005,18 @@ function renderOrders(orders) {
           <td>${badge(o.order_type)}</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
-          <td>${o.date || o.created_at ? new Date(o.date || o.created_at).toLocaleDateString('en-PH') : '—'}</td>
+          <td>${(() => {
+            const raw = o.created_at || o.date || null; // prefer created_at (timestamptz) over date (date-only)
+            if (!raw) return '—';
+            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+            const h = d.getUTCHours(), m = d.getUTCMinutes();
+            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+            return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
+          })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"

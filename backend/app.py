@@ -1221,7 +1221,13 @@ def api_place_order():
         from datetime import datetime, timezone, timedelta
         recent = supabase.table('order').select('order_id, created_at').eq('customer_id', customer_id).order('created_at', desc=True).limit(1).execute()
         if recent.data:
-            last_time = datetime.fromisoformat(recent.data[0]['created_at'].replace('Z', '+00:00'))
+            raw_ts    = recent.data[0]['created_at']
+            # Normalize: trim microseconds to 3 decimals, ensure UTC offset
+            raw_ts    = raw_ts[:23] if len(raw_ts) > 23 and '.' in raw_ts else raw_ts
+            if not raw_ts.endswith('Z') and '+' not in raw_ts[10:]:
+                raw_ts += '+00:00'
+            raw_ts    = raw_ts.replace('Z', '+00:00')
+            last_time = datetime.fromisoformat(raw_ts)
             if datetime.now(timezone.utc) - last_time < timedelta(seconds=10):
                 return jsonify({'error': 'Duplicate order detected. Please wait a moment.'}), 429
     except Exception as dup_err:
