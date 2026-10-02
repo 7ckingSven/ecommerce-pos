@@ -598,10 +598,14 @@ function selectPosProduct(productId) {
   }
 
   const modalHtml = `
-    <div style="margin-bottom:1rem;">
-      <strong style="font-size:14px;">${p.product_name}</strong>
-      <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Select variant to add to order</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1rem 0.75rem;border-bottom:1px solid var(--border);margin-bottom:1rem;">
+      <div>
+        <strong style="font-size:14px;">${p.product_name}</strong>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Select variant to add to order</div>
+      </div>
+      <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;font-size:20px;" title="Close">&times;</button>
     </div>
+    <div style="padding:0 1rem 1rem;">
     ${groups.map(g => `
       <div style="margin-bottom:12px;">
         <label style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
@@ -619,6 +623,7 @@ function selectPosProduct(productId) {
     `).join('')}
     <div id="posVarStock" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;min-height:18px;"></div>
     <button onclick="confirmPosVariant()" class="btn btn-solid-green" style="width:100%;">Add to Order</button>
+    </div>
   `;
   showGenericModal(modalHtml);
 }
