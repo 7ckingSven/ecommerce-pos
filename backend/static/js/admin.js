@@ -2950,6 +2950,7 @@ function renderUsers(users) {
 
 let userSearchText = '';
 let userRoleFilter = '';
+let userStatusFilter = '';
 
 function filterUserSearch(val) {
   userSearchText = val.toLowerCase();
@@ -3007,6 +3008,11 @@ function applyUserFilters() {
   renderUsers(filtered);
 }
 
+function toggleBranchVisibility(role) {
+  const branchGroup = document.getElementById('uBranch')?.closest('.form-group');
+  if (branchGroup) branchGroup.style.display = role === 'admin' ? 'none' : '';
+}
+
 function openUserModal(user = null) {
   // staff and customer come back as arrays from Supabase — normalize to object
   const s = user ? (Array.isArray(user.staff)    ? user.staff[0]    : user.staff)    : null;
@@ -3020,14 +3026,21 @@ function openUserModal(user = null) {
   document.getElementById('uEmail').value     = s?.email || c?.email || '';
   document.getElementById('uPhone').value     = s?.phone_number || '';
   document.getElementById('uUsername').value  = user?.username || '';
-  document.getElementById('uRole').value      = user?.role || 'staff';
+
+  const role = user?.role || 'staff';
+  document.getElementById('uRole').value = role;
   document.getElementById('uPasswordGroup').style.display = user ? 'none' : 'block';
 
-  // Populate branch dropdown
+  // Toggle branch visibility based on role
+  toggleBranchVisibility(role);
+
+  // Populate branch dropdown then pre-select saved branch (B7c fix)
   populateBranchSelects('uBranch');
-  if (s?.branch_id) {
-    document.getElementById('uBranch').value = s.branch_id;
-  }
+  setTimeout(() => {
+    if (s?.branch_id) {
+      document.getElementById('uBranch').value = s.branch_id;
+    }
+  }, 0);
 
   document.getElementById('userModalOverlay').classList.add('open');
   document.getElementById('userModal').classList.add('open');
@@ -3046,7 +3059,14 @@ async function editUser(id) {
 
 async function toggleUserStatus(id, currentStatus) {
   const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
-  if (!confirm(`${newStatus === 'inactive' ? 'Deactivate' : 'Activate'} this user?`)) return;
+  const user = allUsers.find(u => u.user_id === id);
+  const username = user?.username || 'this user';
+  const action = newStatus === 'inactive' ? 'Deactivate' : 'Reactivate';
+  const confirmed = await showConfirmDialog(
+    `${action} User`,
+    `${action} <strong>${username}</strong>?`
+  );
+  if (!confirmed) return;
   try {
     const res = await fetch(`/api/admin/users/${id}`, {
       method: 'PUT',

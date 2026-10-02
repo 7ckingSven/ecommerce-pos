@@ -1130,7 +1130,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Role <span class="req">*</span></label>
-            <select id="uRole" class="form-input form-select" required>
+            <select id="uRole" class="form-input form-select" required onchange="toggleBranchVisibility(this.value)">
               <option value="staff">Staff</option>
               <option value="admin">Admin</option>
             </select>
