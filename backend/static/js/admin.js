@@ -786,6 +786,8 @@ function renderProducts(products) {
             <td>${p.category}</td>
             <td>${peso(p.price)}</td>
             <td>${badge(p.status)}</td>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.created_at ? new Date(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + new Date(p.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + new Date(p.updated_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
             <td>
               <div style="display:flex;gap:6px;">
                 <button class="btn-icon" onclick="event.stopPropagation();editProduct('${p.product_id}')" title="Edit">
@@ -802,7 +804,7 @@ function renderProducts(products) {
               </div>
             </td>
           </tr>
-          <tr id="variantRow_${p.product_id}" style="display:none;background:var(--surface);"><td colspan="7" style="padding:0;"><table style="width:100%;"><tbody class="variant-stock-content"></tbody></table></td></tr>`;
+          <tr id="variantRow_${p.product_id}" style="display:none;background:var(--surface);"><td colspan="9" style="padding:0;"><table style="width:100%;"><tbody class="variant-stock-content"></tbody></table></td></tr>`;
       }).join('')
     : '<tr><td colspan="7" class="table-empty">No products found</td></tr>';
 }
