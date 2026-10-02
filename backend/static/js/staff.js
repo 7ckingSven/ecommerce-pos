@@ -1039,7 +1039,7 @@ function renderInvHistory(data) {
             <td>${i.quantity_after}</td>
             <td>${i.from_branch?.branch_name || '—'}</td>
             <td>${i.to_branch?.branch_name   || '—'}</td>
-            <td>${new Date(i.date).toLocaleDateString('en-PH')}</td>
+            <td>${new Date(i.date).toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' })}</td>
             <td style="max-width:200px;font-size:12px;">
               ${(() => {
                 const note = (i.note || '').toLowerCase();
