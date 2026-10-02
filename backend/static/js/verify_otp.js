@@ -5,91 +5,141 @@
 document.addEventListener('DOMContentLoaded', function () {
 
   // ── OTP input — digits only + enable/disable verify button ──
-  const otpInput  = document.getElementById('otp');
+  const otpInput = document.getElementById('otp');
   const verifyBtn = document.getElementById('verifyBtn');
 
+  let otpExpired = false;
+
+  function syncVerifyBtn() {
+    if (!otpInput || !verifyBtn) return;
+    const clean = otpInput.value.replace(/[^0-9]/g, '');
+    otpInput.value     = clean;
+    verifyBtn.disabled = clean.length !== 6 || otpExpired;
+  }
+
   if (otpInput) {
-    otpInput.addEventListener('input', function () {
-      this.value = this.value.replace(/[^0-9]/g, '');
-      if (verifyBtn) {
-        verifyBtn.disabled = this.value.length !== 6;
-      }
+    otpInput.addEventListener('input',  syncVerifyBtn);
+    otpInput.addEventListener('keyup',  syncVerifyBtn);
+    otpInput.addEventListener('paste', function () {
+      setTimeout(syncVerifyBtn, 0);
     });
     otpInput.focus();
   }
 
-  // ── 5-minute OTP countdown ──
-  let otpSeconds     = 5 * 60;
-  const timerMin     = document.getElementById('timerMin');
-  const timerSec     = document.getElementById('timerSec');
-  const timerWrap    = document.getElementById('timerWrap');
-  const timerExpired = document.getElementById('timerExpired');
+  // ── OTP countdown — inline in the hint text ──
+  let otpSeconds = 5 * 60;
+  let otpInterval;
+
+  function formatTime(s) {
+    const m = Math.floor(s / 60);
+    const sec = s % 60;
+    return String(m).padStart(2, '0') + ':' + String(sec).padStart(2, '0');
+  }
+
+  function getTimerEl() {
+    return document.getElementById('otpTimerText');
+  }
+
+  function getHintEl() {
+    return document.getElementById('otpHint');
+  }
 
   function updateTimer() {
     if (otpSeconds <= 0) {
-      if (timerWrap)    timerWrap.style.display    = 'none';
-      if (timerExpired) timerExpired.style.display = 'block';
+      otpExpired = true;
+      clearInterval(otpInterval);
+      const hint = getHintEl();
+      if (hint) {
+        hint.innerHTML = '<span style="color:#dc2626;font-weight:500;">⚠ OTP has expired. Please request a new one.</span>';
+      }
       if (verifyBtn) {
         verifyBtn.disabled    = true;
         verifyBtn.textContent = 'OTP Expired';
       }
-      clearInterval(otpInterval);
       return;
     }
 
-    const m = Math.floor(otpSeconds / 60);
-    const s = otpSeconds % 60;
-    if (timerMin) timerMin.textContent = String(m).padStart(2, '0');
-    if (timerSec) timerSec.textContent = String(s).padStart(2, '0');
-
-    // Turn red in last 60 seconds
-    if (otpSeconds <= 60) {
-      const circles = document.querySelectorAll('.otp-timer-circle');
-      circles.forEach(c => {
-        c.style.background  = '#fef2f2';
-        c.style.borderColor = '#fecaca';
-      });
-      if (timerMin) timerMin.style.color = '#dc2626';
-      if (timerSec) timerSec.style.color = '#dc2626';
+    const el = getTimerEl();
+    if (el) {
+      el.textContent = formatTime(otpSeconds);
+      el.style.color = otpSeconds <= 60 ? '#dc2626' : '';
     }
 
     otpSeconds--;
   }
 
-  updateTimer();
-  const otpInterval = setInterval(updateTimer, 1000);
+  function startOtpTimer(seconds) {
+    otpExpired = false;
+    otpSeconds = seconds;
+    clearInterval(otpInterval);
 
-  // ── Resend OTP — 60 second cooldown ──
+    // Restore hint to default state with a fresh timer span
+    const hint = getHintEl();
+    if (hint) {
+      hint.innerHTML = 'Check your inbox and spam folder. OTP expires in <span id="otpTimerText" style="font-weight:600;">05:00</span>.';
+    }
+
+    if (verifyBtn && verifyBtn.textContent === 'OTP Expired') {
+      verifyBtn.textContent = 'Verify OTP →';
+    }
+
+    updateTimer();
+    otpInterval = setInterval(updateTimer, 1000);
+    syncVerifyBtn();
+  }
+
+  startOtpTimer(5 * 60);
+
+  // ── Resend OTP — POST to /resend-otp, then 2-minute cooldown ──
   const resendBtn      = document.getElementById('resendBtn');
   const resendCooldown = document.getElementById('resendCooldown');
+  let resendTimer;
+
+  function startResendCooldown() {
+    let secs = 2 * 60;
+    if (resendBtn)      resendBtn.style.display      = 'none';
+    if (resendCooldown) {
+      resendCooldown.style.display = 'inline';
+      resendCooldown.textContent   = 'Resend again in 2:00';
+    }
+
+    resendTimer = setInterval(function () {
+      secs--;
+      if (secs <= 0) {
+        clearInterval(resendTimer);
+        if (resendBtn) {
+          resendBtn.style.display = 'inline';
+          resendBtn.disabled      = false;
+        }
+        if (resendCooldown) resendCooldown.style.display = 'none';
+      } else {
+        if (resendCooldown) resendCooldown.textContent = 'Resend again in ' + formatTime(secs);
+      }
+    }, 1000);
+  }
 
   if (resendBtn) {
-    resendBtn.addEventListener('click', function (e) {
-      if (this.dataset.cooling === 'true') {
-        e.preventDefault();
-        return;
-      }
+    resendBtn.addEventListener('click', function () {
+      resendBtn.disabled = true;
 
-      // Start 60s cooldown after click (allow navigation)
-      let secs = 60;
-      this.dataset.cooling   = 'true';
-      this.style.display     = 'none';
-      if (resendCooldown) {
-        resendCooldown.style.display = 'inline';
-        resendCooldown.textContent   = 'Resend in ' + secs + 's';
-      }
-
-      const resendTimer = setInterval(function () {
-        secs--;
-        if (secs <= 0) {
-          clearInterval(resendTimer);
-          resendBtn.style.display = 'inline';
-          resendBtn.dataset.cooling = 'false';
-          if (resendCooldown) resendCooldown.style.display = 'none';
-        } else {
-          if (resendCooldown) resendCooldown.textContent = 'Resend in ' + secs + 's';
-        }
-      }, 1000);
+      fetch('/resend-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      })
+        .then(function (res) { return res.json(); })
+        .then(function (data) {
+          if (data.ok) {
+            startOtpTimer(5 * 60);
+            startResendCooldown();
+          } else {
+            alert(data.error || 'Failed to resend OTP. Please try again.');
+            resendBtn.disabled = false;
+          }
+        })
+        .catch(function () {
+          alert('Network error. Please try again.');
+          resendBtn.disabled = false;
+        });
     });
   }
 

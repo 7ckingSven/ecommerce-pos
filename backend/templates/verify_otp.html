@@ -51,38 +51,10 @@
     .auth-divider { height: 1px; background: var(--border); }
     .auth-alert {
       padding: 10px 14px; border-radius: var(--radius-md);
-      font-size: 13px; font-weight: 500;
+      font-size: 13px; font-weight: 500; text-align: center;
     }
     .auth-alert.error   { background:#fef2f2; border:1px solid #fecaca; color:#dc2626; }
     .auth-alert.success { background:var(--g-50); border:1px solid var(--g-200); color:var(--g-700); }
-
-    /* ── Timer ── */
-    .otp-timer-wrap {
-      display: flex; align-items: center;
-      justify-content: center; gap: 8px;
-    }
-    .otp-timer-circle {
-      width: 52px; height: 52px; border-radius: 50%;
-      background: var(--g-50); border: 2px solid var(--g-200);
-      display: flex; align-items: center; justify-content: center;
-      flex-direction: column;
-    }
-    .otp-timer-num {
-      font-size: 16px; font-weight: 700;
-      color: var(--dark); line-height: 1;
-    }
-    .otp-timer-label {
-      font-size: 9px; color: var(--text-muted);
-      font-weight: 500; text-transform: uppercase;
-    }
-    .otp-timer-sep {
-      font-size: 18px; font-weight: 700;
-      color: var(--text-muted); margin-bottom: 6px;
-    }
-    .otp-timer-expired {
-      text-align: center; font-size: 13px;
-      color: #dc2626; font-weight: 500;
-    }
 
     /* ── Fields ── */
     .auth-field { display: flex; flex-direction: column; gap: 6px; }
@@ -184,22 +156,6 @@
         {% endfor %}
       {% endwith %}
 
-      <!-- Timer -->
-      <div id="timerWrap" class="otp-timer-wrap">
-        <div class="otp-timer-circle">
-          <span class="otp-timer-num" id="timerMin">05</span>
-          <span class="otp-timer-label">min</span>
-        </div>
-        <span class="otp-timer-sep">:</span>
-        <div class="otp-timer-circle">
-          <span class="otp-timer-num" id="timerSec">00</span>
-          <span class="otp-timer-label">sec</span>
-        </div>
-      </div>
-      <p id="timerExpired" class="otp-timer-expired" style="display:none;">
-        ⚠ OTP has expired. Please request a new one.
-      </p>
-
       <!-- Form -->
       <form method="POST" action="{{ url_for('verify_otp') }}" style="display:flex;flex-direction:column;gap:1rem;">
         <div class="auth-field">
@@ -214,7 +170,7 @@
             required
             autocomplete="one-time-code"
           />
-          <p class="auth-hint">Check your inbox and spam folder. OTP expires in 5 minutes.</p>
+          <p class="auth-hint" id="otpHint">Check your inbox and spam folder. OTP expires in <span id="otpTimerText" style="font-weight:600;">05:00</span>.</p>
         </div>
         <button type="submit" class="auth-btn" id="verifyBtn" disabled>Verify OTP →</button>
       </form>
@@ -222,9 +178,7 @@
       <!-- Resend -->
       <div class="resend-wrap">
         <span style="color:var(--text-muted);">Didn't receive it?</span>
-        <a href="{{ url_for('forgot_password') }}" class="resend-link" id="resendBtn">
-          Resend OTP Code
-        </a>
+        <button type="button" class="resend-link" id="resendBtn">Resend OTP Code</button>
         <span class="resend-cooldown" id="resendCooldown" style="display:none;"></span>
       </div>
 

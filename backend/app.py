@@ -383,7 +383,7 @@ def forgot_password():
                 print(f"WARNING: Failed to send email: {email_error}")
                 # Continue even if email fails - user can see OTP in console logs for testing
             
-            flash('OTP sent to your email. Check your inbox (and spam folder).', 'success')
+            flash('OTP sent successfully.', 'success')
             return redirect(url_for('verify_otp'))
             
         except Exception as e:
@@ -395,73 +395,146 @@ def forgot_password():
     
     return render_template('forgot_password.html')
 
+
+# ─── RESEND OTP ───────────────────────────────────────
+
+@app.route('/resend-otp', methods=['POST'])
+def resend_otp():
+    if not session.get('otp_sent'):
+        return jsonify({'ok': False, 'error': 'No active OTP session. Please start over.'}), 400
+
+    email = session.get('otp_email')
+    if not email:
+        return jsonify({'ok': False, 'error': 'Session expired. Please start over.'}), 400
+
+    try:
+        # Generate a fresh 6-digit OTP
+        otp = ''.join(random.choices(string.digits, k=6))
+
+        # Overwrite session with new OTP + reset timestamp
+        session['otp_code']       = otp
+        session['otp_created_at'] = datetime.now().isoformat()
+        session['otp_sent']       = True
+        session.pop('otp_verified', None)   # clear any stale verified flag
+
+        # Send email
+        try:
+            send_email_resend(
+                to_email  = email,
+                subject   = 'TEFC E-Commerce — Password Reset OTP (Resent)',
+                html_body = build_otp_email(otp, title='Password Reset Code', purpose='reset your password')
+            )
+        except Exception as email_err:
+            print(f"WARNING: Resend email failed: {email_err}")
+
+        return jsonify({'ok': True}), 200
+
+    except Exception as e:
+        print(f"Resend OTP error: {type(e).__name__}: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': 'An error occurred. Please try again.'}), 500
+
+
+# ─── VERIFY OTP ───────────────────────────────────────
+
 @app.route('/verify-otp', methods=['GET', 'POST'])
 def verify_otp():
     if not session.get('otp_sent'):
         return redirect(url_for('forgot_password'))
-    
+
     if request.method == 'POST':
         otp = request.form.get('otp', '').strip()
-        password = request.form.get('password', '')
-        password_confirm = request.form.get('password_confirm', '')
-        
-        if not otp or not password or not password_confirm:
-            flash('Please fill in all fields.', 'error')
+
+        if not otp:
+            flash('Please enter the OTP.', 'error')
             return redirect(url_for('verify_otp'))
-        
-        if password != password_confirm:
-            flash('Passwords do not match.', 'error')
-            return redirect(url_for('verify_otp'))
-        
+
         try:
-            # Check if OTP has expired (15 minutes)
+            # Check if OTP has expired (5 minutes — matches the frontend countdown)
             otp_created_at = session.get('otp_created_at')
             if otp_created_at:
                 created = datetime.fromisoformat(otp_created_at)
-                if (datetime.now() - created).total_seconds() > 900:  # 15 minutes
+                if (datetime.now() - created).total_seconds() > 300:  # 5 minutes
                     session.pop('otp_code', None)
                     session.pop('otp_sent', None)
                     flash('OTP has expired. Please request a new one.', 'error')
                     return redirect(url_for('forgot_password'))
-            
+
             # Check if OTP matches
             stored_otp = session.get('otp_code', '')
             if otp != stored_otp:
                 flash('Invalid OTP. Please try again.', 'error')
                 return redirect(url_for('verify_otp'))
-            
-            user_id = session.get('otp_user_id')
-            email = session.get('otp_email')
-            
-            if not user_id:
-                flash('Session expired. Please try again.', 'error')
-                return redirect(url_for('forgot_password'))
-            
-            # Update password in user table
-            hashed = hash_password(password)
-            supabase.table('user').update({
-                'password': hashed
-            }).eq('user_id', user_id).execute()
-            
-            
-            # Clear OTP session variables
+
+            # OTP is valid — mark as verified, clear the code, go to reset page
+            session['otp_verified'] = True
             session.pop('otp_code', None)
-            session.pop('otp_email', None)
-            session.pop('otp_user_id', None)
-            session.pop('otp_sent', None)
-            session.pop('otp_created_at', None)
-            
-            flash('Password reset successfully! Please log in.', 'success')
-            return redirect(url_for('login'))
-            
+            return redirect(url_for('reset_password'))
+
         except Exception as e:
             print(f"OTP verification error: {type(e).__name__}: {str(e)}")
             import traceback
             traceback.print_exc()
             flash('An error occurred. Please try again.', 'error')
             return redirect(url_for('verify_otp'))
-    
+
     return render_template('verify_otp.html')
+
+
+# ─── RESET PASSWORD ───────────────────────────────────
+
+@app.route('/reset-password', methods=['GET', 'POST'])
+def reset_password():
+    # Must have gone through OTP verification first
+    if not session.get('otp_verified'):
+        flash('Please verify your OTP first.', 'error')
+        return redirect(url_for('forgot_password'))
+
+    if request.method == 'POST':
+        password         = request.form.get('password', '')
+        password_confirm = request.form.get('password_confirm', '')
+
+        if not password or not password_confirm:
+            flash('Please fill in both password fields.', 'error')
+            return redirect(url_for('reset_password'))
+
+        if len(password) < 8:
+            flash('Password must be at least 8 characters.', 'error')
+            return redirect(url_for('reset_password'))
+
+        if password != password_confirm:
+            flash('Passwords do not match.', 'error')
+            return redirect(url_for('reset_password'))
+
+        try:
+            user_id = session.get('otp_user_id')
+            if not user_id:
+                flash('Session expired. Please start over.', 'error')
+                return redirect(url_for('forgot_password'))
+
+            # Update password in user table
+            hashed = hash_password(password)
+            supabase.table('user').update({
+                'password': hashed
+            }).eq('user_id', user_id).execute()
+
+            # Clear all OTP-related session variables
+            for key in ('otp_code', 'otp_email', 'otp_user_id',
+                        'otp_sent', 'otp_created_at', 'otp_verified'):
+                session.pop(key, None)
+
+            flash('Password reset successfully! Please log in.', 'success')
+            return redirect(url_for('login'))
+
+        except Exception as e:
+            print(f"Reset password error: {type(e).__name__}: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            flash('An error occurred. Please try again.', 'error')
+            return redirect(url_for('reset_password'))
+
+    return render_template('reset_password.html')
 
 
 # ─── DASHBOARDS ───────────────────────────────────────
@@ -481,7 +554,7 @@ def staff_dashboard():
 @app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for('landing'))
+    return redirect(url_for('login'))
 
 # ══════════════════════════════════════════════════════
 # MOBILE API ROUTES — React Native Customer App

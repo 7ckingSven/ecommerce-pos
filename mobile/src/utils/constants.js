@@ -3,7 +3,7 @@
 //   'emulator' → local Flask (development)
 //   'render'   → Render deployment (real phone / production)
 
-const ENV = 'render'; // ← change this line only
+const ENV = 'emulator'; // ← change this line only
 
 export const API_BASE_URL = ENV === 'emulator'
   ? 'http://10.0.2.2:5000/api'                     // Android emulator → local Flask
