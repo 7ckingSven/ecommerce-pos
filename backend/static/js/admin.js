@@ -2764,11 +2764,12 @@ function openAssignModal(discountId, discountName) {
 
   // Build state — pre-check products that already have this discount
   assignProductState = allProducts.map(p => ({
-    product_id:   p.product_id,
-    product_name: p.product_name,
-    category:     p.category,
-    branch_stock: p.branch_stock || [],
-    checked:      p.discount_id === discountId,
+    product_id:      p.product_id,
+    product_name:    p.product_name,
+    category:        p.category,
+    branch_stock:    p.branch_stock || [],
+    checked:         p.discount_id === discountId,
+    wasAssigned:     p.discount_id === discountId, // track original state
   }));
 
   // Populate branch filter from allBranches
@@ -2842,7 +2843,9 @@ async function submitAssign() {
   if (!currentAssignDiscountId) return;
 
   const toAssign   = assignProductState.filter(p => p.checked).map(p => p.product_id);
-  const toUnassign = assignProductState.filter(p => !p.checked).map(p => p.product_id);
+  // Only unassign products that HAD this discount before and are now unchecked
+  // (never touch products that had a different discount or no discount)
+  const toUnassign = assignProductState.filter(p => p.wasAssigned && !p.checked).map(p => p.product_id);
 
   try {
     const requests = [];
