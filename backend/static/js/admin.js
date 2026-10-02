@@ -3180,10 +3180,10 @@ async function loadPurchaseOrders() {
 
     // Badge — pending requests
     const pending = allStockRequests.filter(r => r.status === 'pending').length;
-    const badge   = document.getElementById('poRequestBadge');
-    if (badge) {
-      badge.textContent   = pending;
-      badge.style.display = pending > 0 ? 'inline' : 'none';
+    const poBadge   = document.getElementById('poRequestBadge');
+    if (poBadge) {
+      poBadge.textContent   = pending;
+      poBadge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
     renderStockRequests(allStockRequests);
@@ -3217,9 +3217,9 @@ function renderStockRequests(requests) {
           <td>${r.branch?.branch_name || '—'}</td>
           <td>${badge(r.status)}</td>
           <td style="font-size:12px;">${r.note || '—'}</td>
-          <td>${new Date(r.created_at).toLocaleDateString('en-PH')}</td>
+          <td>${new Date(r.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
           <td>
-            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${r.product?.product_name}', ${r.quantity_needed})" title="Review / Change Decision">
+            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${r.product?.product_name}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </td>
@@ -3244,7 +3244,7 @@ function renderPOs(pos) {
           <td>${itemCount} item${itemCount !== 1 ? 's' : ''}</td>
           <td>${peso(total)}</td>
           <td>${badge(po.status)}</td>
-          <td>${new Date(po.created_at).toLocaleDateString('en-PH')}</td>
+          <td>${new Date(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
           <td>
             <button class="btn-icon" onclick="openPODetail('${po.po_id}')" title="View">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -3257,7 +3257,7 @@ function renderPOs(pos) {
 
 // ─── Review Stock Request ─────────────────────────────
 
-function openReviewRequest(requestId, productName, qty) {
+function openReviewRequest(requestId, productName, qty, status) {
   document.getElementById('reviewRequestId').value    = requestId;
   document.getElementById('reviewRequestTitle').textContent = `Review Request — ${productName}`;
   document.getElementById('reviewRequestInfo').innerHTML = `
@@ -3266,6 +3266,11 @@ function openReviewRequest(requestId, productName, qty) {
       <div><strong>Quantity Requested:</strong> ${qty} units</div>
     </div>`;
   document.getElementById('reviewAdminNote').value = '';
+  // Show/hide buttons based on current status
+  const approveBtn = document.querySelector('#reviewRequestModal .btn-solid-green');
+  const rejectBtn  = document.querySelector('#reviewRequestModal .btn[style*="#ef4444"]');
+  if (approveBtn) approveBtn.style.display = status === 'approved' ? 'none' : '';
+  if (rejectBtn)  rejectBtn.style.display  = status === 'rejected' ? 'none' : '';
   document.getElementById('reviewRequestModalOverlay')?.classList.add('open');
   document.getElementById('reviewRequestModal')?.classList.add('open');
 }
@@ -3553,7 +3558,7 @@ function openPODetail(poId) {
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:13px;">
       <div><strong>Supplier:</strong> ${po.supplier}</div>
       <div><strong>Status:</strong> ${badge(po.status)}</div>
-      <div><strong>Created:</strong> ${new Date(po.created_at).toLocaleDateString('en-PH')}</div>
+      <div><strong>Created:</strong> ${new Date(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</div>
       ${po.note ? `<div><strong>Note:</strong> ${po.note}</div>` : ''}
     </div>
     <table class="data-table" style="margin-bottom:1rem;">
@@ -3584,35 +3589,52 @@ function openPODetail(poId) {
       <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
       <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
   } else if (po.status === 'ordered') {
-    const branchChecks = allBranches.map(b =>
-      `<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;">
-        <input type="checkbox" id="branchChk_${b.branch_id}" value="${b.branch_id}" checked
-          style="width:15px;height:15px;cursor:pointer;accent-color:var(--g-400);"
-          onchange="document.getElementById('branchQty_${b.branch_id}').disabled=!this.checked;"/>
-        <label for="branchChk_${b.branch_id}" style="font-size:13px;font-weight:500;min-width:130px;cursor:pointer;">${b.branch_name}</label>
-        <input type="number" id="branchQty_${b.branch_id}" min="0" value="0"
-          style="width:70px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;"/>
-        <span style="font-size:11px;color:var(--text-muted);">units</span>
-      </div>`
-    ).join('');
+    // Build per-item receive + distribute UI
+    const itemRows = items.map((item, idx) => {
+      const orderedQty = Number(item.quantity);
+      const productLabel = (item.product?.product_name || '—')
+        + (item.variant_options && Object.keys(item.variant_options).length
+            ? ' <span style="font-size:10px;color:var(--text-muted);">(' + Object.entries(item.variant_options).map(([k,v])=>k+': '+v).join(', ') + ')</span>'
+            : '');
+      const branchInputs = allBranches.map(b =>
+        `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <label style="font-size:12px;font-weight:500;min-width:120px;">${b.branch_name}</label>
+          <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="0"
+            data-item="${idx}" data-branch="${b.branch_id}"
+            style="width:64px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;"
+            oninput="validatePODistribution()"/>
+          <span style="font-size:11px;color:var(--text-muted);">units</span>
+        </div>`
+      ).join('');
+      return `
+        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;" data-item-idx="${idx}" data-ordered="${orderedQty}">
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+            <span style="font-size:13px;font-weight:600;">${productLabel}</span>
+            <span style="font-size:11px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
+            <div style="display:flex;align-items:center;gap:6px;">
+              <label style="font-size:11px;color:var(--text-muted);">Actually received:</label>
+              <input type="number" id="recv_${idx}" min="0" max="${orderedQty}" value="${orderedQty}"
+                style="width:64px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:12px;font-weight:600;"
+                oninput="validatePODistribution()"/>
+              <span style="font-size:11px;color:var(--text-muted);">/ ${orderedQty} max</span>
+            </div>
+          </div>
+          <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
+          ${branchInputs}
+          <div id="distError_${idx}" style="font-size:11px;color:#ef4444;margin-top:4px;display:none;"></div>
+          <div id="distCount_${idx}" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+        </div>`;
+    }).join('');
+
     footer.innerHTML += `
-      <div style="background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:8px;min-width:280px;">
-        <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:8px;text-transform:uppercase;letter-spacing:0.5px;">📦 Distribute Stock to Branches</div>
-        ${branchChecks}
-        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Check branches and enter quantity for each.</div>
+      <div style="width:100%;max-height:380px;overflow-y:auto;padding-right:2px;">
+        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
+        ${itemRows}
       </div>
-      <button id="markReceivedBtn" class="btn btn-solid-green" onclick="
-        var branches = [];
-        allBranches.forEach(function(b) {
-          var chk = document.getElementById('branchChk_' + b.branch_id);
-          var qty = parseInt(document.getElementById('branchQty_' + b.branch_id)?.value || '0');
-          if (chk && chk.checked && qty > 0) branches.push({ branch_id: b.branch_id, quantity: qty });
-        });
-        if (!branches.length) { showToast('Please select at least one branch and enter quantity.', 'error'); return; }
-        var btn = document.getElementById('markReceivedBtn');
-        if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
-        updatePOStatus('${poId}', 'received', null, branches);
-      ">Mark as Received ✓</button>`
+      <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Mark as Received ✓</button>`;
+
+    // Run initial validation to set counter labels
+    setTimeout(validatePODistribution, 0);
   }
 
   document.getElementById('poDetailModalOverlay')?.classList.add('open');
@@ -3622,6 +3644,106 @@ function openPODetail(poId) {
 function closePODetailModal() {
   document.getElementById('poDetailModalOverlay')?.classList.remove('open');
   document.getElementById('poDetailModal')?.classList.remove('open');
+}
+
+// ─── PO Receive & Distribute Validation ──────────────────
+function validatePODistribution() {
+  var footer   = document.getElementById('poDetailFooter');
+  if (!footer) return;
+  var itemDivs = footer.querySelectorAll('[data-item-idx]');
+  if (!itemDivs.length) return;
+
+  var allValid = true;
+
+  itemDivs.forEach(function(div) {
+    var idx        = div.getAttribute('data-item-idx');
+    var orderedQty = parseInt(div.getAttribute('data-ordered')) || 0;
+    var recvInput  = document.getElementById('recv_' + idx);
+    var recvQty    = Math.min(parseInt(recvInput?.value || '0'), orderedQty);
+    if (recvInput && parseInt(recvInput.value) > orderedQty) {
+      recvInput.value = orderedQty; // clamp silently
+      recvQty = orderedQty;
+    }
+
+    var distTotal  = 0;
+    allBranches.forEach(function(b) {
+      var inp = document.getElementById('dist_' + idx + '_' + b.branch_id);
+      if (inp) distTotal += parseInt(inp.value || '0');
+    });
+
+    var errEl   = document.getElementById('distError_' + idx);
+    var countEl = document.getElementById('distCount_' + idx);
+    var over    = distTotal > recvQty;
+    var none    = recvQty <= 0;
+
+    if (countEl) {
+      countEl.textContent = 'Distributed: ' + distTotal + ' / ' + recvQty + ' received';
+      countEl.style.color = over ? '#ef4444' : distTotal === recvQty ? 'var(--g-400)' : 'var(--text-muted)';
+    }
+    if (errEl) {
+      if (over) {
+        errEl.textContent = '⚠ Total distributed (' + distTotal + ') exceeds received (' + recvQty + ')';
+        errEl.style.display = '';
+      } else if (none) {
+        errEl.textContent = '⚠ Enter the actually received quantity above (must be > 0)';
+        errEl.style.display = '';
+      } else {
+        errEl.style.display = 'none';
+      }
+    }
+
+    if (over || none || distTotal === 0) allValid = false;
+  });
+
+  var btn = document.getElementById('markReceivedBtn');
+  if (btn) btn.disabled = !allValid;
+}
+
+async function submitPOReceive(poId) {
+  var footer   = document.getElementById('poDetailFooter');
+  var itemDivs = footer ? footer.querySelectorAll('[data-item-idx]') : [];
+  var po       = allPOs.find(function(p) { return p.po_id === poId; });
+  if (!po) return;
+
+  // Build per-item received quantities + branch distributions
+  var itemsPayload = [];
+  var items = po.po_item || [];
+  itemDivs.forEach(function(div) {
+    var idx       = div.getAttribute('data-item-idx');
+    var item      = items[parseInt(idx)];
+    if (!item) return;
+    var recvQty   = parseInt(document.getElementById('recv_' + idx)?.value || '0');
+    var branches  = [];
+    allBranches.forEach(function(b) {
+      var qty = parseInt(document.getElementById('dist_' + idx + '_' + b.branch_id)?.value || '0');
+      if (qty > 0) branches.push({ branch_id: b.branch_id, quantity: qty });
+    });
+    itemsPayload.push({ po_item_id: item.po_item_id, product_id: item.product_id, received_quantity: recvQty, branches: branches });
+  });
+
+  var btn = document.getElementById('markReceivedBtn');
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+
+  try {
+    const res = await fetch('/api/admin/purchase-orders/' + poId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'received', po_number: po.po_number, items: itemsPayload }),
+    });
+    if (res.ok) {
+      showToast('PO marked as received!');
+      closePODetailModal();
+      loadPurchaseOrders();
+      loadInventory();
+    } else {
+      const err = await res.json();
+      showToast(err.error || 'Failed to receive PO.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
+    }
+  } catch (e) {
+    showToast('Error submitting.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
+  }
 }
 
 async function updatePOStatus(poId, status, branchId = null, branches = null) {
