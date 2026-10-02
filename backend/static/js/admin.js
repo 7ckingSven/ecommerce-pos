@@ -3,8 +3,10 @@ const ITEMS_PER_PAGE = 10;
 let invPage              = 1;
 let ordersPage           = 1;
 let inventoryTypeFilterVal = '';
+let inventoryBranchFilter  = '';
 let branchStockPage   = 1;
 let allBranchProducts = [];
+let branchStockSearchVal = '';
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -668,6 +670,20 @@ async function loadProducts() {
         brands.map(b => `<option value="${b}">${b}</option>`).join('');
     }
 
+    // Populate branch filter dropdown in products toolbar
+    const branchSel = document.getElementById('productBranchFilter');
+    if (branchSel) {
+      const branchMap = {};
+      allProducts.forEach(p => {
+        (p.branch_stock || []).forEach(bs => {
+          if (bs.branch_id && bs.branch?.branch_name)
+            branchMap[bs.branch_id] = bs.branch.branch_name;
+        });
+      });
+      branchSel.innerHTML = '<option value="">All Branches</option>' +
+        Object.entries(branchMap).map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
+    }
+
   } catch (e) { console.error('Products error:', e); }
 }
 
@@ -1169,7 +1185,9 @@ function updateBranchStockSummary(products) {
   var html = '<div class="branch-stock-grid">';
   Object.keys(branchMap).forEach(function(branch) {
     var branchId  = branchMap[branch].branch_id;
-    var allItems  = branchMap[branch].items;
+    var allItems  = branchStockSearchVal
+      ? branchMap[branch].items.filter(i => i.product_name.toLowerCase().includes(branchStockSearchVal))
+      : branchMap[branch].items;
     var items     = allItems.slice((branchStockPage - 1) * ITEMS_PER_PAGE, branchStockPage * ITEMS_PER_PAGE);
     var rows     = items.map(function(i) {
       var imgHtml = i.image_url
@@ -1211,10 +1229,13 @@ function updateBranchStockSummary(products) {
   html += '</div>';
   wrap.innerHTML = html;
 
-  // Pagination
+  // Pagination — use filtered count
   var maxItems = 0;
   Object.keys(branchMap).forEach(function(b) {
-    if (branchMap[b].items.length > maxItems) maxItems = branchMap[b].items.length;
+    var filteredLen = branchStockSearchVal
+      ? branchMap[b].items.filter(i => i.product_name.toLowerCase().includes(branchStockSearchVal)).length
+      : branchMap[b].items.length;
+    if (filteredLen > maxItems) maxItems = filteredLen;
   });
   var pagerEl = document.getElementById('branchStockPagination');
   if (!pagerEl) {
@@ -1282,6 +1303,7 @@ async function loadInventory() {
     // Update branch stock summary with products that have branch_stock
     updateBranchStockSummary(products);
 
+
     // Check low stock per branch — flag if ANY branch has low/zero stock
     const getBranchTotal = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
@@ -1332,18 +1354,46 @@ function getMovementType(i) {
   return { label: 'Other', color: '#9ca3af', icon: '•', bg: 'rgba(107,114,128,0.1)' };
 }
 
-function filterInventoryType(val) {
+async function filterInventoryType(val, el) {
+  if (val === 'low_stock') {
+    // Show products with low stock from products API
+    try {
+      const res      = await fetch('/api/admin/products');
+      const products = await res.json();
+      const getBranchTotalF = p => p.branch_stock?.length
+        ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
+        : Number(p.quantity);
+      const lowStock = products.filter(p => p.status === 'active' && getBranchTotalF(p) <= 10);
+      document.getElementById('inventoryBody').innerHTML = lowStock.length
+        ? `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#ef4444;">⚠️ Low Stock Products (≤ 10 units)</strong></td></tr>` +
+          lowStock.map(p => {
+            const total = getBranchTotalF(p);
+            const branchBreakdown = p.branch_stock?.length
+              ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(', ')
+              : `${total} units`;
+            return `
+            <tr style="background:rgba(239,68,68,0.05);">
+              <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
+              <td>—</td>
+              <td colspan="2"><span style="color:#ef4444;font-weight:700;">${branchBreakdown} remaining</span></td>
+              <td>${p.category}</td>
+              <td colspan="4">—</td>
+            </tr>`;
+          }).join('')
+        : '<tr><td colspan="9" class="table-empty">✅ All products have sufficient stock</td></tr>';
+    } catch (e) { console.error('Low stock filter error:', e); }
+    return;
+  }
   inventoryTypeFilterVal = val;
   invPage = 1;
-  renderInventory(allInventory);
+  applyInventoryFilters();
 }
 window.filterInventoryType = filterInventoryType;
 
 function renderInventory(data) {
-  allInventory = data;
-  const filteredInv = inventoryTypeFilterVal
-    ? data.filter(i => getMovementType(i).label.toLowerCase().includes(inventoryTypeFilterVal))
-    : data;
+  // Only update master when called from loadInventory (full dataset)
+  if (!inventorySearchVal && !inventoryTypeFilterVal) allInventory = data;
+  const filteredInv = data;
   const paged = paginate(filteredInv, invPage);
   // Update stats
   const restocks    = data.filter(i => getMovementType(i).label === 'Restock');
@@ -1399,50 +1449,50 @@ function renderInventory(data) {
   renderPager('invPagination', filteredInv.length, invPage, 'changeInvPage');
 }
 
+let inventorySearchVal = '';
 function filterInventorySearch(q) {
-  const filtered = allInventory.filter(i =>
-    (i.product?.product_name || '').toLowerCase().includes(q.toLowerCase()) ||
-    (i.note || '').toLowerCase().includes(q.toLowerCase())
-  );
+  inventorySearchVal = (q || '').toLowerCase().trim();
+  invPage = 1;
+  applyInventoryFilters();
+}
+
+function applyInventoryFilters() {
+  let filtered = allInventory;
+  if (inventorySearchVal) {
+    filtered = filtered.filter(i =>
+      (i.product?.product_name || '').toLowerCase().includes(inventorySearchVal) ||
+      (i.note || '').toLowerCase().includes(inventorySearchVal)
+    );
+  }
+  if (inventoryTypeFilterVal) {
+    filtered = filtered.filter(i =>
+      getMovementType(i).label.toLowerCase().includes(inventoryTypeFilterVal)
+    );
+  }
   renderInventory(filtered);
 }
 
-async function filterInventoryType(type, el) {
-  if (type === 'low_stock') {
-    // Show products with low stock from products API
-    try {
-      const res      = await fetch('/api/admin/products');
-      const products = await res.json();
-      const getBranchTotalF = p => p.branch_stock?.length
-        ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
-        : Number(p.quantity);
-      const lowStock = products.filter(p => p.status === 'active' && getBranchTotalF(p) <= 10);
-      document.getElementById('inventoryBody').innerHTML = lowStock.length
-        ? `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#ef4444;">⚠️ Low Stock Products (≤ 10 units)</strong></td></tr>` +
-          lowStock.map(p => {
-            const total = getBranchTotalF(p);
-            const branchBreakdown = p.branch_stock?.length
-              ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(', ')
-              : `${total} units`;
-            return `
-            <tr style="background:rgba(239,68,68,0.05);">
-              <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
-              <td>—</td>
-              <td colspan="2"><span style="color:#ef4444;font-weight:700;">${branchBreakdown} remaining</span></td>
-              <td>${p.category}</td>
-              <td colspan="4">—</td>
-            </tr>`;
-          }).join('')
-        : '<tr><td colspan="9" class="table-empty">✅ All products have sufficient stock</td></tr>';
-    } catch (e) { console.error('Low stock filter error:', e); }
+function filterByBranch(branchId) {
+  inventoryBranchFilter = branchId;
+  productsPage = 1;
+  if (!branchId) {
+    renderProducts(allProducts);
     return;
   }
-  // Filter inventory records by type (from note field)
-  const filtered = type
-    ? allInventory.filter(i => (i.note || '').toLowerCase().includes(type))
-    : allInventory;
-  renderInventory(filtered);
+  const filtered = allProducts.filter(p =>
+    (p.branch_stock || []).some(bs => bs.branch_id === branchId)
+  );
+  renderProducts(filtered);
 }
+window.filterByBranch = filterByBranch;
+
+function filterBranchStock(q) {
+  branchStockSearchVal = (q || '').toLowerCase().trim();
+  branchStockPage = 1;
+  updateBranchStockSummary(allBranchProducts);
+}
+window.filterBranchStock = filterBranchStock;
+
 
 
 // ─── ADD STOCK Modal ─────────────────────────────────
@@ -1468,6 +1518,119 @@ async function openAddStockModal() {
 
 let addStockRowCount = 0;
 
+/* ── Shared autocomplete helper ──────────────────────────────────────────── */
+function buildProductAutocomplete(container, { inputId, hiddenId, listId, onSelect }) {
+  function stockLabel(p) {
+    return p.branch_stock?.length
+      ? p.branch_stock.map(b => `${b.branch?.branch_name||'Branch'}: ${b.quantity}`).join(' | ')
+      : `Stock: ${p.quantity}`;
+  }
+
+  const input  = container.querySelector(`#${inputId}`);
+  const hidden = container.querySelector(`#${hiddenId}`);
+  if (!input || !hidden) return;
+
+  // Create a FIXED-position list appended to body — escapes all overflow clipping
+  const list = document.createElement('div');
+  list.id = listId;
+  list.style.cssText = [
+    'display:none',
+    'position:fixed',
+    'background:var(--card-bg)',
+    'border:1px solid var(--border)',
+    'border-radius:8px',
+    'z-index:9999',
+    'max-height:200px',
+    'overflow-y:auto',
+    'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
+  ].join(';');
+  document.body.appendChild(list);
+
+  function positionList() {
+    const rect = input.getBoundingClientRect();
+    list.style.top   = (rect.bottom + 2) + 'px';
+    list.style.left  = rect.left + 'px';
+    list.style.width = rect.width + 'px';
+  }
+
+  function showSuggestions(q) {
+    const term = (q || '').toLowerCase().trim();
+    list.innerHTML = '';
+    if (!term) { list.style.display = 'none'; return; }
+    const matches = allProducts.filter(p =>
+      (p.product_name || '').toLowerCase().includes(term)
+    ).slice(0, 10);
+    if (!matches.length) {
+      list.innerHTML = `<div style="padding:8px 12px;font-size:12px;color:var(--text-muted);">No products found</div>`;
+      positionList();
+      list.style.display = 'block';
+      return;
+    }
+    matches.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'ac-item';
+      item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);background:var(--card-bg);';
+      item.innerHTML = `<span style="font-weight:500;">${p.product_name}</span><span style="font-size:11px;color:var(--text-muted);margin-left:6px;">${stockLabel(p)}</span>`;
+      item.addEventListener('mousedown', e => { e.preventDefault(); selectProduct(p); });
+      list.appendChild(item);
+    });
+    positionList();
+    list.style.display = 'block';
+  }
+
+  function selectProduct(p) {
+    hidden.value = p.product_id;
+    input.value  = p.product_name;
+    input.dataset.selectedId = p.product_id;
+    list.style.display = 'none';
+    const clearBtn = container.querySelector('.ac-clear');
+    if (clearBtn) clearBtn.style.display = 'inline-flex';
+    input.readOnly = true;
+    input.style.background = 'var(--surface)';
+    if (onSelect) onSelect(p);
+  }
+
+  function clearSelection() {
+    hidden.value = '';
+    input.value  = '';
+    input.dataset.selectedId = '';
+    input.readOnly = false;
+    input.style.background = '';
+    list.style.display = 'none';
+    const clearBtn = container.querySelector('.ac-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (onSelect) onSelect(null);
+  }
+
+  input.addEventListener('input',  () => showSuggestions(input.value));
+  input.addEventListener('focus',  () => { if (!input.readOnly) showSuggestions(input.value); });
+  input.addEventListener('blur',   () => setTimeout(() => { list.style.display = 'none'; }, 150));
+  // Reposition if user scrolls inside the modal while list is open
+  input.closest('.modal')?.addEventListener('scroll', positionList);
+
+  const clearBtn = container.querySelector('.ac-clear');
+  if (clearBtn) clearBtn.addEventListener('click', clearSelection);
+
+  // Expose clearSelection + cleanup so modal close can reset and remove the body-appended list
+  container._acClear = () => {
+    clearSelection();
+    list.remove();
+  };
+}
+
+/* HTML template for an autocomplete product field */
+function productAcHTML(inputId, hiddenId) {
+  return `
+    <div style="display:flex;align-items:center;gap:4px;">
+      <input id="${inputId}" type="text" class="form-input" placeholder="Type to search product..." autocomplete="off"
+        style="flex:1;" />
+      <button type="button" class="ac-clear" title="Clear"
+        style="display:none;align-items:center;justify-content:center;width:26px;height:26px;border:none;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;flex-shrink:0;">×</button>
+    </div>
+    <input id="${hiddenId}" type="hidden" required />`;
+}
+
+/* ── Add Stock rows ──────────────────────────────────────────────────────── */
 function addStockItemRow() {
   addStockRowCount++;
   const rowId  = 'addStockRow_' + addStockRowCount;
@@ -1476,21 +1639,15 @@ function addStockItemRow() {
   row.id       = rowId;
   row.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;position:relative;';
 
-  const productOptions = allProducts.map(p => {
-    const bs = p.branch_stock?.length
-      ? p.branch_stock.map(b => `${b.branch?.branch_name||'Branch'}: ${b.quantity}`).join(' | ')
-      : `Stock: ${p.quantity}`;
-    return `<option value="${p.product_id}" data-groups='${JSON.stringify(p.option_groups||[])}'>${p.product_name} (${bs})</option>`;
-  }).join('');
+  const inputId  = `asInput_${addStockRowCount}`;
+  const hiddenId = `asHidden_${addStockRowCount}`;
+  const listId   = `asList_${addStockRowCount}`;
 
   row.innerHTML = `
     ${addStockRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove()" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
     <div class="form-group" style="margin-bottom:8px;">
       <label class="form-label" style="font-size:11px;">Product <span class="req">*</span></label>
-      <select class="form-input form-select add-stock-product" required onchange="loadRowVariants(this, '${rowId}')">
-        <option value="">Select product</option>
-        ${productOptions}
-      </select>
+      ${productAcHTML(inputId, hiddenId)}
     </div>
     <div class="add-stock-variant-wrap" style="display:none;margin-bottom:8px;">
       <label class="form-label" style="font-size:11px;">Variant <span style="font-size:10px;color:var(--text-muted);">(optional)</span></label>
@@ -1502,17 +1659,20 @@ function addStockItemRow() {
     </div>
   `;
   wrap.appendChild(row);
+
+  buildProductAutocomplete(row, {
+    inputId, hiddenId, listId: `asList_${addStockRowCount}`,
+    onSelect: (p) => loadRowVariantsByProduct(p, rowId)
+  });
 }
 
-function loadRowVariants(sel, rowId) {
-  const row   = document.getElementById(rowId);
-  const wrap  = row.querySelector('.add-stock-variant-wrap');
-  const cont  = row.querySelector('.add-stock-variant-selects');
-  const opt   = sel.options[sel.selectedIndex];
-  const groups = JSON.parse(opt?.dataset?.groups || '[]');
-
+function loadRowVariantsByProduct(product, rowId) {
+  const row  = document.getElementById(rowId);
+  const wrap = row.querySelector('.add-stock-variant-wrap');
+  const cont = row.querySelector('.add-stock-variant-selects');
+  if (!product) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  const groups = product.option_groups || [];
   if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
-
   wrap.style.display = 'block';
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
@@ -1524,8 +1684,7 @@ function loadRowVariants(sel, rowId) {
     </div>
   `).join('');
 }
-window.addStockItemRow  = addStockItemRow;
-window.loadRowVariants  = loadRowVariants;
+window.addStockItemRow = addStockItemRow;
 
 function closeAddStockModal() {
   document.getElementById('addStockModalOverlay')?.classList.remove('open');
@@ -1595,10 +1754,10 @@ async function submitAddStock(e) {
   const items = [];
   let hasError = false;
   rows.forEach(function(row) {
-    const productSel = row.querySelector('.add-stock-product');
-    const qtySel     = row.querySelector('.add-stock-qty');
-    const productId  = productSel?.value;
-    const qty        = parseInt(qtySel?.value || '0');
+    const hiddenInput = row.querySelector('input[type="hidden"]');
+    const qtySel      = row.querySelector('.add-stock-qty');
+    const productId   = hiddenInput?.value;
+    const qty         = parseInt(qtySel?.value || '0');
 
     if (!productId || qty <= 0) { hasError = true; return; }
 
@@ -1665,14 +1824,17 @@ async function openTransferModal() {
   if (!allProducts.length) await loadProducts();
   if (!allBranches.length) await loadBranches();
 
-  const prodSel = document.getElementById('transferProduct');
-  if (prodSel) prodSel.innerHTML = '<option value="">Select product</option>' +
-    allProducts.map(p => {
-      const branchStockLabel = p.branch_stock?.length
-        ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' | ')
-        : `Stock: ${p.quantity}`;
-      return `<option value="${p.product_id}">${p.product_name} (${branchStockLabel})</option>`;
-    }).join('');
+  // Replace product select with autocomplete
+  const prodWrap = document.getElementById('transferProductWrap');
+  if (prodWrap) {
+    prodWrap.innerHTML = productAcHTML('transferProductInput', 'transferProduct');
+    buildProductAutocomplete(prodWrap, {
+      inputId:  'transferProductInput',
+      hiddenId: 'transferProduct',
+      listId:   'transferProductList',
+      onSelect: (p) => loadTransferVariants(p ? p.product_id : ''),
+    });
+  }
 
   const opts = '<option value="">Select branch</option>' +
     allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
@@ -1690,6 +1852,9 @@ function closeTransferModal() {
   document.getElementById('transferModal')?.classList.remove('open');
   document.getElementById('transferForm')?.reset();
   const tvw = document.getElementById('transferVariantWrap'); if (tvw) tvw.style.display = 'none';
+  // Reset autocomplete
+  const prodWrap = document.getElementById('transferProductWrap');
+  if (prodWrap?._acClear) prodWrap._acClear();
 }
 
 
@@ -1790,14 +1955,17 @@ async function openAdjustModal() {
   if (!allProducts.length) await loadProducts();
   if (!allBranches.length) await loadBranches();
 
-  const sel = document.getElementById('adjustProduct');
-  if (sel) sel.innerHTML = '<option value="">Select product</option>' +
-    allProducts.map(p => {
-      const branchStockLabel = p.branch_stock?.length
-        ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' | ')
-        : `Stock: ${p.quantity}`;
-      return `<option value="${p.product_id}">${p.product_name} (${branchStockLabel})</option>`;
-    }).join('');
+  // Replace product select with autocomplete
+  const prodWrap = document.getElementById('adjustProductWrap');
+  if (prodWrap) {
+    prodWrap.innerHTML = productAcHTML('adjustProductInput', 'adjustProduct');
+    buildProductAutocomplete(prodWrap, {
+      inputId:  'adjustProductInput',
+      hiddenId: 'adjustProduct',
+      listId:   'adjustProductList',
+      onSelect: (p) => loadAdjustVariants(p ? p.product_id : '')
+    });
+  }
 
   const branchSel = document.getElementById('adjustBranch');
   if (branchSel) branchSel.innerHTML = '<option value="">Select branch</option>' +
@@ -1813,6 +1981,9 @@ function closeAdjustModal() {
   document.getElementById('adjustModal')?.classList.remove('open');
   document.getElementById('adjustForm')?.reset();
   const avw = document.getElementById('adjustVariantWrap'); if (avw) avw.style.display = 'none';
+  // Reset autocomplete
+  const prodWrap = document.getElementById('adjustProductWrap');
+  if (prodWrap?._acClear) prodWrap._acClear();
 }
 
 async function submitAdjust(e) {

@@ -491,3 +491,28 @@
 ::-webkit-scrollbar-corner {
   background: transparent;
 }
+/* ─── Product Autocomplete (shared with admin modals) ─── */
+.ac-item:hover { background: var(--hover); }
+.ac-item:last-child { border-bottom: none !important; }
+
+/* ─── Search Button (inside .search-wrap / .pos-search-wrap) ─── */
+.search-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  padding: 5px 12px;
+  background: var(--g-600);
+  color: #ffffff;
+  border: none;
+  border-radius: 6px;
+  font-family: 'Sora', sans-serif;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background var(--transition);
+  white-space: nowrap;
+}
+.search-btn:hover { background: var(--g-700); }
+.search-btn svg { width: 13px; height: 13px; stroke: currentColor; }

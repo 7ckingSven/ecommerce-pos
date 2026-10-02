@@ -5,6 +5,8 @@ let staffInvPage          = 1;
 let staffHistoryTypeFilterVal = '';
 let staffHistoryPage = 1;
 let allInvHistory    = [];
+let staffStockSearchVal = '';
+let historySearchVal = '';
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -1010,7 +1012,8 @@ function filterStaffHistoryType(val) {
 window.filterStaffHistoryType = filterStaffHistoryType;
 
 function renderInvHistory(data) {
-  allInvHistory = data;
+  // Only update master when no filters are active (called from loadInventory)
+  if (!staffHistoryTypeFilterVal && !historySearchVal) allInvHistory = data;
   const filteredHist = staffHistoryTypeFilterVal
     ? data.filter(i => getStaffMovementType(i) === staffHistoryTypeFilterVal)
     : data;
@@ -1209,6 +1212,29 @@ function filterInventorySearch(q) {
   );
   renderInvProducts(filtered);
 }
+
+function filterHistorySearch(q) {
+  historySearchVal = (q || '').toLowerCase().trim();
+  staffHistoryPage = 1;
+  const base = historySearchVal
+    ? allInvHistory.filter(i =>
+        (i.product?.product_name || '').toLowerCase().includes(historySearchVal) ||
+        (i.note || '').toLowerCase().includes(historySearchVal)
+      )
+    : allInvHistory;
+  renderInvHistory(base);
+}
+window.filterHistorySearch = filterHistorySearch;
+
+function filterStaffStockSearch(q) {
+  staffStockSearchVal = (q || '').toLowerCase().trim();
+  staffInvPage = 1;
+  const filtered = staffStockSearchVal
+    ? invProducts.filter(p => p.product_name.toLowerCase().includes(staffStockSearchVal))
+    : invProducts;
+  renderInvProducts(filtered);
+}
+window.filterStaffStockSearch = filterStaffStockSearch;
 
 function filterStaffInventoryType(type) {
   if (type === 'low_stock') {
