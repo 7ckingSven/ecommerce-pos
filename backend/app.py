@@ -1020,14 +1020,18 @@ def api_add_to_cart():
     try:
         existing = supabase.table('cart').select('*').eq('customer_id', customer_id).eq('product_id', product_id).eq('status', 'active').execute()
 
-        if existing.data:
-            cart_id      = existing.data[0]['cart_id']
-            new_quantity = existing.data[0]['quantity'] + quantity
+        # Find a row whose selected_options exactly match — different variants are separate cart items
+        matched = next(
+            (row for row in (existing.data or []) if (row.get('selected_options') or {}) == (selected_options or {})),
+            None
+        )
+
+        if matched:
+            new_quantity = matched['quantity'] + quantity
             res = supabase.table('cart').update({
-                'quantity':         new_quantity,
-                'selected_options': selected_options,
-                'branch_id':        branch_id,
-            }).eq('cart_id', cart_id).execute()
+                'quantity':  new_quantity,
+                'branch_id': branch_id,
+            }).eq('cart_id', matched['cart_id']).execute()
         else:
             res = supabase.table('cart').insert({
                 'customer_id':      customer_id,
