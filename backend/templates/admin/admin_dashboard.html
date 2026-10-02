@@ -8,6 +8,7 @@
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
@@ -589,11 +590,20 @@
           <span style="font-size:12px;color:var(--text-muted);">to</span>
           <input type="date" id="salesDateTo" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applySalesDateRange()"/>
 
+          <!-- Branch Filter -->
+          <select class="filter-select" id="salesBranchFilter" onchange="applySalesBranchFilter(this.value)" style="min-width:150px;">
+            <option value="all">All Branches</option>
+          </select>
+
           <!-- Reset -->
           <button class="btn btn-cancel" onclick="resetSalesFilter()" style="font-size:12px;padding:6px 12px;">Reset</button>
           <button class="btn btn-outline-green" onclick="printSalesReport()" style="font-size:12px;padding:6px 12px;display:flex;align-items:center;gap:6px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
             Print / PDF
+          </button>
+          <button class="btn btn-outline-green" onclick="exportSalesExcel()" style="font-size:12px;padding:6px 12px;display:flex;align-items:center;gap:6px;background:rgba(34,197,94,0.08);">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+            Export Excel
           </button>
         </div>
         <div id="salesFilterLabel" style="font-size:12px;color:var(--text-muted);font-style:italic;"></div>

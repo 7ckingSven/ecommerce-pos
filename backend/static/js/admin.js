@@ -2448,7 +2448,11 @@ let branchChartInst  = null;
 let allSalesOrders = []; // Store all orders for filtering
 
 function filterSalesOrders(orders) {
-  const completed = orders.filter(o => o.status === 'completed');
+  let completed = orders.filter(o => o.status === 'completed');
+  // Apply branch filter
+  if (currentSalesBranchFilter && currentSalesBranchFilter !== 'all') {
+    completed = completed.filter(o => o.branch_id === currentSalesBranchFilter);
+  }
   renderSalesData(completed, orders);
 }
 
@@ -2534,12 +2538,21 @@ function applySalesDateRange() {
   filterSalesOrders(filtered);
 }
 
+let currentSalesBranchFilter = 'all';
+
+function applySalesBranchFilter(val) {
+  currentSalesBranchFilter = val;
+  filterSalesOrders(allSalesOrders);
+}
+
 function resetSalesFilter() {
-  document.getElementById('salesQuickFilter').value  = 'all';
-  document.getElementById('salesMonthFilter').value  = '';
-  document.getElementById('salesDateFrom').value      = '';
-  document.getElementById('salesDateTo').value        = '';
+  document.getElementById('salesQuickFilter').value   = 'all';
+  document.getElementById('salesMonthFilter').value   = '';
+  document.getElementById('salesDateFrom').value       = '';
+  document.getElementById('salesDateTo').value         = '';
+  document.getElementById('salesBranchFilter').value  = 'all';
   document.getElementById('salesFilterLabel').textContent = '';
+  currentSalesBranchFilter = 'all';
   filterSalesOrders(allSalesOrders);
 }
 
@@ -2849,6 +2862,95 @@ function printSalesReport() {
 }
 window.printSalesReport = printSalesReport;
 
+// ─── Export Sales Report as Excel ─────────────────────────────────────────
+function exportSalesExcel() {
+  if (typeof XLSX === 'undefined') {
+    alert('Excel library not loaded. Please refresh and try again.'); return;
+  }
+
+  const filterLabel = document.getElementById('salesFilterLabel')?.textContent || 'All Time';
+  const branchSel   = document.getElementById('salesBranchFilter');
+  const branchLabel = branchSel?.selectedOptions[0]?.text || 'All Branches';
+  const now         = new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric' });
+
+  // ── Sheet 1: Sales Summary ──────────────────────────
+  const summaryData = [
+    ['TEFC E-Commerce — Sales Report'],
+    ['Triple E & Fiel Collince General Merchandise'],
+    ['Generated:', now],
+    ['Filter Period:', filterLabel || 'All Time'],
+    ['Branch:', branchLabel],
+    [],
+    ['SALES OVERVIEW'],
+    ['Metric', 'Value'],
+    ['Total Revenue',  document.getElementById('salesTotal')?.textContent  || ''],
+    ['Online Sales',   document.getElementById('salesOnline')?.textContent || ''],
+    ['Walk-in Sales',  document.getElementById('salesWalkin')?.textContent || ''],
+    ['Total Customers',document.getElementById('salesCustomers')?.textContent || ''],
+    [],
+    ['BRANCH BREAKDOWN'],
+    ['Branch', 'Revenue', 'Total Orders', 'Walk-in', 'Online'],
+    [
+      'Triple E',
+      document.getElementById('branchTE_revenue')?.textContent || '',
+      document.getElementById('branchTE_orders')?.textContent  || '',
+      document.getElementById('branchTE_walkin')?.textContent  || '',
+      document.getElementById('branchTE_online')?.textContent  || '',
+    ],
+    [
+      'Fiel Collince',
+      document.getElementById('branchFC_revenue')?.textContent || '',
+      document.getElementById('branchFC_orders')?.textContent  || '',
+      document.getElementById('branchFC_walkin')?.textContent  || '',
+      document.getElementById('branchFC_online')?.textContent  || '',
+    ],
+  ];
+
+  // ── Sheet 2: Top Products ───────────────────────────
+  const topRows   = [];
+  const topTbody  = document.getElementById('topProductsBody');
+  if (topTbody) {
+    topRows.push(['Product', 'Units Sold', 'Revenue']);
+    topTbody.querySelectorAll('tr').forEach(tr => {
+      const cells = tr.querySelectorAll('td');
+      if (cells.length >= 3) topRows.push([cells[0].textContent, cells[1].textContent, cells[2].textContent]);
+    });
+  }
+
+  // ── Sheet 3: Least Selling ──────────────────────────
+  const leastRows  = [];
+  const leastTbody = document.getElementById('leastProductsBody');
+  if (leastTbody) {
+    leastRows.push(['Product', 'Units Sold', 'Revenue']);
+    leastTbody.querySelectorAll('tr').forEach(tr => {
+      const cells = tr.querySelectorAll('td');
+      if (cells.length >= 3) leastRows.push([cells[0].textContent, cells[1].textContent, cells[2].textContent]);
+    });
+  }
+
+  // ── Sheet 4: Payment Breakdown ──────────────────────
+  const payRows  = [];
+  const payTbody = document.getElementById('paymentBreakdownBody');
+  if (payTbody) {
+    payRows.push(['Payment Method', 'Transactions', 'Total Amount']);
+    payTbody.querySelectorAll('tr').forEach(tr => {
+      const cells = tr.querySelectorAll('td');
+      if (cells.length >= 3) payRows.push([cells[0].textContent.trim(), cells[1].textContent, cells[2].textContent]);
+    });
+  }
+
+  // ── Build workbook ──────────────────────────────────
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(summaryData),   'Summary');
+  if (topRows.length)   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(topRows),   'Top Products');
+  if (leastRows.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(leastRows), 'Least Selling');
+  if (payRows.length)   XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(payRows),   'Payment Breakdown');
+
+  const fileName = `TEFC_Sales_Report_${new Date().toISOString().slice(0,10)}.xlsx`;
+  XLSX.writeFile(wb, fileName);
+}
+window.exportSalesExcel = exportSalesExcel;
+
 async function loadSales() {
   try {
     const [orders, customers] = await Promise.all([
@@ -2858,6 +2960,14 @@ async function loadSales() {
 
     allSalesOrders = orders;
     document.getElementById('salesCustomers').textContent = customers.length;
+
+    // Populate branch filter dropdown from allBranches
+    const branchSel = document.getElementById('salesBranchFilter');
+    if (branchSel && allBranches.length) {
+      branchSel.innerHTML = '<option value="all">All Branches</option>' +
+        allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+      branchSel.value = currentSalesBranchFilter;
+    }
 
     // Default: show all completed orders
     filterSalesOrders(allSalesOrders);
