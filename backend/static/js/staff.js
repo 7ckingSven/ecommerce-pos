@@ -465,8 +465,7 @@ function renderPosProducts(products) {
   }).join('');
 }
 
-function addToOrder(productId, name, price, maxStock, selectedOptions = {}) {
-  const keyId   = productId + JSON.stringify(selectedOptions);
+function addToOrder(productId, name, price, maxStock, selectedOptions = {}, discountMeta = {}) {
   const existing = orderItems.find(i => i.product_id === productId && JSON.stringify(i.selected_options||{}) === JSON.stringify(selectedOptions));
   if (existing) {
     if (existing.quantity >= maxStock) {
@@ -475,7 +474,17 @@ function addToOrder(productId, name, price, maxStock, selectedOptions = {}) {
     }
     existing.quantity++;
   } else {
-    orderItems.push({ product_id: productId, name, price, quantity: 1, max: maxStock, selected_options: selectedOptions });
+    orderItems.push({
+      product_id:     productId,
+      name,
+      price,
+      quantity:       1,
+      max:            maxStock,
+      selected_options: selectedOptions,
+      original_price: discountMeta.original_price || null,
+      discount_name:  discountMeta.discount_name  || null,
+      discount_pct:   discountMeta.discount_pct   || null,
+    });
   }
   renderOrderItems();
   updateTotal();
@@ -546,7 +555,11 @@ function selectPosProduct(productId) {
 
   const groups = p.option_groups || [];
   if (!groups.length) {
-    addToOrder(p.product_id, p.product_name, effectivePrice, p.quantity, {});
+    addToOrder(p.product_id, p.product_name, effectivePrice, p.quantity, {}, {
+      original_price: disc ? p.price : null,
+      discount_name:  disc ? disc.discount_name : null,
+      discount_pct:   disc ? disc.percentage    : null,
+    });
     return;
   }
 
@@ -654,12 +667,18 @@ async function confirmPosVariant() {
   } catch (e) {}
 
   const variantLabel = Object.entries(posSelectedVariants).map(([k,v]) => `${k}: ${v}`).join(', ');
+  const disc2 = posCurrentProduct.discount;
   addToOrder(
     posCurrentProduct.product_id,
     `${posCurrentProduct.product_name} (${variantLabel})`,
     posCurrentProduct.effectivePrice,
     availableStock || posCurrentProduct.quantity,
-    { ...posSelectedVariants }
+    { ...posSelectedVariants },
+    {
+      original_price: disc2 ? posCurrentProduct.price : null,
+      discount_name:  disc2 ? disc2.discount_name     : null,
+      discount_pct:   disc2 ? disc2.percentage        : null,
+    }
   );
   posSelectedVariants = {};
   closeGenericModal();
@@ -677,7 +696,6 @@ function updateTotal() {
 }
 
 function clearOrder() {
-
   orderItems = [];
   renderOrderItems();
   updateTotal();
@@ -685,6 +703,14 @@ function clearOrder() {
   document.getElementById('posCashReceived').value = '';
   document.getElementById('posChange').value        = '';
   document.getElementById('posGcashRef').value      = '';
+
+  // Reset payment method back to default (walk_in_cash)
+  selectedPayment = 'walk_in_cash';
+  document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
+  const defaultBtn = document.querySelector('.pos-pay-btn[onclick*="walk_in_cash"]');
+  if (defaultBtn) defaultBtn.classList.add('active');
+  document.getElementById('posRefNo').style.display     = 'none';
+  document.getElementById('posCashInput').style.display = 'flex';
 }
 
 function selectPayment(method, el) {
@@ -771,6 +797,7 @@ async function processOrder() {
       const receiptRefNo    = document.getElementById('posGcashRef').value;
       const receiptCustomer = document.getElementById('posCustomer')?.value?.trim() || '';
       setButtonLoading(processBtn, false);
+      clearOrder();
       loadPosProducts();
       loadOrders();
       loadSummary();
@@ -829,11 +856,25 @@ function showReceipt(data, items, received, payment, refNo, customerName = '') {
     </div>
     <hr class="receipt-divider"/>
     <div style="margin-bottom:0.5rem;">
-      ${items.map(i => `
+      ${items.map(i => {
+        const hasDiscount = i.original_price && i.original_price > i.price;
+        const origSubtotal = (i.original_price || i.price) * i.quantity;
+        const discSubtotal = i.price * i.quantity;
+        const discAmt      = origSubtotal - discSubtotal;
+        return `
         <div class="receipt-row">
           <span>${i.name} x${i.quantity}</span>
-          <span>${peso(i.price * i.quantity)}</span>
-        </div>`).join('')}
+          <span>${hasDiscount
+            ? `<span style="text-decoration:line-through;color:var(--text-muted);font-size:10px;margin-right:4px;">${peso(origSubtotal)}</span>${peso(discSubtotal)}`
+            : peso(discSubtotal)
+          }</span>
+        </div>
+        ${hasDiscount ? `
+        <div class="receipt-row" style="font-size:10px;color:var(--g-400);padding-left:8px;">
+          <span>${i.discount_name || 'Discount'} (−${i.discount_pct || 0}%)</span>
+          <span>−${peso(discAmt)}</span>
+        </div>` : ''}`;
+      }).join('')}
     </div>
     <hr class="receipt-divider"/>
     <div class="receipt-row">

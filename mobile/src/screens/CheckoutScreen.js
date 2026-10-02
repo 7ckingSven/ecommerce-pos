@@ -300,8 +300,7 @@ export default function CheckoutScreen({ route, navigation }) {
                 gcashMethod === 'details' ? refNo.trim() : '',
                 branchId || cartItems[0]?.branch_id || null,
                 shippingFee,
-                address,
-                addressNote,
+                address + (addressNote ? ' | ' + addressNote : ''),
                 gcashMethod === 'details' ? senderNo.trim() : '',
                 gcashMethod === 'image'   ? receiptImage   : null
               );
@@ -459,7 +458,17 @@ export default function CheckoutScreen({ route, navigation }) {
             <TouchableOpacity
               key={m.id}
               style={[styles.payMethod, payment === m.id && styles.payMethodActive]}
-              onPress={() => setPayment(m.id)}
+              onPress={() => {
+                setPayment(m.id);
+                if (m.id !== 'gcash') {
+                  setRefNo('');
+                  setSenderNo('');
+                  setReceiptImage(null);
+                  setRefNoError('');
+                  setSenderError('');
+                  setGcashMethod('details');
+                }
+              }}
             >
               <View style={[styles.payIcon, payment === m.id && styles.payIconActive]}>
                 <Feather name={m.icon} size={20} color={payment === m.id ? COLORS.white : COLORS.textMuted}/>
