@@ -1089,6 +1089,21 @@ window.confirmProductToggle    = confirmProductToggle;
 async function submitProduct(e) {
   e.preventDefault();
   const submitBtn = e.submitter || document.querySelector('#productForm button[type="submit"]');
+
+  // ── Validation ─────────────────────────────────────────
+  const pName     = document.getElementById('pName').value.trim();
+  const pBrand    = document.getElementById('pBrand').value.trim();
+  const pCategory = document.getElementById('pCategory').value;
+  const pPrice    = parseFloat(document.getElementById('pPrice').value);
+  const pStatus   = document.getElementById('pStatus').value;
+
+  if (!pName)                          { showToast('Product name is required.', 'error'); return; }
+  if (!pBrand)                         { showToast('Brand is required.', 'error'); return; }
+  if (!pCategory)                      { showToast('Please select a category.', 'error'); return; }
+  if (isNaN(pPrice) || pPrice <= 0)   { showToast('Price must be greater than 0.', 'error'); return; }
+  if (!pStatus)                        { showToast('Please select a status.', 'error'); return; }
+  // ───────────────────────────────────────────────────────
+
   setButtonLoading(submitBtn, true);
   const id       = document.getElementById('productId').value;
   const formData = new FormData();
@@ -3056,16 +3071,29 @@ async function deleteDiscount(id, name) {
 async function submitDiscount(e) {
   e.preventDefault();
   const discBtn = e.submitter || document.querySelector('#discountForm button[type="submit"]');
-  setButtonLoading(discBtn, true);
   const id   = document.getElementById('discountId').value;
   const startsAtVal = document.getElementById('dStartsAt')?.value;
   const endsAtVal   = document.getElementById('dEndsAt')?.value;
+
+  // ── Validation ─────────────────────────────────────────
+  const dName       = document.getElementById('dName').value.trim();
+  const dPercentage = parseFloat(document.getElementById('dPercentage').value);
+
+  if (!dName)                                    { showToast('Discount name is required.', 'error'); return; }
+  if (isNaN(dPercentage) || dPercentage <= 0)   { showToast('Percentage must be greater than 0.', 'error'); return; }
+  if (dPercentage > 100)                         { showToast('Percentage cannot exceed 100.', 'error'); return; }
+  if (startsAtVal && endsAtVal && new Date(endsAtVal) <= new Date(startsAtVal)) {
+    showToast('End date must be after the start date.', 'error'); return;
+  }
+  // ───────────────────────────────────────────────────────
+
   const data = {
-    discount_name: document.getElementById('dName').value.trim(),
-    percentage:    parseFloat(document.getElementById('dPercentage').value),
+    discount_name: dName,
+    percentage:    dPercentage,
     starts_at:     startsAtVal ? new Date(startsAtVal).toISOString() : null,
     ends_at:       endsAtVal   ? new Date(endsAtVal).toISOString()   : null,
   };
+  setButtonLoading(discBtn, true);
   try {
     const url    = id ? `/api/admin/discounts/${id}` : '/api/admin/discounts';
     const method = id ? 'PUT' : 'POST';
@@ -3383,6 +3411,21 @@ async function submitUser(e) {
   const id  = document.getElementById('userId').value;
   const btn = document.getElementById('userSubmitBtn');
 
+  // ── Validate required fields ──────────────────────────
+  const fname    = document.getElementById('uFname').value.trim();
+  const lname    = document.getElementById('uLname').value.trim();
+  const username = document.getElementById('uUsername').value.trim();
+  const email    = document.getElementById('uEmail').value.trim();
+  const role     = document.getElementById('uRole').value;
+
+  if (!fname)    { showToast('First name is required.', 'error'); return; }
+  if (!lname)    { showToast('Last name is required.', 'error'); return; }
+  if (!username) { showToast('Username is required.', 'error'); return; }
+  if (/\s/.test(username)) { showToast('Username cannot contain spaces.', 'error'); return; }
+  if (!email)    { showToast('Email address is required.', 'error'); return; }
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email address.', 'error'); return; }
+  if (!role)     { showToast('Please select a role.', 'error'); return; }
+
   // ── Validate phone
   const phone = document.getElementById('uPhone').value;
   if (phone && !/^09[0-9]{9}$/.test(phone)) {
@@ -3398,10 +3441,7 @@ async function submitUser(e) {
   }
 
   // ── Confirm dialog
-  const fname    = document.getElementById('uFname').value;
-  const lname    = document.getElementById('uLname').value;
-  const username = document.getElementById('uUsername').value;
-  const action   = id ? 'update' : 'add';
+  const action = id ? 'update' : 'add';
 
   const confirmed = await showConfirmDialog(
     id ? 'Confirm Update Staff' : 'Confirm Add Staff',
@@ -3416,10 +3456,10 @@ async function submitUser(e) {
     fname:     fname,
     mi:        document.getElementById('uMi').value,
     lname:     lname,
-    email:     document.getElementById('uEmail').value,
+    email:     email,
     phone:     phone,
     username:  username,
-    role:      document.getElementById('uRole').value,
+    role:      role,
     password:  password,
     branch_id: document.getElementById('uBranch').value || null,
   };
