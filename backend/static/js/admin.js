@@ -6,7 +6,8 @@ let inventoryTypeFilterVal = '';
 let inventoryBranchFilter  = '';
 let branchStockPage   = 1;
 let allBranchProducts = [];
-let branchStockSearchVal = '';
+let branchStockSearchVal  = '';
+let branchStockLevelVal   = '';
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -508,18 +509,25 @@ async function loadOverview() {
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
       : Number(p.quantity);
 
-    // Per-branch stock checks — detect issues in ANY branch
-    const hasAnyBranchLow  = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
-    const hasAnyBranchZero = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0);
+    // Per-branch stock checks — two-tier threshold
+    // Critical: any branch has 1–5 units
+    // Low Stock: any branch has 6–10 units (but NOT critical)
+    const hasAnyBranchCritical = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5);
+    const hasAnyBranchLow      = p => !hasAnyBranchCritical(p) && p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+    const hasAnyBranchZero     = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0);
 
-    const lowStock   = activeProducts.filter(p => hasAnyBranchLow(p));
-    const outOfStock = activeProducts.filter(p => hasAnyBranchZero(p));
-    document.getElementById('statLowStock').textContent    = lowStock.length;
+    const criticalStock = activeProducts.filter(p => hasAnyBranchCritical(p));
+    const lowStock      = activeProducts.filter(p => hasAnyBranchLow(p));
+    const outOfStock    = activeProducts.filter(p => hasAnyBranchZero(p));
 
-    // Update inventory nav badge (low stock warning)
+    document.getElementById('statLowStock').textContent = lowStock.length;
+    const critEl = document.getElementById('statCriticalStock');
+    if (critEl) critEl.textContent = criticalStock.length;
+
+    // Update inventory nav badge (critical + low stock warning)
     const invBadge = document.getElementById('invLowStockBadge');
     if (invBadge) {
-      const totalLow = lowStock.length + outOfStock.length;
+      const totalLow = criticalStock.length + lowStock.length + outOfStock.length;
       invBadge.textContent   = totalLow > 99 ? '99+' : totalLow;
       invBadge.style.display = totalLow > 0 ? 'inline-block' : 'none';
     }
@@ -579,19 +587,28 @@ async function loadOverview() {
           </tr>`).join('')
       : '<tr><td colspan="5" class="table-empty">No orders yet</td></tr>';
 
-    // ── Low Stock Alert table ───────────────────────────
-    document.getElementById('lowStockBody').innerHTML = lowStock.length
-      ? lowStock.map(p => {
+    // ── Stock Alert table (Critical first, then Low Stock) ─
+    const alertProducts = [
+      ...criticalStock.map(p => ({ ...p, _alertLevel: 'critical' })),
+      ...lowStock.map(p => ({ ...p, _alertLevel: 'low' })),
+    ];
+    document.getElementById('lowStockBody').innerHTML = alertProducts.length
+      ? alertProducts.map(p => {
           const branchBreakdown = p.branch_stock?.length
             ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' / ')
             : `${getTotal(p)}`;
+          const isCritical = p._alertLevel === 'critical';
+          const levelBadge = isCritical
+            ? '<span style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:999px;font-size:11px;padding:2px 8px;font-weight:600;">🔴 Critical</span>'
+            : '<span style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:11px;padding:2px 8px;font-weight:600;">🟡 Low Stock</span>';
           return `<tr>
             <td>${p.product_name}</td>
             <td>${p.category}</td>
-            <td><span style="color:#ef4444;font-weight:600;">${branchBreakdown}</span></td>
+            <td><span style="color:${isCritical ? '#ef4444' : '#f59e0b'};font-weight:600;">${branchBreakdown}</span></td>
+            <td>${levelBadge}</td>
           </tr>`;
         }).join('')
-      : '<tr><td colspan="3" class="table-empty">All products have sufficient stock ✓</td></tr>';
+      : '<tr><td colspan="4" class="table-empty">All products have sufficient stock ✓</td></tr>';
 
     // ── Top Selling Products table ──────────────────────
     const sorted = [...activeProducts].sort((a, b) => Number(b.total_sold || 0) - Number(a.total_sold || 0));
@@ -1185,20 +1202,28 @@ function updateBranchStockSummary(products) {
   var html = '<div class="branch-stock-grid">';
   Object.keys(branchMap).forEach(function(branch) {
     var branchId  = branchMap[branch].branch_id;
-    var allItems  = branchStockSearchVal
-      ? branchMap[branch].items.filter(i => i.product_name.toLowerCase().includes(branchStockSearchVal))
-      : branchMap[branch].items;
+    var allItems  = branchMap[branch].items.filter(i => {
+      const q = Number(i.quantity);
+      if (branchStockLevelVal === 'critical_stock' && !(q > 0 && q <= 5))  return false;
+      if (branchStockLevelVal === 'low_stock'      && !(q > 5 && q <= 10)) return false;
+      if (branchStockLevelVal === 'out_of_stock'   && q !== 0)             return false;
+      if (branchStockSearchVal && !i.product_name.toLowerCase().includes(branchStockSearchVal)) return false;
+      return true;
+    });
     var items     = allItems.slice((branchStockPage - 1) * ITEMS_PER_PAGE, branchStockPage * ITEMS_PER_PAGE);
     var rows     = items.map(function(i) {
       var imgHtml = i.image_url
         ? '<img src="' + (i.image_urls?.length ? i.image_urls[0] : i.image_url) + '" class="product-img-cell" style="width:32px;height:32px;" alt="' + i.product_name + '"/>'
         : '<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
-      var qtyClass = i.quantity === 0 ? 'out-stock' : i.quantity <= 5 ? 'low-stock' : 'in-stock';
-      var badge    = i.quantity === 0
+      const bq     = Number(i.quantity);
+      var qtyClass = bq === 0 ? 'out-stock' : bq <= 5 ? 'low-stock' : 'in-stock';
+      var badge    = bq === 0
         ? '<span class="badge badge--red">Out of Stock</span>'
-        : i.quantity <= 5
-          ? '<span class="badge badge--yellow">Low Stock</span>'
-          : '<span class="badge badge--green">In Stock</span>';
+        : bq <= 5
+          ? '<span class="badge badge--red">Critical Level</span>'
+          : bq <= 10
+            ? '<span class="badge badge--yellow">Low Stock</span>'
+            : '<span class="badge badge--green">In Stock</span>';
       var hasVariants = i.option_groups && i.option_groups.length > 0;
       var expandBtn   = hasVariants
         ? '<span class="inv-expand-btn" style="margin-left:6px;font-size:10px;color:var(--text-muted);cursor:pointer;" onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this)">▶</span>'
@@ -1232,9 +1257,14 @@ function updateBranchStockSummary(products) {
   // Pagination — use filtered count
   var maxItems = 0;
   Object.keys(branchMap).forEach(function(b) {
-    var filteredLen = branchStockSearchVal
-      ? branchMap[b].items.filter(i => i.product_name.toLowerCase().includes(branchStockSearchVal)).length
-      : branchMap[b].items.length;
+    var filteredLen = branchMap[b].items.filter(i => {
+      const q = Number(i.quantity);
+      if (branchStockLevelVal === 'critical_stock' && !(q > 0 && q <= 5))  return false;
+      if (branchStockLevelVal === 'low_stock'      && !(q > 5 && q <= 10)) return false;
+      if (branchStockLevelVal === 'out_of_stock'   && q !== 0)             return false;
+      if (branchStockSearchVal && !i.product_name.toLowerCase().includes(branchStockSearchVal)) return false;
+      return true;
+    }).length;
     if (filteredLen > maxItems) maxItems = filteredLen;
   });
   var pagerEl = document.getElementById('branchStockPagination');
@@ -1304,31 +1334,51 @@ async function loadInventory() {
     updateBranchStockSummary(products);
 
 
-    // Check low stock per branch — flag if ANY branch has low/zero stock
-    const getBranchTotal = p => p.branch_stock?.length
+    // Check low stock per branch — two-tier: critical (≤5) and low (6–10)
+    const getBranchTotal   = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
       : Number(p.quantity);
-    const hasLowBranch  = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
-    const hasZeroBranch = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0);
-    const lowStock = products.filter(p => p.status === 'active' && getBranchTotal(p) <= 10);
-    const banner   = document.getElementById('lowStockBanner');
-    const bannerText = document.getElementById('lowStockBannerText');
+    const hasCritBranch    = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5);
+    const hasLowBranch     = p => !hasCritBranch(p) && p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+    const criticalInv      = products.filter(p => p.status === 'active' && hasCritBranch(p));
+    const lowInv           = products.filter(p => p.status === 'active' && hasLowBranch(p));
+    const banner           = document.getElementById('lowStockBanner');
+    const bannerText       = document.getElementById('lowStockBannerText');
+    const bannerBtn        = document.getElementById('lowStockBannerBtn');
+    const totalAlert       = criticalInv.length + lowInv.length;
 
-    if (lowStock.length > 0 && banner) {
+    if (totalAlert > 0 && banner) {
       banner.style.display = 'flex';
-      bannerText.textContent = `⚠️ ${lowStock.length} product${lowStock.length > 1 ? 's are' : ' is'} running low on stock!`;
+      if (criticalInv.length > 0) {
+        // Critical takes priority — red banner
+        banner.style.background = 'rgba(239,68,68,0.1)';
+        banner.style.border     = '1px solid rgba(239,68,68,0.3)';
+        bannerText.style.color  = '#ef4444';
+        if (bannerBtn) bannerBtn.style.color = '#ef4444';
+        banner.querySelector('svg').style.stroke = '#ef4444';
+        bannerText.textContent = `🔴 ${criticalInv.length} product${criticalInv.length > 1 ? 's are' : ' is'} at critical stock level (≤5 units)!`
+          + (lowInv.length > 0 ? ` · ${lowInv.length} more running low.` : '');
+      } else {
+        // Only low stock — amber banner
+        banner.style.background = 'rgba(245,158,11,0.1)';
+        banner.style.border     = '1px solid rgba(245,158,11,0.3)';
+        bannerText.style.color  = '#f59e0b';
+        if (bannerBtn) bannerBtn.style.color = '#f59e0b';
+        banner.querySelector('svg').style.stroke = '#f59e0b';
+        bannerText.textContent = `🟡 ${lowInv.length} product${lowInv.length > 1 ? 's are' : ' is'} running low on stock (6–10 units).`;
+      }
 
       // Also update nav badge
       const navInv = document.getElementById('navInventory');
       if (navInv && !navInv.querySelector('.nav-badge')) {
         const badge = document.createElement('span');
         badge.className   = 'nav-badge';
-        badge.textContent = lowStock.length;
+        badge.textContent = totalAlert;
         badge.style.cssText = 'background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;';
         navInv.appendChild(badge);
       } else if (navInv) {
         const b = navInv.querySelector('.nav-badge');
-        if (b) b.textContent = lowStock.length;
+        if (b) b.textContent = totalAlert;
       }
     } else if (banner) {
       banner.style.display = 'none';
@@ -1355,33 +1405,49 @@ function getMovementType(i) {
 }
 
 async function filterInventoryType(val, el) {
-  if (val === 'low_stock') {
-    // Show products with low stock from products API
+  if (val === 'low_stock' || val === 'critical_stock') {
+    // Show products by stock level tier
     try {
       const res      = await fetch('/api/admin/products');
       const products = await res.json();
-      const getBranchTotalF = p => p.branch_stock?.length
+      const getBranchTotalF  = p => p.branch_stock?.length
         ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
         : Number(p.quantity);
-      const lowStock = products.filter(p => p.status === 'active' && getBranchTotalF(p) <= 10);
-      document.getElementById('inventoryBody').innerHTML = lowStock.length
-        ? `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#ef4444;">⚠️ Low Stock Products (≤ 10 units)</strong></td></tr>` +
-          lowStock.map(p => {
-            const total = getBranchTotalF(p);
+      const hasCritBranchF   = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5);
+      const hasLowBranchF    = p => !hasCritBranchF(p) && p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+
+      let filtered;
+      let headerHtml;
+      if (val === 'critical_stock') {
+        filtered   = products.filter(p => p.status === 'active' && hasCritBranchF(p));
+        headerHtml = `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#ef4444;">🔴 Critical Level Products (≤ 5 units) — Urgent Restock Needed</strong></td></tr>`;
+      } else {
+        // low_stock shows both tiers, critical first
+        const critical = products.filter(p => p.status === 'active' && hasCritBranchF(p));
+        const low      = products.filter(p => p.status === 'active' && hasLowBranchF(p));
+        filtered   = [...critical, ...low];
+        headerHtml = `<tr><td colspan="9" style="padding:1rem;"><strong style="color:#f59e0b;">⚠️ Stock Alert — ${critical.length} Critical (≤5) · ${low.length} Low Stock (6–10)</strong></td></tr>`;
+      }
+
+      document.getElementById('inventoryBody').innerHTML = filtered.length
+        ? headerHtml + filtered.map(p => {
+            const isCrit = hasCritBranchF(p);
+            const color  = isCrit ? '#ef4444' : '#f59e0b';
+            const bg     = isCrit ? 'rgba(239,68,68,0.05)' : 'rgba(245,158,11,0.05)';
             const branchBreakdown = p.branch_stock?.length
               ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(', ')
-              : `${total} units`;
+              : `${getBranchTotalF(p)} units`;
             return `
-            <tr style="background:rgba(239,68,68,0.05);">
+            <tr style="background:${bg};">
               <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
               <td>—</td>
-              <td colspan="2"><span style="color:#ef4444;font-weight:700;">${branchBreakdown} remaining</span></td>
+              <td colspan="2"><span style="color:${color};font-weight:700;">${branchBreakdown} remaining</span></td>
               <td>${p.category}</td>
               <td colspan="4">—</td>
             </tr>`;
           }).join('')
         : '<tr><td colspan="9" class="table-empty">✅ All products have sufficient stock</td></tr>';
-    } catch (e) { console.error('Low stock filter error:', e); }
+    } catch (e) { console.error('Stock filter error:', e); }
     return;
   }
   inventoryTypeFilterVal = val;
@@ -1492,6 +1558,13 @@ function filterBranchStock(q) {
   updateBranchStockSummary(allBranchProducts);
 }
 window.filterBranchStock = filterBranchStock;
+
+function filterBranchStockLevel(val) {
+  branchStockLevelVal = val || '';
+  branchStockPage = 1;
+  updateBranchStockSummary(allBranchProducts);
+}
+window.filterBranchStockLevel = filterBranchStockLevel;
 
 
 

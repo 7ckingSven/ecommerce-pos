@@ -1077,28 +1077,45 @@ async function loadInventory() {
       return bs ? bs.quantity : 0;
     };
 
-    // Stats — use branch stock quantity, not overall product quantity
+    // Stats — two-tier: critical (≤5) and low (6–10), using branch stock
+    const criticalCount = invProducts.filter(p => { const q = branchQty(p); return q > 0 && q <= 5; }).length;
+    const lowCount      = invProducts.filter(p => { const q = branchQty(p); return q > 5 && q <= 10; }).length;
     document.getElementById('invTotalProducts').textContent = invProducts.length;
-    document.getElementById('invLowStock').textContent      = invProducts.filter(p => { const q = branchQty(p); return q > 0 && q <= 10; }).length;
+    document.getElementById('invLowStock').textContent      = lowCount;
     document.getElementById('invOutOfStock').textContent    = invProducts.filter(p => branchQty(p) <= 0).length;
+    const critEl = document.getElementById('invCriticalStock');
+    if (critEl) critEl.textContent = criticalCount;
 
-    // Low stock banner
-    const lowCount  = invProducts.filter(p => { const q = branchQty(p); return p.status === 'active' && q > 0 && q <= 10; }).length;
+    // Stock alert banner — red for critical, amber for low stock only
     const banner    = document.getElementById('staffLowStockBanner');
     const bannerTxt = document.getElementById('staffLowStockText');
-    if (banner && lowCount > 0) {
+    const totalAlert = criticalCount + lowCount;
+    if (banner && totalAlert > 0) {
       banner.style.display = 'flex';
-      bannerTxt.textContent = `⚠️ ${lowCount} product${lowCount > 1 ? 's are' : ' is'} running low on stock!`;
+      if (criticalCount > 0) {
+        banner.style.background = 'rgba(239,68,68,0.1)';
+        banner.style.border     = '1px solid rgba(239,68,68,0.3)';
+        bannerTxt.style.color   = '#ef4444';
+        banner.querySelector('svg').style.stroke = '#ef4444';
+        bannerTxt.textContent = `🔴 ${criticalCount} product${criticalCount > 1 ? 's are' : ' is'} at critical stock level (≤5 units)!`
+          + (lowCount > 0 ? ` · ${lowCount} more running low.` : '');
+      } else {
+        banner.style.background = 'rgba(245,158,11,0.1)';
+        banner.style.border     = '1px solid rgba(245,158,11,0.3)';
+        bannerTxt.style.color   = '#f59e0b';
+        banner.querySelector('svg').style.stroke = '#f59e0b';
+        bannerTxt.textContent = `🟡 ${lowCount} product${lowCount > 1 ? 's are' : ' is'} running low on stock (6–10 units).`;
+      }
     } else if (banner) {
       banner.style.display = 'none';
     }
 
-    // Update inventory nav badge (low stock + out of stock)
+    // Update inventory nav badge (critical + low + out of stock)
     const invBadge = document.getElementById('invLowStockBadge');
     if (invBadge) {
-      const totalAlert = invProducts.filter(p => branchQty(p) <= 10).length;
-      invBadge.textContent   = totalAlert > 99 ? '99+' : totalAlert;
-      invBadge.style.display = totalAlert > 0 ? 'inline-block' : 'none';
+      const badgeCount = criticalCount + lowCount + invProducts.filter(p => branchQty(p) <= 0).length;
+      invBadge.textContent   = badgeCount > 99 ? '99+' : badgeCount;
+      invBadge.style.display = badgeCount > 0 ? 'inline-block' : 'none';
     }
 
     const oneWeekAgo = new Date();
@@ -1237,9 +1254,19 @@ function filterStaffStockSearch(q) {
 window.filterStaffStockSearch = filterStaffStockSearch;
 
 function filterStaffInventoryType(type) {
-  if (type === 'low_stock') {
-    const lowStock = invProducts.filter(p => p.quantity <= 10);
-    renderInvProducts(lowStock);
+  const bQty = p => {
+    const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+    return bs ? Number(bs.quantity) : Number(p.quantity || 0);
+  };
+  if (type === 'critical_stock') {
+    renderInvProducts(invProducts.filter(p => { const q = bQty(p); return q > 0 && q <= 5; }));
+  } else if (type === 'low_stock') {
+    // Show both tiers — critical first, then low
+    const critical = invProducts.filter(p => { const q = bQty(p); return q > 0 && q <= 5; });
+    const low      = invProducts.filter(p => { const q = bQty(p); return q > 5 && q <= 10; });
+    renderInvProducts([...critical, ...low]);
+  } else if (type === 'out_of_stock') {
+    renderInvProducts(invProducts.filter(p => bQty(p) === 0));
   } else {
     renderInvProducts(invProducts);
   }

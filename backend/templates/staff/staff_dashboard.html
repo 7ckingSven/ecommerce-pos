@@ -205,10 +205,10 @@
 
     <!-- ─── INVENTORY SECTION ──────────────────────── -->
     <section class="section" id="section-inventory">
-      <!-- Low Stock Alert Banner -->
-      <div id="staffLowStockBanner" style="display:none;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.3);border-radius:8px;padding:10px 16px;margin-bottom:1rem;display:flex;align-items:center;gap:10px;">
-        <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
-        <span id="staffLowStockText" style="font-size:13px;color:#ef4444;font-weight:500;"></span>
+      <!-- Stock Alert Banner -->
+      <div id="staffLowStockBanner" style="display:none;border-radius:8px;padding:10px 16px;margin-bottom:1rem;align-items:center;gap:10px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;flex-shrink:0;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+        <span id="staffLowStockText" style="font-size:13px;font-weight:500;"></span>
       </div>
 
 
@@ -223,7 +223,13 @@
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
           </div>
-          <div class="stat-info"><span class="stat-label">Low Stock</span><span class="stat-value" id="invLowStock">—</span><span class="stat-sub">≤ 10 units</span></div>
+          <div class="stat-info"><span class="stat-label">Low Stock</span><span class="stat-value" id="invLowStock">—</span><span class="stat-sub">6–10 units remaining</span></div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-icon stat-icon--red">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          </div>
+          <div class="stat-info"><span class="stat-label">Critical Level</span><span class="stat-value" id="invCriticalStock" style="color:#ef4444;">—</span><span class="stat-sub">≤5 units — urgent restock</span></div>
         </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--red">
@@ -240,15 +246,23 @@
       </div>
 
       <div class="card">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px;">
           <h3 class="card-title">Product Stock Levels</h3>
-          <div class="search-wrap" style="margin-left:auto;max-width:320px;">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" id="staffStockSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterStaffStockSearch(this.value)" oninput="if(!this.value) filterStaffStockSearch('')" style="font-size:12px;"/>
-            <button class="search-btn" onclick="filterStaffStockSearch(document.getElementById('staffStockSearchInput').value)">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              Search
-            </button>
+          <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+            <select class="filter-select" id="staffStockLevelFilter" onchange="filterStaffInventoryType(this.value)" style="font-size:12px;">
+              <option value="">All Stock Levels</option>
+              <option value="critical_stock">🔴 Critical Level (≤5)</option>
+              <option value="low_stock">🟡 Low Stock (6–10)</option>
+              <option value="out_of_stock">⚫ Out of Stock</option>
+            </select>
+            <div class="search-wrap" style="max-width:320px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+              <input type="text" id="staffStockSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterStaffStockSearch(this.value)" oninput="if(!this.value) filterStaffStockSearch('')" style="font-size:12px;"/>
+              <button class="search-btn" onclick="filterStaffStockSearch(document.getElementById('staffStockSearchInput').value)">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                Search
+              </button>
+            </div>
           </div>
         </div>
         <div class="table-wrap">
