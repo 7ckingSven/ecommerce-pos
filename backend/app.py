@@ -2254,6 +2254,19 @@ def admin_delete_product(product_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/products/<product_id>/status', methods=['PATCH'])
+@admin_required
+def admin_update_product_status(product_id):
+    try:
+        data   = request.get_json()
+        status = data.get('status', '').strip()
+        if status not in ('active', 'inactive'):
+            return jsonify({'error': 'Invalid status. Must be "active" or "inactive".'}), 400
+        supabase.table('product').update({'status': status}).eq('product_id', product_id).execute()
+        return jsonify({'message': f'Product {status}.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ─── Inventory ────────────────────────────────────────
 
 @app.route('/api/admin/inventory', methods=['GET'])

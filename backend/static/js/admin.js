@@ -788,11 +788,16 @@ function renderProducts(products) {
             <td>${badge(p.status)}</td>
             <td>
               <div style="display:flex;gap:6px;">
-                <button class="btn-icon" onclick="editProduct('${p.product_id}')" title="Edit">
+                <button class="btn-icon" onclick="event.stopPropagation();editProduct('${p.product_id}')" title="Edit">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
-                <button class="btn-icon btn-icon--red" onclick="deleteProduct('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}')" title="Deactivate">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
+                <button class="btn-icon"
+                  ${(() => { const totalStock = (p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0); const noStock = totalStock === 0; return noStock ? 'disabled title="No stock available" style="opacity:0.35;cursor:not-allowed;"' : `style="color:${p.status === 'active' ? '#ef4444' : '#16a34a'}" title="${p.status === 'active' ? 'Deactivate' : 'Activate'}"`; })()}
+                  onclick="event.stopPropagation();openProductToggleModal('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', '${p.status}', ${(p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0)})">
+                  ${p.status === 'active'
+                    ? `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>`
+                    : `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="20 6 9 17 4 12"/></svg>`
+                  }
                 </button>
               </div>
             </td>
@@ -1021,14 +1026,63 @@ async function editProduct(id) {
   if (product) openProductModal(product);
 }
 
-async function deleteProduct(id, name) {
-  if (!confirm(`Deactivate "${name}"?`)) return;
+// ─── Product Toggle Modal ─────────────────────────────
+let _toggleProductId     = null;
+let _toggleProductStatus = null;
+
+function openProductToggleModal(id, name, status, totalStock) {
+  if (totalStock === 0) return;
+  _toggleProductId     = id;
+  _toggleProductStatus = status;
+  const isActive = status === 'active';
+  document.getElementById('productToggleModalTitle').textContent =
+    isActive ? 'Deactivate Product' : 'Activate Product';
+  document.getElementById('productToggleModalDesc').innerHTML = isActive
+    ? `Deactivate <strong>${name}</strong>? This product will no longer be visible to staff in POS and inventory.`
+    : `Activate <strong>${name}</strong>? This product will become visible in POS and inventory.`;
+  const btn = document.getElementById('productToggleConfirmBtn');
+  btn.textContent = isActive ? 'Deactivate' : 'Activate';
+  btn.style.background   = isActive ? '#ef4444' : '#16a34a';
+  btn.style.color        = '#fff';
+  btn.style.borderColor  = isActive ? '#ef4444' : '#16a34a';
+  document.getElementById('productToggleModalOverlay').classList.add('open');
+  document.getElementById('productToggleModal').classList.add('open');
+}
+
+function closeProductToggleModal() {
+  document.getElementById('productToggleModalOverlay').classList.remove('open');
+  document.getElementById('productToggleModal').classList.remove('open');
+  _toggleProductId = _toggleProductStatus = null;
+}
+
+async function confirmProductToggle() {
+  if (!_toggleProductId) return;
+  const isActive = _toggleProductStatus === 'active';
   try {
-    const res = await fetch(`/api/admin/products/${id}`, { method: 'DELETE' });
-    if (res.ok) { showToast('Product deactivated.'); loadProducts(); }
-    else showToast('Failed to deactivate product.', 'error');
+    let res;
+    if (isActive) {
+      // Deactivate — existing DELETE endpoint
+      res = await fetch(`/api/admin/products/${_toggleProductId}`, { method: 'DELETE' });
+    } else {
+      // Activate — PATCH with new status
+      res = await fetch(`/api/admin/products/${_toggleProductId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'active' })
+      });
+    }
+    if (res.ok) {
+      showToast(isActive ? 'Product deactivated.' : 'Product activated.');
+      closeProductToggleModal();
+      loadProducts();
+    } else {
+      showToast(isActive ? 'Failed to deactivate product.' : 'Failed to activate product.', 'error');
+    }
   } catch (e) { showToast('Error.', 'error'); }
 }
+window.openProductToggleModal  = openProductToggleModal;
+window.closeProductToggleModal = closeProductToggleModal;
+window.confirmProductToggle    = confirmProductToggle;
 
 async function submitProduct(e) {
   e.preventDefault();
