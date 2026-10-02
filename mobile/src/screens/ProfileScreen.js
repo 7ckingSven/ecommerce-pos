@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator, TextInput,
+  ScrollView, ActivityIndicator, TextInput,
   Modal, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
@@ -140,15 +140,63 @@ export default function ProfileScreen({ navigation }) {
     const stored = await getCustomer();
     if (!stored?.customer_id) return;
 
+    // ── Personal Info Validation ──────────────────────────
+    if (editType === 'personal') {
+      if (!editForm.fname?.trim()) {
+        showAlert({ type: 'warning', title: 'Required', message: 'First name is required.' }); return;
+      }
+      if (!editForm.lname?.trim()) {
+        showAlert({ type: 'warning', title: 'Required', message: 'Last name is required.' }); return;
+      }
+      if (editForm.dob?.trim()) {
+        const dobRegex = /^\d{4}-\d{2}-\d{2}$/;
+        if (!dobRegex.test(editForm.dob.trim())) {
+          showAlert({ type: 'warning', title: 'Invalid Date', message: 'Date of birth must be in YYYY-MM-DD format (e.g. 2000-01-25).' }); return;
+        }
+        const d = new Date(editForm.dob.trim());
+        if (isNaN(d.getTime())) {
+          showAlert({ type: 'warning', title: 'Invalid Date', message: 'Please enter a valid date of birth.' }); return;
+        }
+        if (d > new Date()) {
+          showAlert({ type: 'warning', title: 'Invalid Date', message: 'Date of birth cannot be in the future.' }); return;
+        }
+      }
+    }
+
+    // ── Contact Info Validation ───────────────────────────
+    if (editType === 'contact') {
+      if (!editForm.username?.trim()) {
+        showAlert({ type: 'warning', title: 'Required', message: 'Username is required.' }); return;
+      }
+      if (/\s/.test(editForm.username.trim())) {
+        showAlert({ type: 'warning', title: 'Invalid Username', message: 'Username cannot contain spaces.' }); return;
+      }
+      if (!editForm.email?.trim()) {
+        showAlert({ type: 'warning', title: 'Required', message: 'Email address is required.' }); return;
+      }
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(editForm.email.trim())) {
+        showAlert({ type: 'warning', title: 'Invalid Email', message: 'Please enter a valid email address.' }); return;
+      }
+      if (!editForm.phone_number?.trim()) {
+        showAlert({ type: 'warning', title: 'Required', message: 'Phone number is required.' }); return;
+      }
+      const phoneClean = editForm.phone_number.trim().replace(/\D/g, '');
+      if (phoneClean.length !== 11 || !phoneClean.startsWith('09')) {
+        showAlert({ type: 'warning', title: 'Invalid Phone', message: 'Phone number must be 11 digits and start with 09.' }); return;
+      }
+    }
+
+    // ── Password Validation ───────────────────────────────
     if (editType === 'password') {
       if (!editForm.old_password || !editForm.new_password || !editForm.confirm_password) {
-        Alert.alert('Required', 'Please fill in all password fields.'); return;
+        showAlert({ type: 'warning', title: 'Required', message: 'Please fill in all password fields.' }); return;
       }
       if (editForm.new_password.length < 8) {
-        Alert.alert('Error', 'New password must be at least 8 characters.'); return;
+        showAlert({ type: 'warning', title: 'Too Short', message: 'New password must be at least 8 characters.' }); return;
       }
       if (editForm.new_password !== editForm.confirm_password) {
-        Alert.alert('Error', 'New passwords do not match.'); return;
+        showAlert({ type: 'warning', title: 'Mismatch', message: 'New passwords do not match.' }); return;
       }
     }
 
@@ -196,13 +244,13 @@ export default function ProfileScreen({ navigation }) {
         headers: { 'X-Customer-ID': stored.customer_id },
       });
 
-      Alert.alert('Success', editType === 'password' ? 'Password changed successfully!' : 'Profile updated successfully!');
+      showAlert({ type: 'success', title: 'Success', message: editType === 'password' ? 'Password changed successfully!' : 'Profile updated successfully!' });
       closeEdit();
       loadProfile(); // refresh
 
     } catch (e) {
       const msg = e?.response?.data?.error || 'Failed to save. Please try again.';
-      Alert.alert('Error', msg);
+      showAlert({ type: 'error', title: 'Error', message: msg });
     } finally {
       setSaving(false);
     }
