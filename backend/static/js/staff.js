@@ -1683,38 +1683,42 @@ let allSummaryOrders = []; // store all orders for date filtering
 
 async function loadSummary() {
   try {
-    const res    = await fetch('/api/staff/orders?limit=1000');
+    const res = await fetch('/api/staff/orders?limit=1000');
     const raw = await res.json();
     allSummaryOrders = Array.isArray(raw) ? raw : [];
 
-    // Set today's date in picker — use PH timezone
+    // Default both pickers to today
     const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-    const picker = document.getElementById('summaryDatePicker');
-    if (picker && !picker.value) picker.value = today;
+    const fromEl = document.getElementById('summaryDateFrom');
+    const toEl   = document.getElementById('summaryDateTo');
+    if (fromEl && !fromEl.value) fromEl.value = today;
+    if (toEl   && !toEl.value)   toEl.value   = today;
 
-    renderSummaryForDate(picker?.value || today);
+    renderSummaryForRange(fromEl?.value || today, toEl?.value || today);
   } catch (e) { console.error('Summary error:', e); }
 }
 
-function renderSummaryForDate(dateStr) {
-  const isToday = dateStr === new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-  const label   = isToday ? 'Today' : new Date(dateStr + 'T00:00:00').toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' });
+function renderSummaryForRange(fromStr, toStr) {
+  const today    = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+  const isSingle = fromStr === toStr;
+  const isToday  = isSingle && fromStr === today;
 
-  // Update labels
-  const summaryLabel = document.getElementById('summaryLabel');
-  const tableTitle   = document.getElementById('summaryTableTitle');
-  if (summaryLabel) summaryLabel.textContent = `${label}'s Sales`;
-  if (tableTitle)   tableTitle.textContent   = `${label}'s Transactions`;
+  const fmtDate    = d => new Date(d + 'T00:00:00').toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' });
+  const rangeLabel = isToday ? 'Today' : isSingle ? fmtDate(fromStr) : `${fmtDate(fromStr)} – ${fmtDate(toStr)}`;
 
-  const labelEl = document.getElementById('summaryDateLabel');
-  if (labelEl) labelEl.textContent = isToday ? 'Today' : `${label}`;
+  const summaryLabelEl = document.getElementById('summaryLabel');
+  const tableTitleEl   = document.getElementById('summaryTableTitle');
+  const dateRangeLbl   = document.getElementById('summaryDateLabel');
+  if (summaryLabelEl) summaryLabelEl.textContent = isToday ? "Today's Sales"        : `Sales (${rangeLabel})`;
+  if (tableTitleEl)   tableTitleEl.textContent   = isToday ? "Today's Transactions" : `Transactions (${rangeLabel})`;
+  if (dateRangeLbl)   dateRangeLbl.textContent   = rangeLabel;
 
-  // Filter orders by date — PH timezone
+  // Filter orders within range — PH timezone
   const filtered = allSummaryOrders.filter(o => {
     const raw = o.created_at || o.date || null;
     if (!raw) return false;
     const localDate = new Date(raw).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-    return localDate === dateStr;
+    return localDate >= fromStr && localDate <= toStr;
   });
 
   const allValid = filtered.filter(o => o.status !== 'cancelled');
@@ -1736,25 +1740,29 @@ function renderSummaryForDate(dateStr) {
           <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) : '—'}</td>
           <td>${badge(o.status)}</td>
         </tr>`).join('')
-    : `<tr><td colspan="7" class="table-empty">No transactions for ${label}</td></tr>`;
+    : `<tr><td colspan="7" class="table-empty">No transactions for ${rangeLabel}</td></tr>`;
 }
 
-async function loadSummaryByDate(dateStr) {
-  if (!dateStr) return;
-  // Re-fetch all orders to ensure we have data for selected date
+async function applyDateRangeFilter() {
+  const fromEl = document.getElementById('summaryDateFrom');
+  const toEl   = document.getElementById('summaryDateTo');
+  if (!fromEl?.value || !toEl?.value) return;
+  if (fromEl.value > toEl.value) toEl.value = fromEl.value;
   try {
     const res = await fetch('/api/staff/orders?limit=1000');
     const raw = await res.json();
     allSummaryOrders = Array.isArray(raw) ? raw : [];
   } catch (e) { console.error('Summary fetch error:', e); }
-  renderSummaryForDate(dateStr);
+  renderSummaryForRange(fromEl.value, toEl.value);
 }
 
 function resetSummaryDate() {
   const today  = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
-  const picker = document.getElementById('summaryDatePicker');
-  if (picker) picker.value = today;
-  renderSummaryForDate(today);
+  const fromEl = document.getElementById('summaryDateFrom');
+  const toEl   = document.getElementById('summaryDateTo');
+  if (fromEl) fromEl.value = today;
+  if (toEl)   toEl.value   = today;
+  renderSummaryForRange(today, today);
 }
 
 // ─── Init ─────────────────────────────────────────────
