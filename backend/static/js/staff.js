@@ -713,6 +713,22 @@ function clearOrder() {
   document.getElementById('posCashInput').style.display = 'flex';
 }
 
+function confirmClearOrder() {
+  if (!orderItems.length) return; // nothing to clear
+  showGenericModal(`
+    <div style="padding:1.5rem;text-align:center;">
+      <h3 style="margin:0 0 .5rem;">Clear Order?</h3>
+      <p style="margin:0 0 1.25rem;color:var(--text-muted);font-size:14px;">
+        This will remove all ${orderItems.length} item${orderItems.length !== 1 ? 's' : ''} from the current order.<br>This action cannot be undone.
+      </p>
+      <div style="display:flex;gap:.75rem;justify-content:center;">
+        <button class="btn btn-outline" onclick="closeGenericModal()">Cancel</button>
+        <button class="btn btn-solid-red" onclick="closeGenericModal();clearOrder();">Yes, Clear</button>
+      </div>
+    </div>
+  `);
+}
+
 function selectPayment(method, el) {
   selectedPayment = method;
   document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
@@ -1190,7 +1206,19 @@ function renderStaffOrders(orders) {
           <td>${o.order_item?.length || 0} item(s)</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
-          <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
+          <td>${(() => {
+            const raw = o.created_at || o.date || null;
+            if (!raw) return '—';
+            // Trim microseconds (Supabase returns 6 decimal places; JS only handles 3)
+            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+            const h = d.getUTCHours(), m = d.getUTCMinutes();
+            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+            return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
+          })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
@@ -1358,7 +1386,19 @@ function renderStaffOrders(orders) {
           <td>${o.order_item?.length || 0} item(s)</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
-          <td>${new Date(o.date).toLocaleDateString('en-PH')}</td>
+          <td>${(() => {
+            const raw = o.created_at || o.date || null;
+            if (!raw) return '—';
+            // Trim microseconds (Supabase returns 6 decimal places; JS only handles 3)
+            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+            const h = d.getUTCHours(), m = d.getUTCMinutes();
+            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+            return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
+          })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
             <select class="filter-select" style="font-size:11px;padding:4px 8px;"
