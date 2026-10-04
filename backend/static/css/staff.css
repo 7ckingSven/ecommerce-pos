@@ -15,7 +15,9 @@
   display: flex;
   flex-direction: column;
   gap: 0.75rem;
-  overflow: hidden;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden; /* clips pos-products scroll overflow — does NOT block chips because chips use z-index */
 }
 
 .pos-search-wrap {
@@ -27,6 +29,9 @@
   border-radius: var(--radius-sm);
   padding: 0 12px;
   transition: border-color 0.2s;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2;
 }
 .pos-search-wrap:focus-within { border-color: var(--g-600); }
 
@@ -34,8 +39,19 @@
 .pos-cats {
   display: flex;
   gap: 8px;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: visible;
+  padding-bottom: 6px;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 2; /* sit above pos-products so overflow:hidden on parent doesn't block pointer events */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
 }
+.pos-cats::-webkit-scrollbar { height: 4px; width: 0; }
+.pos-cats::-webkit-scrollbar-track { background: transparent; }
+.pos-cats::-webkit-scrollbar-thumb { background: var(--border); border-radius: 999px; }
 .pos-cat {
   padding: 5px 14px;
   border-radius: 999px;
@@ -48,6 +64,7 @@
   cursor: pointer;
   transition: all 0.2s;
   white-space: nowrap;
+  flex-shrink: 0;
 }
 .pos-cat:hover { border-color: var(--g-600); color: var(--g-400); }
 .pos-cat.active { background: var(--g-600); border-color: var(--g-600); color: #ffffff; }
@@ -59,6 +76,11 @@
   gap: 0.75rem;
   overflow-y: auto;
   padding-right: 4px;
+  flex: 1;
+  min-height: 0;
+  align-content: start;
+  position: relative;
+  z-index: 1; /* below chips so its overflow area doesn't intercept chip clicks */
 }
 .pos-product-card {
   background: var(--card-bg);
@@ -490,6 +512,141 @@
 
 ::-webkit-scrollbar-corner {
   background: transparent;
+}
+
+/* ─── Category chip scrollbar uses its own rules defined above ─── */
+
+/* ─── POS Discount Dropdown ─── */
+.pos-discount-wrap {
+  position: relative;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.pos-discount-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  background: var(--card-bg);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 7px 10px;
+  cursor: pointer;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  user-select: none;
+}
+.pos-discount-trigger:hover { border-color: var(--g-600); }
+.pos-discount-wrap.open .pos-discount-trigger {
+  border-color: var(--g-600);
+  box-shadow: 0 0 0 3px rgba(22,163,74,0.12);
+}
+
+.pos-discount-trigger-left {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+.pos-discount-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border-radius: 6px;
+  background: rgba(22,163,74,0.1);
+  color: var(--g-600);
+  flex-shrink: 0;
+}
+
+.pos-discount-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  font-family: 'Sora', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: color 0.2s;
+}
+
+.pos-discount-chevron {
+  width: 14px;
+  height: 14px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  transition: transform 0.2s ease;
+}
+
+.pos-discount-menu {
+  display: none;
+  position: absolute;
+  left: 1rem;
+  right: 1rem;
+  top: calc(100% - 2px);
+  background: var(--card-bg);
+  border: 1.5px solid var(--g-600);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 8px 24px var(--shadow);
+  z-index: 200;
+  overflow: hidden;
+  max-height: 220px;
+  overflow-y: auto;
+}
+.pos-discount-menu.open { display: block; }
+
+.pos-discount-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 9px 12px;
+  cursor: pointer;
+  transition: background 0.15s;
+  border-bottom: 1px solid var(--border);
+}
+.pos-discount-option:last-child { border-bottom: none; }
+.pos-discount-option:hover { background: var(--hover); }
+.pos-discount-option.active { background: rgba(22,163,74,0.08); }
+
+.pos-discount-option-none .pos-discount-opt-name {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.pos-discount-opt-left {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+.pos-discount-opt-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  font-family: 'Sora', sans-serif;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pos-discount-opt-sub {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-family: 'Sora', sans-serif;
+}
+.pos-discount-badge {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(22,163,74,0.12);
+  color: var(--g-400);
+  font-size: 11px;
+  font-weight: 700;
+  font-family: 'JetBrains Mono', monospace;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 /* ─── Product Autocomplete (shared with admin modals) ─── */
 .ac-item:hover { background: var(--hover); }

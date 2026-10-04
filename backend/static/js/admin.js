@@ -1,5 +1,14 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
+const PROD_PAGE_SIZE = 12;
+let productsPage         = 1;
+let _prodFilteredCache   = [];
+const DISC_PAGE_SIZE = 5;
+let discountsPage        = 1;
+let _discFilteredCache   = [];
+const USER_PAGE_SIZE = 12;
+let usersPage            = 1;
+let _userFilteredCache   = [];
 let invPage              = 1;
 let ordersPage           = 1;
 let inventoryTypeFilterVal = '';
@@ -135,7 +144,7 @@ function renderPager(containerId, total, currentPage, fnName) {
 }
 
 function changeInvPage(p)         { invPage = p;         renderInventory(allInventory); }
-function changeOrdersPage(p)      { ordersPage = p;      renderOrders(allOrders); }
+function changeOrdersPage(p)      { ordersPage = p;      applyAdminOrderFilters(); }
 function changeBranchStockPage(p) {
   branchStockPage = p;
   const wrap = document.getElementById('branchStockSummary');
@@ -155,6 +164,7 @@ var pageTitles = {
   sales:           ['Sales Reports',     'View analytics and generate sales reports'],
   discounts:       ['Discounts',         'Manage product discounts'],
   users:           ['User Management',   'Manage admin and staff accounts'],
+  profile:         ['My Profile',        'View and update your account information'],
 };
 
 
@@ -310,6 +320,16 @@ function showSection(name, el) {
   document.getElementById('pageSub').textContent   = pageTitles[name][1];
   window.location.hash = name;
   localStorage.setItem('admin-section', name);
+  // Profile sidebar active indicator
+  const sidebarProfileBtn = document.getElementById('sidebarProfileBtn');
+  if (sidebarProfileBtn) {
+    if (name === 'profile') {
+      sidebarProfileBtn.style.background = 'rgba(255,255,255,0.12)';
+      sidebarProfileBtn.style.borderRadius = '8px';
+    } else {
+      sidebarProfileBtn.style.background = '';
+    }
+  }
   loaders[name] && loaders[name]();
   startAutoRefresh(name);
 }
@@ -443,6 +463,7 @@ var loaders = {
   discounts: loadDiscounts,
   users:          loadUsers,
   purchase_orders: loadPurchaseOrders,
+  profile:         loadProfile,
 };
 
 // ─── BRANCHES (shared utility) ────────────────────────
@@ -771,8 +792,11 @@ async function toggleVariantRow(productId, btnEl) {
 window.toggleVariantRow = toggleVariantRow;
 
 function renderProducts(products) {
-  document.getElementById('productsBody').innerHTML = products.length
-    ? products.map(p => {
+  _prodFilteredCache = products;
+  const start  = (productsPage - 1) * PROD_PAGE_SIZE;
+  const paged  = products.slice(start, start + PROD_PAGE_SIZE);
+  document.getElementById('productsBody').innerHTML = paged.length
+    ? paged.map(p => {
         return `
           <tr style='cursor:pointer;' onclick="toggleVariantRow('${p.product_id}', this.querySelector('.expand-btn'))">
             <td>
@@ -807,9 +831,17 @@ function renderProducts(products) {
           <tr id="variantRow_${p.product_id}" style="display:none;background:var(--surface);"><td colspan="9" style="padding:0;"><table style="width:100%;"><tbody class="variant-stock-content"></tbody></table></td></tr>`;
       }).join('')
     : '<tr><td colspan="7" class="table-empty">No products found</td></tr>';
+  renderPagerCustom('productsPagination', products.length, productsPage, PROD_PAGE_SIZE, 'changeProductsPage');
 }
 
+function changeProductsPage(page) {
+  productsPage = page;
+  renderProducts(_prodFilteredCache);
+}
+window.changeProductsPage = changeProductsPage;
+
 function filterProducts(q) {
+  productsPage = 1;
   const filtered = allProducts.filter(p =>
     p.product_name.toLowerCase().includes(q.toLowerCase()) ||
     (p.brand || '').toLowerCase().includes(q.toLowerCase())
@@ -818,6 +850,7 @@ function filterProducts(q) {
 }
 
 function filterByCategory(cat) {
+  productsPage = 1;
   const brand = document.getElementById('brandFilter')?.value || '';
   let filtered = cat
     ? allProducts.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase())
@@ -827,6 +860,7 @@ function filterByCategory(cat) {
 }
 
 function filterByBrand(brand) {
+  productsPage = 1;
   const cat = document.getElementById('categoryFilter')?.value || '';
   let filtered = brand
     ? allProducts.filter(p => p.brand?.trim() === brand.trim())
@@ -897,14 +931,86 @@ function openProductModal(product = null) {
   if (netWeightEl)   netWeightEl.value   = product?.net_weight      || '';
   if (netWeightUnit) netWeightUnit.value = product?.net_weight_unit || 'kg';
 
+  _prodUpdateSaveBtn();
   document.getElementById('productModalOverlay').classList.add('open');
   document.getElementById('productModal').classList.add('open');
+}
+
+// ── Product Modal Inline Validation ──────────────────────
+function _prodSetFieldError(inputId, msg) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.style.borderColor = msg ? '#ef4444' : '';
+  const container = input.parentNode.classList.contains('form-group')
+    ? input.parentNode
+    : (input.parentNode.parentNode || input.parentNode);
+  let hint = document.getElementById(inputId + '_perr');
+  if (msg) {
+    if (!hint) {
+      hint = document.createElement('span');
+      hint.id        = inputId + '_perr';
+      hint.className = 'field-hint';
+      hint.style.cssText = 'color:#ef4444;margin-top:3px;display:block;';
+      container.appendChild(hint);
+    }
+    hint.textContent = msg;
+  } else if (hint) {
+    hint.textContent = '';
+    input.style.borderColor = '';
+  }
+}
+
+function _prodClearErrors() {
+  ['pName','pBrand','pCategory','pPrice','pNetWeight'].forEach(id => _prodSetFieldError(id, ''));
+}
+
+function _prodUpdateSaveBtn() {
+  const btn = document.getElementById('productSubmitBtn');
+  if (!btn) return;
+  const allFilled = ['pName','pBrand','pCategory','pPrice','pNetWeight'].every(id => {
+    const v = (document.getElementById(id)?.value || '').trim();
+    return v !== '';
+  });
+  btn.disabled = !allFilled;
+  btn.style.opacity = allFilled ? '1' : '0.45';
+  btn.style.cursor  = allFilled ? 'pointer' : 'not-allowed';
+}
+
+function _prodCheckField(id) {
+  const val = (document.getElementById(id)?.value || '').trim();
+  switch (id) {
+    case 'pName':      _prodSetFieldError(id, !val ? 'Product name is required.' : ''); break;
+    case 'pBrand':     _prodSetFieldError(id, !val ? 'Brand is required.' : ''); break;
+    case 'pCategory':  _prodSetFieldError(id, !val ? 'Category is required.' : ''); break;
+    case 'pPrice': {
+      const v = parseFloat(document.getElementById(id)?.value);
+      _prodSetFieldError(id, !document.getElementById(id)?.value ? 'Price is required.' : isNaN(v) || v <= 0 ? 'Price must be greater than 0.' : '');
+      break;
+    }
+    case 'pNetWeight': {
+      const v = parseFloat(document.getElementById(id)?.value);
+      _prodSetFieldError(id, !document.getElementById(id)?.value ? 'Net weight is required.' : isNaN(v) || v <= 0 ? 'Must be greater than 0.' : '');
+      break;
+    }
+  }
+  _prodUpdateSaveBtn();
+}
+
+function _prodValidate() {
+  ['pName','pBrand','pCategory','pPrice','pNetWeight'].forEach(id => _prodCheckField(id));
+  return !['pName','pBrand','pCategory','pPrice','pNetWeight'].some(id => {
+    const hint = document.getElementById(id + '_perr');
+    return hint && hint.textContent;
+  });
 }
 
 function closeProductModal() {
   document.getElementById('productModalOverlay').classList.remove('open');
   document.getElementById('productModal').classList.remove('open');
   document.getElementById('productForm').reset();
+  _prodClearErrors();
+  const saveBtn = document.getElementById('productSubmitBtn');
+  if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.45'; saveBtn.style.cursor = 'not-allowed'; }
   const previewWrap = document.getElementById('imagePreviewsWrap');
   if (previewWrap) previewWrap.innerHTML = '';
   const existingWrap = document.getElementById('existingImagesWrap');
@@ -1090,19 +1196,9 @@ async function submitProduct(e) {
   e.preventDefault();
   const submitBtn = e.submitter || document.querySelector('#productForm button[type="submit"]');
 
-  // ── Validation ─────────────────────────────────────────
-  const pName     = document.getElementById('pName').value.trim();
-  const pBrand    = document.getElementById('pBrand').value.trim();
-  const pCategory = document.getElementById('pCategory').value;
-  const pPrice    = parseFloat(document.getElementById('pPrice').value);
-  const pStatus   = document.getElementById('pStatus').value;
-
-  if (!pName)                          { showToast('Product name is required.', 'error'); return; }
-  if (!pBrand)                         { showToast('Brand is required.', 'error'); return; }
-  if (!pCategory)                      { showToast('Please select a category.', 'error'); return; }
-  if (isNaN(pPrice) || pPrice <= 0)   { showToast('Price must be greater than 0.', 'error'); return; }
-  if (!pStatus)                        { showToast('Please select a status.', 'error'); return; }
-  // ───────────────────────────────────────────────────────
+  // ── Inline validation ─────────────────────────────────
+  if (!_prodValidate()) return;
+  // ──────────────────────────────────────────────────────
 
   setButtonLoading(submitBtn, true);
   const id       = document.getElementById('productId').value;
@@ -1656,6 +1752,11 @@ async function openAddStockModal() {
   document.getElementById('addStockNote').value = '';
   addStockItemRow();
 
+  _setInvBtn('addStockSubmitBtn', false);
+  // Live check — branch change + item row inputs (event delegation)
+  document.getElementById('addStockBranch')?.addEventListener('change', _addStockUpdateBtn);
+  document.getElementById('addStockItems')?.addEventListener('input',  _addStockUpdateBtn);
+  document.getElementById('addStockItems')?.addEventListener('change', _addStockUpdateBtn);
   document.getElementById('addStockModalOverlay')?.classList.add('open');
   document.getElementById('addStockModal')?.classList.add('open');
 }
@@ -1788,7 +1889,7 @@ function addStockItemRow() {
   const listId   = `asList_${addStockRowCount}`;
 
   row.innerHTML = `
-    ${addStockRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove()" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
+    ${addStockRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove();_addStockUpdateBtn();" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
     <div class="form-group" style="margin-bottom:8px;">
       <label class="form-label" style="font-size:11px;">Product <span class="req">*</span></label>
       ${productAcHTML(inputId, hiddenId)}
@@ -1806,7 +1907,7 @@ function addStockItemRow() {
 
   buildProductAutocomplete(row, {
     inputId, hiddenId, listId: `asList_${addStockRowCount}`,
-    onSelect: (p) => loadRowVariantsByProduct(p, rowId)
+    onSelect: (p) => { loadRowVariantsByProduct(p, rowId); _addStockUpdateBtn(); },
   });
 }
 
@@ -1830,12 +1931,51 @@ function loadRowVariantsByProduct(product, rowId) {
 }
 window.addStockItemRow = addStockItemRow;
 
+// ── Inventory modal save-button guards ───────────────────
+function _setInvBtn(id, enabled) {
+  const btn = document.getElementById(id);
+  if (!btn) return;
+  btn.disabled        = !enabled;
+  btn.style.opacity   = enabled ? '1' : '0.45';
+  btn.style.cursor    = enabled ? 'pointer' : 'not-allowed';
+}
+
+function _addStockUpdateBtn() {
+  const branch  = (document.getElementById('addStockBranch')?.value || '').trim();
+  if (!branch) { _setInvBtn('addStockSubmitBtn', false); return; }
+  const rows = document.querySelectorAll('#addStockItems > div');
+  if (!rows.length) { _setInvBtn('addStockSubmitBtn', false); return; }
+  const allValid = Array.from(rows).every(row => {
+    const hidden = row.querySelector('input[type="hidden"]');
+    const qty    = row.querySelector('.add-stock-qty');
+    return hidden?.value && qty?.value && parseInt(qty.value) >= 1;
+  });
+  _setInvBtn('addStockSubmitBtn', allValid);
+}
+
+function _transferUpdateBtn() {
+  const product = (document.getElementById('transferProduct')?.value || '').trim();
+  const qty     = (document.getElementById('transferQty')?.value || '').trim();
+  const from    = (document.getElementById('transferFrom')?.value || '').trim();
+  const to      = (document.getElementById('transferTo')?.value || '').trim();
+  _setInvBtn('transferSubmitBtn', !!(product && qty && parseInt(qty) >= 1 && from && to));
+}
+
+function _adjustUpdateBtn() {
+  const product = (document.getElementById('adjustProduct')?.value || '').trim();
+  const qty     = (document.getElementById('adjustQty')?.value || '').trim();
+  const reason  = (document.getElementById('adjustReason')?.value || '').trim();
+  const branch  = (document.getElementById('adjustBranch')?.value || '').trim();
+  _setInvBtn('adjustSubmitBtn', !!(product && qty && parseInt(qty) >= 1 && reason && branch));
+}
+
 function closeAddStockModal() {
   document.getElementById('addStockModalOverlay')?.classList.remove('open');
   document.getElementById('addStockModal')?.classList.remove('open');
   document.getElementById('addStockForm')?.reset();
   document.getElementById('addStockItems').innerHTML = '';
   addStockRowCount = 0;
+  _setInvBtn('addStockSubmitBtn', false);
 }
 
 
@@ -1976,7 +2116,7 @@ async function openTransferModal() {
       inputId:  'transferProductInput',
       hiddenId: 'transferProduct',
       listId:   'transferProductList',
-      onSelect: (p) => loadTransferVariants(p ? p.product_id : ''),
+      onSelect: (p) => { loadTransferVariants(p ? p.product_id : ''); _transferUpdateBtn(); },
     });
   }
 
@@ -1987,6 +2127,10 @@ async function openTransferModal() {
   if (fromEl) fromEl.innerHTML = opts;
   if (toEl)   toEl.innerHTML   = opts;
 
+  _setInvBtn('transferSubmitBtn', false);
+  document.getElementById('transferQty')?.addEventListener('input',  _transferUpdateBtn);
+  document.getElementById('transferFrom')?.addEventListener('change', _transferUpdateBtn);
+  document.getElementById('transferTo')?.addEventListener('change',   _transferUpdateBtn);
   document.getElementById('transferModalOverlay')?.classList.add('open');
   document.getElementById('transferModal')?.classList.add('open');
 }
@@ -1999,6 +2143,7 @@ function closeTransferModal() {
   // Reset autocomplete
   const prodWrap = document.getElementById('transferProductWrap');
   if (prodWrap?._acClear) prodWrap._acClear();
+  _setInvBtn('transferSubmitBtn', false);
 }
 
 
@@ -2107,7 +2252,7 @@ async function openAdjustModal() {
       inputId:  'adjustProductInput',
       hiddenId: 'adjustProduct',
       listId:   'adjustProductList',
-      onSelect: (p) => loadAdjustVariants(p ? p.product_id : '')
+      onSelect: (p) => { loadAdjustVariants(p ? p.product_id : ''); _adjustUpdateBtn(); },
     });
   }
 
@@ -2116,6 +2261,10 @@ async function openAdjustModal() {
     allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('') +
     '<option value="both">📦 Both Branches</option>';
 
+  _setInvBtn('adjustSubmitBtn', false);
+  document.getElementById('adjustQty')?.addEventListener('input',    _adjustUpdateBtn);
+  document.getElementById('adjustReason')?.addEventListener('change', _adjustUpdateBtn);
+  document.getElementById('adjustBranch')?.addEventListener('change', _adjustUpdateBtn);
   document.getElementById('adjustModalOverlay')?.classList.add('open');
   document.getElementById('adjustModal')?.classList.add('open');
 }
@@ -2128,6 +2277,7 @@ function closeAdjustModal() {
   // Reset autocomplete
   const prodWrap = document.getElementById('adjustProductWrap');
   if (prodWrap?._acClear) prodWrap._acClear();
+  _setInvBtn('adjustSubmitBtn', false);
 }
 
 async function submitAdjust(e) {
@@ -2398,11 +2548,13 @@ let adminOrderSearchText   = '';
 
 function filterOrders(type) {
   adminOrderTypeFilter = type;
+  ordersPage = 1;
   applyAdminOrderFilters();
 }
 
 function filterOrderStatus(status) {
   adminOrderStatusFilter = status;
+  ordersPage = 1;
   applyAdminOrderFilters();
 }
 
@@ -2429,12 +2581,7 @@ function applyAdminOrderFilters() {
           || type.includes(adminOrderSearchText);
     });
   }
-  ordersPage = 1;
   renderOrders(filtered);
-}
-
-function filterOrderStatus(status) {
-  renderOrders(status ? allOrders.filter(o => o.status === status) : allOrders);
 }
 
 // ─── SALES REPORTS ────────────────────────────────────
@@ -3025,8 +3172,11 @@ function getDiscountStatus(d) {
 }
 
 function renderDiscounts(discounts) {
-  document.getElementById('discountsBody').innerHTML = discounts.length
-    ? discounts.map(d => {
+  _discFilteredCache = discounts;
+  const discStart = (discountsPage - 1) * DISC_PAGE_SIZE;
+  const discPaged = discounts.slice(discStart, discStart + DISC_PAGE_SIZE);
+  document.getElementById('discountsBody').innerHTML = discPaged.length
+    ? discPaged.map(d => {
         const assignedProducts = allProducts.filter(p => p.discount_id === d.discount_id);
         const assignedCount    = assignedProducts.length;
         const previewNames     = assignedProducts.slice(0, 3).map(p => p.product_name).join(', ');
@@ -3073,9 +3223,17 @@ function renderDiscounts(discounts) {
           </tr>`;
       }).join('')
     : '<tr><td colspan="4" class="table-empty">No discounts yet. Click "Add Discount" to create one.</td></tr>';
+  renderPagerCustom('discountsPagination', discounts.length, discountsPage, DISC_PAGE_SIZE, 'changeDiscountsPage');
 }
 
+function changeDiscountsPage(page) {
+  discountsPage = page;
+  renderDiscounts(_discFilteredCache);
+}
+window.changeDiscountsPage = changeDiscountsPage;
+
 function filterDiscounts(q) {
+  discountsPage = 1;
   const filtered = allDiscounts.filter(d =>
     d.discount_name.toLowerCase().includes(q.toLowerCase())
   );
@@ -3348,8 +3506,11 @@ async function loadUsers() {
 }
 
 function renderUsers(users) {
-  document.getElementById('usersBody').innerHTML = users.length
-    ? users.map(u => {
+  _userFilteredCache = users;
+  const uStart = (usersPage - 1) * USER_PAGE_SIZE;
+  const uPaged = users.slice(uStart, uStart + USER_PAGE_SIZE);
+  document.getElementById('usersBody').innerHTML = uPaged.length
+    ? uPaged.map(u => {
         const s = Array.isArray(u.staff)    ? u.staff[0]    : u.staff;
         const c = Array.isArray(u.customer) ? u.customer[0] : u.customer;
         const name = s?.fname
@@ -3384,7 +3545,10 @@ function renderUsers(users) {
         </tr>`;
       }).join('')
     : '<tr><td colspan="7" class="table-empty">No users found</td></tr>';
+  renderPagerCustom('usersPagination', users.length, usersPage, USER_PAGE_SIZE, 'changeUsersPage');
 }
+function changeUsersPage(page) { usersPage = page; renderUsers(_userFilteredCache); }
+window.changeUsersPage = changeUsersPage;
 
 let userSearchText = '';
 let userRoleFilter = '';
@@ -3392,17 +3556,20 @@ let userStatusFilter = '';
 
 function filterUserSearch(val) {
   userSearchText = val.toLowerCase();
+  usersPage = 1;
   applyUserFilters();
 }
 window.filterUserSearch = filterUserSearch;
 
 function filterUserRole(role) {
   userRoleFilter = role;
+  usersPage = 1;
   applyUserFilters();
 }
 
 function filterUserStatus(status) {
   userStatusFilter = status;
+  usersPage = 1;
   applyUserFilters();
 }
 window.filterUserStatus = filterUserStatus;
@@ -3488,6 +3655,76 @@ function closeUserModal() {
   document.getElementById('userModalOverlay').classList.remove('open');
   document.getElementById('userModal').classList.remove('open');
   document.getElementById('userForm').reset();
+  _userClearErrors();
+  // Reset password eye icon to crossed on close
+  const eyeBtn = document.querySelector('#uPasswordGroup .btn-icon');
+  if (eyeBtn) eyeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+  const uPw = document.getElementById('uPassword');
+  if (uPw) uPw.type = 'password';
+}
+
+// ── User Modal Inline Validation ─────────────────────────
+function _userSetFieldError(inputId, msg) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.style.borderColor = msg ? '#ef4444' : '';
+  const container = input.parentNode.classList.contains('form-group')
+    ? input.parentNode
+    : (input.parentNode.parentNode || input.parentNode);
+  let hint = document.getElementById(inputId + '_uerr');
+  if (msg) {
+    if (!hint) {
+      hint = document.createElement('span');
+      hint.id        = inputId + '_uerr';
+      hint.className = 'field-hint';
+      hint.style.cssText = 'color:#ef4444;margin-top:3px;display:block;';
+      container.appendChild(hint);
+    }
+    hint.textContent = msg;
+  } else if (hint) {
+    hint.textContent = '';
+    input.style.borderColor = '';
+  }
+}
+
+function _userClearErrors() {
+  ['uFname','uLname','uEmail','uPhone','uUsername','uPassword'].forEach(id => _userSetFieldError(id, ''));
+}
+
+function _userCheckField(id) {
+  const isNew = !document.getElementById('userId').value;
+  const val   = (document.getElementById(id)?.value || '').trim();
+  switch (id) {
+    case 'uFname':    _userSetFieldError(id, !val ? 'First name is required.' : ''); break;
+    case 'uLname':    _userSetFieldError(id, !val ? 'Last name is required.' : ''); break;
+    case 'uUsername': _userSetFieldError(id, !val ? 'Username is required.' : /\s/.test(document.getElementById(id).value) ? 'Username cannot contain spaces.' : ''); break;
+    case 'uEmail': {
+      const ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(val);
+      _userSetFieldError(id, !val ? 'Email is required.' : !ok ? 'Enter a valid email address.' : '');
+      break;
+    }
+    case 'uPhone': {
+      const raw = document.getElementById(id)?.value || '';
+      _userSetFieldError(id, !raw ? 'Phone number is required.' : !/^09\d{9}$/.test(raw) ? 'Must be 09XXXXXXXXX (11 digits).' : '');
+      break;
+    }
+    case 'uPassword': {
+      if (!isNew) break;
+      const pw = document.getElementById(id)?.value || '';
+      _userSetFieldError(id, !pw ? 'Password is required.' : pw.length < 8 ? 'Must be at least 8 characters.' : '');
+      break;
+    }
+  }
+}
+
+function _userValidate() {
+  const isNew = !document.getElementById('userId').value;
+  ['uFname','uLname','uUsername','uEmail','uPhone'].forEach(id => _userCheckField(id));
+  if (isNew) _userCheckField('uPassword');
+  return !['uFname','uLname','uUsername','uEmail','uPhone', ...(isNew ? ['uPassword'] : [])].some(id => {
+    const hint = document.getElementById(id + '_uerr');
+    return hint && hint.textContent;
+  });
 }
 
 async function editUser(id) {
@@ -3521,34 +3758,16 @@ async function submitUser(e) {
   const id  = document.getElementById('userId').value;
   const btn = document.getElementById('userSubmitBtn');
 
-  // ── Validate required fields ──────────────────────────
+  // ── Inline validation ─────────────────────────────────
+  if (!_userValidate()) return;
+
   const fname    = document.getElementById('uFname').value.trim();
   const lname    = document.getElementById('uLname').value.trim();
   const username = document.getElementById('uUsername').value.trim();
   const email    = document.getElementById('uEmail').value.trim();
   const role     = document.getElementById('uRole').value;
-
-  if (!fname)    { showToast('First name is required.', 'error'); return; }
-  if (!lname)    { showToast('Last name is required.', 'error'); return; }
-  if (!username) { showToast('Username is required.', 'error'); return; }
-  if (/\s/.test(username)) { showToast('Username cannot contain spaces.', 'error'); return; }
-  if (!email)    { showToast('Email address is required.', 'error'); return; }
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { showToast('Please enter a valid email address.', 'error'); return; }
-  if (!role)     { showToast('Please select a role.', 'error'); return; }
-
-  // ── Validate phone
-  const phone = document.getElementById('uPhone').value;
-  if (phone && !/^09[0-9]{9}$/.test(phone)) {
-    showToast('Phone number must start with 09 and be 11 digits.', 'error');
-    return;
-  }
-
-  // ── Validate password (required for new user)
+  const phone    = document.getElementById('uPhone').value;
   const password = document.getElementById('uPassword').value;
-  if (!id && password.length < 8) {
-    showToast('Password must be at least 8 characters.', 'error');
-    return;
-  }
 
   // ── Confirm dialog
   const action = id ? 'update' : 'add';
@@ -4285,3 +4504,213 @@ window.addEventListener('beforeunload', function () {
   style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
   document.head.appendChild(style);
 })();
+
+
+// ══════════════════════════════════════════════════════
+// PROFILE MODULE
+// ══════════════════════════════════════════════════════
+
+let _profOrigInfo = {};
+
+// ── Inline field error helpers ────────────────────────
+function _profSetFieldError(inputId, msg) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.style.borderColor = msg ? '#ef4444' : '';
+  let hint = document.getElementById(inputId + '_err');
+  // Append outside the position:relative wrapper so icons don't shift
+  const container = input.parentNode.classList.contains('form-group')
+    ? input.parentNode
+    : (input.parentNode.parentNode || input.parentNode);
+  if (msg) {
+    if (!hint) {
+      hint = document.createElement('span');
+      hint.id        = inputId + '_err';
+      hint.className = 'field-hint';
+      hint.style.cssText = 'color:#ef4444;margin-top:3px;display:block;';
+      container.appendChild(hint);
+    }
+    hint.textContent = msg;
+  } else if (hint) {
+    hint.textContent = '';
+    input.style.borderColor = '';
+  }
+}
+
+function _profClearErrors() {
+  ['profFname','profLname','profUsername','profEmail','profPhone','profCurrentPw','profNewPw','profConfirmPw'].forEach(id => {
+    _profSetFieldError(id, '');
+  });
+}
+
+// Returns true if all currently-entered values pass validation (no errors)
+function _profValidate() {
+  const fname     = document.getElementById('profFname').value.trim();
+  const lname     = document.getElementById('profLname').value.trim();
+  const username  = document.getElementById('profUsername').value.trim();
+  const email     = document.getElementById('profEmail').value.trim();
+  const phone     = document.getElementById('profPhone').value.trim();
+  const currentPw = document.getElementById('profCurrentPw').value;
+  const newPw     = document.getElementById('profNewPw').value;
+  const confirmPw = document.getElementById('profConfirmPw').value;
+  const changingPw = !!(currentPw || newPw || confirmPw);
+
+  let valid = true;
+
+  _profSetFieldError('profFname',    !fname    ? 'First name is required.' : '');
+  _profSetFieldError('profLname',    !lname    ? 'Last name is required.'  : '');
+  _profSetFieldError('profUsername', !username ? 'Username is required.'   : '');
+
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  _profSetFieldError('profEmail', !email ? 'Email is required.' : !emailOk ? 'Enter a valid email address.' : '');
+
+  const phoneOk = /^09\d{9}$/.test(phone);
+  _profSetFieldError('profPhone', !phone ? 'Phone number is required.' : !phoneOk ? 'Must be 09XXXXXXXXX (11 digits).' : '');
+
+  if (!fname || !lname || !username || !email || !emailOk || !phone || !phoneOk) valid = false;
+
+  if (changingPw) {
+    _profSetFieldError('profCurrentPw', !currentPw ? 'Current password is required.' : '');
+    _profSetFieldError('profNewPw',
+      !newPw            ? 'New password is required.' :
+      newPw.length < 8  ? 'Must be at least 8 characters.' : '');
+    _profSetFieldError('profConfirmPw',
+      !confirmPw           ? 'Please confirm your new password.' :
+      confirmPw !== newPw  ? 'Passwords do not match.' : '');
+    if (!currentPw || !newPw || newPw.length < 8 || confirmPw !== newPw) valid = false;
+  } else {
+    _profSetFieldError('profCurrentPw', '');
+    _profSetFieldError('profNewPw',     '');
+    _profSetFieldError('profConfirmPw', '');
+  }
+
+  return valid;
+}
+
+async function loadProfile() {
+  try {
+    const res  = await fetch('/auth/profile');
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Failed to load profile.', 'error'); return; }
+
+    document.getElementById('profFname').value    = data.fname        || '';
+    document.getElementById('profMi').value       = data.mi           || '';
+    document.getElementById('profLname').value    = data.lname        || '';
+    document.getElementById('profUsername').value = data.username     || '';
+    document.getElementById('profEmail').value    = data.email        || '';
+    document.getElementById('profPhone').value    = data.phone_number || '';
+    document.getElementById('profCurrentPw').value = '';
+    document.getElementById('profNewPw').value     = '';
+    document.getElementById('profConfirmPw').value = '';
+
+    _profOrigInfo = {
+      fname: data.fname || '', mi: data.mi || '', lname: data.lname || '',
+      username: data.username || '', email: data.email || '',
+      phone_number: data.phone_number || '',
+    };
+
+    _profClearErrors();
+
+    ['profFname','profMi','profLname','profUsername','profEmail','profPhone','profCurrentPw','profNewPw','profConfirmPw'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.oninput = checkProfDirty;
+    });
+
+    _setProfSaveBtn(false);
+  } catch (e) {
+    showToast('Error loading profile.', 'error');
+  }
+}
+
+function checkProfDirty() {
+  const infoDirty =
+    document.getElementById('profFname').value    !== _profOrigInfo.fname ||
+    document.getElementById('profMi').value       !== _profOrigInfo.mi ||
+    document.getElementById('profLname').value    !== _profOrigInfo.lname ||
+    document.getElementById('profUsername').value !== _profOrigInfo.username ||
+    document.getElementById('profEmail').value    !== _profOrigInfo.email ||
+    document.getElementById('profPhone').value    !== _profOrigInfo.phone_number;
+  const pwDirty = !!(
+    document.getElementById('profCurrentPw').value ||
+    document.getElementById('profNewPw').value ||
+    document.getElementById('profConfirmPw').value
+  );
+  const dirty = infoDirty || pwDirty;
+
+  // Run inline validation whenever there are changes; clear errors when pristine
+  if (dirty) {
+    const valid = _profValidate();
+    _setProfSaveBtn(valid);
+  } else {
+    _profClearErrors();
+    _setProfSaveBtn(false);
+  }
+}
+
+function _setProfSaveBtn(enabled) {
+  const btn = document.getElementById('profSaveBtn');
+  if (!btn) return;
+  btn.disabled      = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.5';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
+}
+
+async function saveProfile() {
+  const btn        = document.getElementById('profSaveBtn');
+  const fname      = document.getElementById('profFname').value.trim();
+  const mi         = document.getElementById('profMi').value.trim();
+  const lname      = document.getElementById('profLname').value.trim();
+  const username   = document.getElementById('profUsername').value.trim();
+  const email      = document.getElementById('profEmail').value.trim();
+  const phone      = document.getElementById('profPhone').value.trim();
+  const currentPw  = document.getElementById('profCurrentPw').value;
+  const newPw      = document.getElementById('profNewPw').value;
+  const confirmPw  = document.getElementById('profConfirmPw').value;
+  const changingPw = !!(currentPw || newPw || confirmPw);
+
+  // Final validation guard (button should already be disabled on error, but safety net)
+  if (!_profValidate()) return;
+
+  setButtonLoading(btn, true);
+  try {
+    // Always save info
+    const infoRes  = await fetch('/auth/profile', {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action: 'info', fname, mi, lname, username, email, phone_number: phone }),
+    });
+    const infoData = await infoRes.json();
+    if (!infoRes.ok) { showToast(infoData.error || 'Failed to save profile.', 'error'); return; }
+
+    // Optionally change password
+    if (changingPw) {
+      const pwRes  = await fetch('/auth/profile', {
+        method: 'PATCH', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'password', current_password: currentPw, new_password: newPw, confirm_password: confirmPw }),
+      });
+      const pwData = await pwRes.json();
+      if (!pwRes.ok) { showToast(pwData.error || 'Failed to change password.', 'error'); return; }
+    }
+
+    showToast(changingPw ? 'Profile and password updated!' : 'Profile updated successfully!');
+    _profOrigInfo = { fname, mi, lname, username, email, phone_number: phone };
+    document.getElementById('profCurrentPw').value = '';
+    document.getElementById('profNewPw').value     = '';
+    document.getElementById('profConfirmPw').value = '';
+    _profClearErrors();
+    _setProfSaveBtn(false);
+  } catch (e) {
+    showToast('Error saving profile.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+function togglePwVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  btn.innerHTML = isHidden
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+}

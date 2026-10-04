@@ -1481,6 +1481,125 @@ def api_change_password():
 
 
 
+# ══════════════════════════════════════════════════════
+# PROFILE ROUTES (Admin & Staff)
+# ══════════════════════════════════════════════════════
+
+# ─── GET current user profile ────────────────────────
+@app.route('/auth/profile', methods=['GET'])
+@staff_required
+def get_profile():
+    try:
+        user_id  = session.get('user_id')
+        staff_id = session.get('staff_id')
+
+        user_res = supabase_retry(lambda: supabase.table('user')
+            .select('username')
+            .eq('user_id', user_id)
+            .single()
+            .execute())
+        staff_res = supabase_retry(lambda: supabase.table('staff')
+            .select('fname, lname, mi, email, phone_number')
+            .eq('staff_id', staff_id)
+            .single()
+            .execute())
+
+        if not user_res.data or not staff_res.data:
+            return jsonify({'error': 'Profile not found.'}), 404
+
+        return jsonify({
+            'username':     user_res.data['username'],
+            'fname':        staff_res.data['fname'],
+            'lname':        staff_res.data['lname'],
+            'mi':           staff_res.data['mi'] or '',
+            'email':        staff_res.data['email'],
+            'phone_number': staff_res.data['phone_number'] or '',
+        }), 200
+    except Exception as e:
+        print(f'GET profile error: {e}')
+        return jsonify({'error': 'Failed to load profile.'}), 500
+
+
+# ─── PATCH update profile / change password ──────────
+@app.route('/auth/profile', methods=['PATCH'])
+@staff_required
+def update_profile():
+    try:
+        data     = request.get_json()
+        action   = data.get('action', 'info')  # 'info' or 'password'
+        user_id  = session.get('user_id')
+        staff_id = session.get('staff_id')
+
+        if action == 'password':
+            current_pw  = data.get('current_password', '').strip()
+            new_pw      = data.get('new_password', '').strip()
+            confirm_pw  = data.get('confirm_password', '').strip()
+
+            if not current_pw or not new_pw or not confirm_pw:
+                return jsonify({'error': 'All password fields are required.'}), 400
+            if new_pw != confirm_pw:
+                return jsonify({'error': 'New passwords do not match.'}), 400
+            if len(new_pw) < 8:
+                return jsonify({'error': 'New password must be at least 8 characters.'}), 400
+
+            user_res = supabase_retry(lambda: supabase.table('user')
+                .select('password')
+                .eq('user_id', user_id)
+                .single()
+                .execute())
+            if not user_res.data:
+                return jsonify({'error': 'User not found.'}), 404
+
+            if not verify_password(current_pw, user_res.data['password']):
+                return jsonify({'error': 'Current password is incorrect.'}), 401
+
+            new_hash = hash_password(new_pw)
+            supabase_retry(lambda: supabase.table('user')
+                .update({'password': new_hash})
+                .eq('user_id', user_id)
+                .execute())
+
+            return jsonify({'message': 'Password changed successfully.'}), 200
+
+        else:
+            # Update personal info
+            fname    = data.get('fname', '').strip()
+            lname    = data.get('lname', '').strip()
+            mi       = data.get('mi', '').strip()
+            email    = data.get('email', '').strip()
+            phone    = data.get('phone_number', '').strip()
+            username = data.get('username', '').strip()
+
+            if not fname or not lname or not email or not username:
+                return jsonify({'error': 'First name, last name, email, and username are required.'}), 400
+
+            # Check username uniqueness (exclude current user)
+            uname_res = supabase_retry(lambda: supabase.table('user')
+                .select('user_id')
+                .eq('username', username)
+                .neq('user_id', user_id)
+                .execute())
+            if uname_res.data:
+                return jsonify({'error': 'Username is already taken.'}), 409
+
+            supabase_retry(lambda: supabase.table('staff')
+                .update({'fname': fname, 'lname': lname, 'mi': mi,
+                         'email': email, 'phone_number': phone})
+                .eq('staff_id', staff_id)
+                .execute())
+            supabase_retry(lambda: supabase.table('user')
+                .update({'username': username})
+                .eq('user_id', user_id)
+                .execute())
+
+            # Refresh session name
+            session['name'] = fname + ' ' + lname
+
+            return jsonify({'message': 'Profile updated successfully.'}), 200
+
+    except Exception as e:
+        print(f'PATCH profile error: {e}')
+        return jsonify({'error': 'Failed to update profile.'}), 500
 
 
 # ══════════════════════════════════════════════════════
@@ -1773,7 +1892,7 @@ def api_auth_forgot_password():
 
         # Generate OTP
         otp        = str(random.randint(100000, 999999))
-        expires_at = (datetime.now() + timedelta(minutes=5)).isoformat()
+        expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
 
         # Invalidate old OTPs
         supabase.table('otp_codes').update({'used': True}).eq('email', email).eq('used', False).execute()
@@ -1971,6 +2090,16 @@ def admin_delete_branch(branch_id):
 def admin_get_discounts():
     try:
         res = supabase.table('discount').select('*').order('created_at', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/discounts', methods=['GET'])
+@staff_required
+def staff_get_discounts():
+    """Read-only discount list for POS order-level discount dropdown."""
+    try:
+        res = supabase.table('discount').select('discount_id,discount_name,percentage,starts_at,ends_at').order('discount_name').execute()
         return jsonify(res.data), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500

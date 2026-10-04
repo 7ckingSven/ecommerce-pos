@@ -1,7 +1,10 @@
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
+const SR_PAGE_SIZE   = 12;
 let staffOrdersPage       = 1;
 let staffInvPage          = 1;
+let srPage                = 1;
+let _srFilteredCache      = [];
 let staffHistoryTypeFilterVal = '';
 let staffHistoryPage = 1;
 let allInvHistory    = [];
@@ -74,7 +77,63 @@ function renderPager(containerId, total, currentPage, fnName) {
   });
 }
 
-function changeStaffOrdersPage(p) { staffOrdersPage = p; renderStaffOrders(staffOrders); }
+function renderPagerSized(containerId, total, currentPage, pageSize, fnName) {
+  var el = document.getElementById(containerId);
+  if (!el) return;
+  var totalPages = Math.ceil(total / pageSize);
+  if (totalPages <= 1) { el.innerHTML = ''; return; }
+  var s = (currentPage - 1) * pageSize + 1;
+  var e = Math.min(currentPage * pageSize, total);
+
+  function btn(page, label, disabled) {
+    return '<button '
+      + (disabled ? 'disabled ' : '')
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="height:30px;padding:0 10px;border-radius:6px;'
+      + 'border:1.5px solid var(--border);background:var(--surface);'
+      + 'color:var(--text-primary);font-size:12px;cursor:pointer;'
+      + 'opacity:' + (disabled ? '0.4' : '1') + ';">'
+      + label + '</button>';
+  }
+  function pageBtn(page, active) {
+    return '<button '
+      + 'data-fn="' + fnName + '" data-page="' + page + '" '
+      + 'style="min-width:30px;height:30px;border-radius:6px;'
+      + 'border:1.5px solid ' + (active ? 'var(--g-400)' : 'var(--border)') + ';'
+      + 'background:' + (active ? 'var(--g-400)' : 'var(--surface)') + ';'
+      + 'color:' + (active ? '#fff' : 'var(--text-primary)') + ';'
+      + 'font-size:12px;font-weight:' + (active ? '700' : '400') + ';'
+      + 'cursor:pointer;padding:0 6px;">'
+      + page + '</button>';
+  }
+
+  var btns = '';
+  for (var i = 1; i <= totalPages; i++) {
+    if (i === 1 || i === totalPages || Math.abs(i - currentPage) <= 1) {
+      btns += pageBtn(i, i === currentPage);
+    } else if (Math.abs(i - currentPage) === 2) {
+      btns += '<span style="color:var(--text-muted);padding:0 2px;">...</span>';
+    }
+  }
+
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;flex-wrap:wrap;gap:8px;">'
+    + '<span style="font-size:12px;color:var(--text-muted);">Showing ' + s + ' - ' + e + ' of ' + total + '</span>'
+    + '<div style="display:flex;align-items:center;gap:4px;">'
+    + btn(currentPage - 1, 'Prev', currentPage === 1)
+    + btns
+    + btn(currentPage + 1, 'Next', currentPage === totalPages)
+    + '</div></div>';
+
+  el.querySelectorAll('button[data-fn]').forEach(function(b) {
+    b.addEventListener('click', function() {
+      var fn   = this.getAttribute('data-fn');
+      var page = parseInt(this.getAttribute('data-page'));
+      if (window[fn]) { window[fn](page); }
+    });
+  });
+}
+
+function changeStaffOrdersPage(p) { staffOrdersPage = p; applyStaffOrderFilters(); }
 function changeStaffInvPage(p)     { staffInvPage = p;     renderInvProducts(invProducts); }
 function changeStaffHistoryPage(p) { staffHistoryPage = p; renderInvHistory(allInvHistory); }
 window.changeStaffHistoryPage = changeStaffHistoryPage;
@@ -87,6 +146,7 @@ const pageTitles = {
   orders:    ['Orders',           'Manage online customer orders'],
   requests:  ['Stock Requests',   'Request stock from admin'],
   summary:   ['Sales Summary',    'View sales performance'],
+  profile:   ['My Profile',       'View and update your account information'],
 };
 
 
@@ -226,6 +286,16 @@ function showSection(name, el) {
   document.getElementById('pageSub').textContent   = pageTitles[name][1];
   window.location.hash = name;
   localStorage.setItem('staff-section', name);
+  // Profile sidebar active indicator
+  const sidebarProfileBtn = document.getElementById('sidebarProfileBtn');
+  if (sidebarProfileBtn) {
+    if (name === 'profile') {
+      sidebarProfileBtn.style.background = 'rgba(255,255,255,0.12)';
+      sidebarProfileBtn.style.borderRadius = '8px';
+    } else {
+      sidebarProfileBtn.style.background = '';
+    }
+  }
   loaders[name] && loaders[name]();
   startAutoRefresh(name);
 }
@@ -236,6 +306,7 @@ var loaders = {
   orders:    loadOrders,
   summary:   loadSummary,
   requests:  loadRequests,
+  profile:   loadProfile,
 };
 
 
@@ -348,6 +419,7 @@ function shortId(id) {
 let posProducts     = [];
 let orderItems      = [];
 let selectedPayment = 'walk_in_cash';
+let posDiscounts    = [];
 let invProducts     = [];
 let staffOrders     = [];
 let allBranches     = [];
@@ -440,24 +512,133 @@ async function loadPosProducts() {
   } catch (e) { console.error('POS products error:', e); }
 }
 
+async function loadPosDiscounts() {
+  try {
+    const res  = await fetch('/api/staff/discounts');
+    const data = await res.json();
+    const now  = new Date();
+    posDiscounts = Array.isArray(data)
+      ? data.filter(d => {
+          if (d.ends_at && new Date(d.ends_at) < now) return false;
+          return true;
+        })
+      : [];
+
+    // Update hidden native select (for updateTotal / checkout compatibility)
+    const sel = document.getElementById('posDiscount');
+    if (sel) {
+      sel.innerHTML = '<option value="">— No Discount —</option>' +
+        posDiscounts.map(d =>
+          `<option value="${d.discount_id}" data-pct="${d.percentage}">${d.discount_name} (${d.percentage}% off)</option>`
+        ).join('');
+    }
+
+    // Update custom dropdown menu
+    const menu = document.getElementById('posDiscountMenu');
+    if (menu) {
+      menu.innerHTML = `<div class="pos-discount-option pos-discount-option-none active" data-value="" data-pct="0" onclick="selectDiscount(this)">
+        <span class="pos-discount-opt-name">No Discount</span>
+      </div>` +
+      posDiscounts.map(d => `
+        <div class="pos-discount-option" data-value="${d.discount_id}" data-pct="${d.percentage}" onclick="selectDiscount(this)">
+          <div class="pos-discount-opt-left">
+            <span class="pos-discount-opt-name">${d.discount_name}</span>
+            <span class="pos-discount-opt-sub">Order discount</span>
+          </div>
+          <span class="pos-discount-badge">${d.percentage}% off</span>
+        </div>`).join('');
+    }
+  } catch (e) { console.error('POS discounts error:', e); }
+}
+
+function toggleDiscountDropdown() {
+  const menu    = document.getElementById('posDiscountMenu');
+  const chevron = document.getElementById('posDiscountChevron');
+  const wrap    = document.getElementById('posDiscountWrap');
+  const open    = menu.classList.toggle('open');
+  chevron.style.transform = open ? 'rotate(180deg)' : '';
+  wrap.classList.toggle('open', open);
+  if (open) {
+    // Close on outside click
+    setTimeout(() => document.addEventListener('click', closeDiscountOnOutside, { once: true }), 0);
+  }
+}
+
+function closeDiscountOnOutside(e) {
+  const wrap = document.getElementById('posDiscountWrap');
+  if (wrap && !wrap.contains(e.target)) {
+    document.getElementById('posDiscountMenu').classList.remove('open');
+    document.getElementById('posDiscountChevron').style.transform = '';
+    wrap.classList.remove('open');
+  } else if (wrap && wrap.contains(e.target)) {
+    // Re-attach if click was inside but not on an option
+    setTimeout(() => document.addEventListener('click', closeDiscountOnOutside, { once: true }), 0);
+  }
+}
+
+function selectDiscount(el) {
+  const value = el.dataset.value;
+  const pct   = el.dataset.pct;
+  const name  = el.querySelector('.pos-discount-opt-name').textContent;
+
+  // Update active state in menu
+  document.querySelectorAll('.pos-discount-option').forEach(o => o.classList.remove('active'));
+  el.classList.add('active');
+
+  // Update trigger label
+  const label = document.getElementById('posDiscountLabel');
+  if (value === '') {
+    label.textContent = 'No Discount';
+    label.style.color = '';
+  } else {
+    label.textContent = `${name} — ${pct}% off`;
+    label.style.color = 'var(--g-400)';
+  }
+
+  // Sync hidden select
+  const sel = document.getElementById('posDiscount');
+  if (sel) { sel.value = value; }
+
+  // Close dropdown
+  document.getElementById('posDiscountMenu').classList.remove('open');
+  document.getElementById('posDiscountChevron').style.transform = '';
+  document.getElementById('posDiscountWrap').classList.remove('open');
+
+  updateTotal();
+}
+
 function populateCategories(products) {
-  const cats = [...new Set(products.map(p => p.category))];
+  const cats = [...new Set(products.map(p => p.category).filter(c => c != null && c !== ''))].sort();
   const wrap = document.getElementById('posCats');
-  wrap.innerHTML = `<button class="pos-cat active" onclick="filterPosCategory('', this)">All</button>` +
-    cats.map(c => `<button class="pos-cat" onclick="filterPosCategory('${c}', this)">${c}</button>`).join('');
+  wrap.innerHTML = '';
+
+  const allBtn = document.createElement('button');
+  allBtn.className = 'pos-cat active';
+  allBtn.textContent = 'All';
+  allBtn.addEventListener('click', function() { filterPosCategory('', this); });
+  wrap.appendChild(allBtn);
+
+  cats.forEach(c => {
+    const btn = document.createElement('button');
+    btn.className = 'pos-cat';
+    btn.textContent = c;
+    btn.addEventListener('click', function() { filterPosCategory(c, this); });
+    wrap.appendChild(btn);
+  });
 }
 
 function filterPosCategory(cat, el) {
-  document.querySelectorAll('.pos-cat').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#posCats .pos-cat').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  renderPosProducts(cat ? posProducts.filter(p => p.category === cat) : posProducts);
+  const filtered = cat ? posProducts.filter(p => p.category === cat) : posProducts.slice();
+  renderPosProducts(filtered);
 }
 
 function searchProducts(q) {
   const filtered = posProducts.filter(p =>
     p.product_name.toLowerCase().includes(q.toLowerCase()) ||
     (p.brand || '').toLowerCase().includes(q.toLowerCase()) ||
-    p.category.toLowerCase().includes(q.toLowerCase())
+    (p.category || '').toLowerCase().includes(q.toLowerCase())
   );
   renderPosProducts(filtered);
 }
@@ -728,9 +909,48 @@ window.selectPosVariantOpt   = selectPosVariantOpt;
 window.confirmPosVariant     = confirmPosVariant;
 
 function updateTotal() {
-  const total = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
-  document.getElementById('posSubtotal').textContent = peso(total);
-  document.getElementById('posTotal').textContent    = peso(total);
+  // Subtotal = sum of discounted item prices
+  const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+
+  // Product savings = sum of (original - discounted) per item
+  const prodSavings = orderItems.reduce((s, i) => {
+    if (i.original_price && i.original_price > i.price) {
+      return s + (i.original_price - i.price) * i.quantity;
+    }
+    return s;
+  }, 0);
+
+  // Order-level discount
+  const sel = document.getElementById('posDiscount');
+  const selectedOpt = sel?.options[sel.selectedIndex];
+  const orderDiscPct = selectedOpt?.dataset?.pct ? parseFloat(selectedOpt.dataset.pct) : 0;
+  const orderDiscAmt = subtotal * (orderDiscPct / 100);
+
+  const finalTotal = subtotal - orderDiscAmt;
+
+  document.getElementById('posSubtotal').textContent = peso(subtotal);
+
+  // Product savings row
+  const prodRow = document.getElementById('posProdDiscountRow');
+  if (prodSavings > 0) {
+    document.getElementById('posProdDiscountLabel').textContent = 'Product Savings';
+    document.getElementById('posProdDiscountAmt').textContent   = `−${peso(prodSavings)}`;
+    prodRow.style.display = '';
+  } else {
+    prodRow.style.display = 'none';
+  }
+
+  // Order discount row
+  const orderRow = document.getElementById('posOrderDiscountRow');
+  if (orderDiscPct > 0) {
+    document.getElementById('posOrderDiscountLabel').textContent = `${selectedOpt.text.split('(')[0].trim()} (${orderDiscPct}%)`;
+    document.getElementById('posOrderDiscountAmt').textContent   = `−${peso(orderDiscAmt)}`;
+    orderRow.style.display = '';
+  } else {
+    orderRow.style.display = 'none';
+  }
+
+  document.getElementById('posTotal').textContent = peso(finalTotal);
   computeChange();
 }
 
@@ -739,6 +959,13 @@ function clearOrder() {
   renderOrderItems();
   updateTotal();
   document.getElementById('posCustomer').value     = '';
+  document.getElementById('posDiscount').value     = '';
+  // Reset custom discount dropdown
+  const _dLabel = document.getElementById('posDiscountLabel');
+  if (_dLabel) { _dLabel.textContent = 'No Discount'; _dLabel.style.color = ''; }
+  document.querySelectorAll('.pos-discount-option').forEach(o => o.classList.remove('active'));
+  const _dNone = document.querySelector('.pos-discount-option-none');
+  if (_dNone) _dNone.classList.add('active');
   document.getElementById('posCashReceived').value = '';
   document.getElementById('posChange').value        = '';
   document.getElementById('posGcashRef').value      = '';
@@ -777,7 +1004,10 @@ function selectPayment(method, el) {
 }
 
 function computeChange() {
-  const total    = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const sel      = document.getElementById('posDiscount');
+  const discPct  = sel?.options[sel.selectedIndex]?.dataset?.pct ? parseFloat(sel.options[sel.selectedIndex].dataset.pct) : 0;
+  const total    = subtotal - (subtotal * discPct / 100);
   const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
   const change   = received - total;
   const input    = document.getElementById('posChange');
@@ -811,35 +1041,49 @@ async function processOrder() {
   }
 
   if (selectedPayment === 'walk_in_cash') {
-    const total    = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const _sub  = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const _dSel = document.getElementById('posDiscount');
+    const _dPct = _dSel?.options[_dSel.selectedIndex]?.dataset?.pct ? parseFloat(_dSel.options[_dSel.selectedIndex].dataset.pct) : 0;
+    const _tot  = _sub - (_sub * _dPct / 100);
     const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
-    if (received < total) {
+    if (received < _tot) {
       showToast('Cash received is less than total amount.', 'error');
       return;
     }
   }
 
   try {
-    const total    = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
     const quantity = orderItems.reduce((s, i) => s + i.quantity, 0);
+    const discSel  = document.getElementById('posDiscount');
+    const discOpt  = discSel?.options[discSel.selectedIndex];
+    const discPct  = discOpt?.dataset?.pct ? parseFloat(discOpt.dataset.pct) : 0;
+    const discId   = discSel?.value || null;
+    const discName = discPct > 0 ? discOpt.text.split('(')[0].trim() : null;
+    const discAmt  = subtotal * (discPct / 100);
+    const total    = subtotal - discAmt;
 
     const res = await fetch('/api/staff/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        order_type:     'walk_in',
+        order_type:      'walk_in',
         quantity,
         total,
-        ref_no:         refNo || null,
-        payment_method: selectedPayment,
-        branch_id:      branchId,             // ← sent to create Sales_Transaction
-        cart_items:     orderItems.map(i => ({
+        ref_no:          refNo || null,
+        payment_method:  selectedPayment,
+        branch_id:       branchId,
+        cart_items:      orderItems.map(i => ({
           product_id:       i.product_id,
           quantity:         i.quantity,
           price:            i.price,
           selected_options: i.selected_options || {},
         })),
-        customer_name: document.getElementById('posCustomer').value.trim(),
+        customer_name:   document.getElementById('posCustomer').value.trim(),
+        discount_id:     discId,
+        discount_name:   discName,
+        discount_pct:    discPct || null,
+        discount_amount: discAmt || null,
       }),
     });
 
@@ -851,13 +1095,15 @@ async function processOrder() {
       const receiptPayment  = selectedPayment;
       const receiptRefNo    = document.getElementById('posGcashRef').value;
       const receiptCustomer = document.getElementById('posCustomer')?.value?.trim() || '';
+      const receiptDiscount = { id: discId, name: discName, pct: discPct, amount: discAmt };
       setButtonLoading(processBtn, false);
       clearOrder();
       loadPosProducts();
+      loadPosDiscounts();
       loadOrders();
       loadSummary();
       showToast('Order processed successfully!');
-      showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo, receiptCustomer);
+      showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo, receiptCustomer, receiptDiscount);
     } else {
       setButtonLoading(processBtn, false);
       showToast(data.error || 'Failed to process order.', 'error');
@@ -869,15 +1115,21 @@ async function processOrder() {
 }
 
 // ─── Receipt ──────────────────────────────────────────
-function showReceipt(data, items, received, payment, refNo, customerName = '') {
+function showReceipt(data, items, received, payment, refNo, customerName = '', orderDiscount = {}) {
   // Use passed parameters (captured before clearOrder)
   items    = items    || orderItems;
   received = received !== undefined ? received : parseFloat(document.getElementById('posCashReceived').value) || 0;
   payment  = payment  || selectedPayment;
   refNo    = refNo    || document.getElementById('posGcashRef').value;
 
-  const total     = items.reduce((s, i) => s + i.price * i.quantity, 0) || Number(data.total) || 0;
-  const change    = received - total;
+  const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
+  const prodSavings = items.reduce((s, i) => {
+    if (i.original_price && i.original_price > i.price) return s + (i.original_price - i.price) * i.quantity;
+    return s;
+  }, 0);
+  const orderDiscAmt = orderDiscount?.amount || 0;
+  const total        = Number(data.total) || (subtotal - orderDiscAmt);
+  const change       = received - total;
   const now       = new Date();
 
   // VAT Inclusive (12%) breakdown
@@ -931,6 +1183,21 @@ function showReceipt(data, items, received, payment, refNo, customerName = '') {
         </div>` : ''}`;
       }).join('')}
     </div>
+    <hr class="receipt-divider"/>
+    <div class="receipt-row">
+      <span>Subtotal</span>
+      <span>${peso(subtotal)}</span>
+    </div>
+    ${prodSavings > 0 ? `
+    <div class="receipt-row" style="color:var(--g-400);font-size:11px;">
+      <span>Product Savings</span>
+      <span>−${peso(prodSavings)}</span>
+    </div>` : ''}
+    ${orderDiscAmt > 0 ? `
+    <div class="receipt-row" style="color:var(--g-400);font-size:11px;">
+      <span>${orderDiscount.name || 'Order Discount'} (${orderDiscount.pct}%)</span>
+      <span>−${peso(orderDiscAmt)}</span>
+    </div>` : ''}
     <hr class="receipt-divider"/>
     <div class="receipt-row">
       <span>VATable Sales</span>
@@ -1628,11 +1895,13 @@ let staffOrderSearchText   = '';
 
 function filterStaffOrderType(type) {
   staffOrderTypeFilter = type;
+  staffOrdersPage = 1;
   applyStaffOrderFilters();
 }
 
 function filterStaffOrders(status) {
   staffOrderStatusFilter = status;
+  staffOrdersPage = 1;
   applyStaffOrderFilters();
 }
 
@@ -1659,7 +1928,6 @@ function applyStaffOrderFilters() {
           || type.includes(staffOrderSearchText);
     });
   }
-  staffOrdersPage = 1;
   renderStaffOrders(filtered);
 }
 window.filterStaffOrderType = filterStaffOrderType;
@@ -1789,31 +2057,40 @@ async function loadRequests() {
       badge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
-    document.getElementById('requestsBody').innerHTML = data.length
-      ? data.map(r => {
-          const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
-          const statusColor  = statusColors[r.status] || 'gray';
-          console.log('Request row:', r.product?.product_name, 'variant_options:', r.variant_options);
-          return `
-          <tr>
-            <td>
-              <strong>${r.product?.product_name || '—'}</strong>
-              ${r.variant_options && Object.keys(r.variant_options).length > 0
-                ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
-                : ''}
-            </td>
-            <td>${r.product?.quantity ?? '—'} units</td>
-            <td>${r.quantity_needed} units</td>
-            <td><span class="badge badge--${statusColor}">${r.status}</span></td>
-            <td style="font-size:12px;">${r.note || '—'}</td>
-            <td style="font-size:12px;color:${r.status === 'rejected' ? '#ef4444' : 'inherit'};">${r.admin_note || '—'}</td>
-            <td>${new Date(r.created_at).toLocaleDateString('en-PH')}</td>
-          </tr>`;
-        }).join('')
-      : '<tr><td colspan="7" class="table-empty">No stock requests yet</td></tr>';
+    _srFilteredCache = data;
+    renderRequestsPage();
 
   } catch (e) { console.error('Requests error:', e); }
 }
+
+function renderRequestsPage() {
+  const start  = (srPage - 1) * SR_PAGE_SIZE;
+  const paged  = _srFilteredCache.slice(start, start + SR_PAGE_SIZE);
+  document.getElementById('requestsBody').innerHTML = paged.length
+    ? paged.map(r => {
+        const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
+        const statusColor  = statusColors[r.status] || 'gray';
+        return `
+        <tr>
+          <td>
+            <strong>${r.product?.product_name || '—'}</strong>
+            ${r.variant_options && Object.keys(r.variant_options).length > 0
+              ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+              : ''}
+          </td>
+          <td>${r.product?.quantity ?? '—'} units</td>
+          <td>${r.quantity_needed} units</td>
+          <td><span class="badge badge--${statusColor}">${r.status}</span></td>
+          <td style="font-size:12px;">${r.note || '—'}</td>
+          <td style="font-size:12px;color:${r.status === 'rejected' ? '#ef4444' : 'inherit'};">${r.admin_note || '—'}</td>
+          <td>${new Date(r.created_at).toLocaleDateString('en-PH')}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="table-empty">No stock requests yet</td></tr>';
+  renderPagerSized('staffReqPagination', _srFilteredCache.length, srPage, SR_PAGE_SIZE, 'changeSrPage');
+}
+function changeSrPage(page) { srPage = page; renderRequestsPage(); }
+window.changeSrPage = changeSrPage;
 
 
 function loadReqVariants(productId) {
@@ -1916,6 +2193,7 @@ async function submitRequest(e) {
 document.addEventListener('DOMContentLoaded', async () => {
   await loadBranches();
   await loadPosProducts();
+  await loadPosDiscounts();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');
@@ -1942,3 +2220,211 @@ window.addEventListener('beforeunload', function () {
   style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';
   document.head.appendChild(style);
 })();
+
+
+// ══════════════════════════════════════════════════════
+// PROFILE MODULE
+// ══════════════════════════════════════════════════════
+
+let _profOrigInfo = {};
+
+// ── Inline field error helpers ────────────────────────
+function _profSetFieldError(inputId, msg) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  input.style.borderColor = msg ? '#ef4444' : '';
+  let hint = document.getElementById(inputId + '_err');
+  // Append outside the position:relative wrapper so icons don't shift
+  const container = input.parentNode.classList.contains('form-group')
+    ? input.parentNode
+    : (input.parentNode.parentNode || input.parentNode);
+  if (msg) {
+    if (!hint) {
+      hint = document.createElement('span');
+      hint.id        = inputId + '_err';
+      hint.className = 'field-hint';
+      hint.style.cssText = 'color:#ef4444;margin-top:3px;display:block;';
+      container.appendChild(hint);
+    }
+    hint.textContent = msg;
+  } else if (hint) {
+    hint.textContent = '';
+    input.style.borderColor = '';
+  }
+}
+
+function _profClearErrors() {
+  ['profFname','profLname','profUsername','profEmail','profPhone','profCurrentPw','profNewPw','profConfirmPw'].forEach(id => {
+    _profSetFieldError(id, '');
+  });
+}
+
+// Returns true if all currently-entered values pass validation (no errors)
+function _profValidate() {
+  const fname     = document.getElementById('profFname').value.trim();
+  const lname     = document.getElementById('profLname').value.trim();
+  const username  = document.getElementById('profUsername').value.trim();
+  const email     = document.getElementById('profEmail').value.trim();
+  const phone     = document.getElementById('profPhone').value.trim();
+  const currentPw = document.getElementById('profCurrentPw').value;
+  const newPw     = document.getElementById('profNewPw').value;
+  const confirmPw = document.getElementById('profConfirmPw').value;
+  const changingPw = !!(currentPw || newPw || confirmPw);
+
+  let valid = true;
+
+  _profSetFieldError('profFname',    !fname    ? 'First name is required.' : '');
+  _profSetFieldError('profLname',    !lname    ? 'Last name is required.'  : '');
+  _profSetFieldError('profUsername', !username ? 'Username is required.'   : '');
+
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
+  _profSetFieldError('profEmail', !email ? 'Email is required.' : !emailOk ? 'Enter a valid email address.' : '');
+
+  const phoneOk = /^09\d{9}$/.test(phone);
+  _profSetFieldError('profPhone', !phone ? 'Phone number is required.' : !phoneOk ? 'Must be 09XXXXXXXXX (11 digits).' : '');
+
+  if (!fname || !lname || !username || !email || !emailOk || !phone || !phoneOk) valid = false;
+
+  if (changingPw) {
+    _profSetFieldError('profCurrentPw', !currentPw ? 'Current password is required.' : '');
+    _profSetFieldError('profNewPw',
+      !newPw            ? 'New password is required.' :
+      newPw.length < 8  ? 'Must be at least 8 characters.' : '');
+    _profSetFieldError('profConfirmPw',
+      !confirmPw           ? 'Please confirm your new password.' :
+      confirmPw !== newPw  ? 'Passwords do not match.' : '');
+    if (!currentPw || !newPw || newPw.length < 8 || confirmPw !== newPw) valid = false;
+  } else {
+    _profSetFieldError('profCurrentPw', '');
+    _profSetFieldError('profNewPw',     '');
+    _profSetFieldError('profConfirmPw', '');
+  }
+
+  return valid;
+}
+
+async function loadProfile() {
+  try {
+    const res  = await fetch('/auth/profile');
+    const data = await res.json();
+    if (!res.ok) { showToast(data.error || 'Failed to load profile.', 'error'); return; }
+
+    document.getElementById('profFname').value    = data.fname        || '';
+    document.getElementById('profMi').value       = data.mi           || '';
+    document.getElementById('profLname').value    = data.lname        || '';
+    document.getElementById('profUsername').value = data.username     || '';
+    document.getElementById('profEmail').value    = data.email        || '';
+    document.getElementById('profPhone').value    = data.phone_number || '';
+    document.getElementById('profCurrentPw').value = '';
+    document.getElementById('profNewPw').value     = '';
+    document.getElementById('profConfirmPw').value = '';
+
+    _profOrigInfo = {
+      fname: data.fname || '', mi: data.mi || '', lname: data.lname || '',
+      username: data.username || '', email: data.email || '',
+      phone_number: data.phone_number || '',
+    };
+
+    _profClearErrors();
+
+    ['profFname','profMi','profLname','profUsername','profEmail','profPhone','profCurrentPw','profNewPw','profConfirmPw'].forEach(id => {
+      const el = document.getElementById(id);
+      if (el) el.oninput = checkProfDirty;
+    });
+
+    _setProfSaveBtn(false);
+  } catch (e) {
+    showToast('Error loading profile.', 'error');
+  }
+}
+
+function checkProfDirty() {
+  const infoDirty =
+    document.getElementById('profFname').value    !== _profOrigInfo.fname ||
+    document.getElementById('profMi').value       !== _profOrigInfo.mi ||
+    document.getElementById('profLname').value    !== _profOrigInfo.lname ||
+    document.getElementById('profUsername').value !== _profOrigInfo.username ||
+    document.getElementById('profEmail').value    !== _profOrigInfo.email ||
+    document.getElementById('profPhone').value    !== _profOrigInfo.phone_number;
+  const pwDirty = !!(
+    document.getElementById('profCurrentPw').value ||
+    document.getElementById('profNewPw').value ||
+    document.getElementById('profConfirmPw').value
+  );
+  const dirty = infoDirty || pwDirty;
+
+  // Run inline validation whenever there are changes; clear errors when pristine
+  if (dirty) {
+    const valid = _profValidate();
+    _setProfSaveBtn(valid);
+  } else {
+    _profClearErrors();
+    _setProfSaveBtn(false);
+  }
+}
+
+function _setProfSaveBtn(enabled) {
+  const btn = document.getElementById('profSaveBtn');
+  if (!btn) return;
+  btn.disabled      = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.5';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
+}
+
+async function saveProfile() {
+  const btn        = document.getElementById('profSaveBtn');
+  const fname      = document.getElementById('profFname').value.trim();
+  const mi         = document.getElementById('profMi').value.trim();
+  const lname      = document.getElementById('profLname').value.trim();
+  const username   = document.getElementById('profUsername').value.trim();
+  const email      = document.getElementById('profEmail').value.trim();
+  const phone      = document.getElementById('profPhone').value.trim();
+  const currentPw  = document.getElementById('profCurrentPw').value;
+  const newPw      = document.getElementById('profNewPw').value;
+  const confirmPw  = document.getElementById('profConfirmPw').value;
+  const changingPw = !!(currentPw || newPw || confirmPw);
+
+  // Final validation guard (button should already be disabled on error, but safety net)
+  if (!_profValidate()) return;
+
+  setButtonLoading(btn, true);
+  try {
+    const infoRes  = await fetch('/auth/profile', {
+      method: 'PATCH', headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({ action: 'info', fname, mi, lname, username, email, phone_number: phone }),
+    });
+    const infoData = await infoRes.json();
+    if (!infoRes.ok) { showToast(infoData.error || 'Failed to save profile.', 'error'); return; }
+
+    if (changingPw) {
+      const pwRes  = await fetch('/auth/profile', {
+        method: 'PATCH', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ action: 'password', current_password: currentPw, new_password: newPw, confirm_password: confirmPw }),
+      });
+      const pwData = await pwRes.json();
+      if (!pwRes.ok) { showToast(pwData.error || 'Failed to change password.', 'error'); return; }
+    }
+
+    showToast(changingPw ? 'Profile and password updated!' : 'Profile updated successfully!');
+    _profOrigInfo = { fname, mi, lname, username, email, phone_number: phone };
+    document.getElementById('profCurrentPw').value = '';
+    document.getElementById('profNewPw').value     = '';
+    document.getElementById('profConfirmPw').value = '';
+    _profClearErrors();
+    _setProfSaveBtn(false);
+  } catch (e) {
+    showToast('Error saving profile.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+
+function togglePwVisibility(inputId, btn) {
+  const input = document.getElementById(inputId);
+  if (!input) return;
+  const isHidden = input.type === 'password';
+  input.type = isHidden ? 'text' : 'password';
+  btn.innerHTML = isHidden
+    ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
+    : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+}

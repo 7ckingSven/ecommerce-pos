@@ -81,11 +81,13 @@
       </button>
 
       <div class="sidebar-user">
-        <div class="sidebar-user-avatar">{{ session.name[0] if session.name else 'A' }}</div>
-        <div class="sidebar-user-info">
-          <span class="sidebar-user-name">{{ session.name or 'Admin' }}</span>
-          <span class="sidebar-user-role">Administrator</span>
-        </div>
+        <a href="#" id="sidebarProfileBtn" class="sidebar-user-profile-btn" onclick="showSection('profile', null); return false;" title="View Profile" style="display:flex;align-items:center;gap:10px;flex:1;min-width:0;text-decoration:none;border-radius:8px;transition:background 0.15s;">
+          <div class="sidebar-user-avatar">{{ session.name[0] if session.name else 'A' }}</div>
+          <div class="sidebar-user-info">
+            <span class="sidebar-user-name">{{ session.name or 'Admin' }}</span>
+            <span class="sidebar-user-role">Administrator</span>
+          </div>
+        </a>
         <a href="#" data-logout-url="{{ url_for('logout') }}" onclick="openLogoutModal(this.dataset.logoutUrl)" class="sidebar-logout" title="Logout">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
         </a>
@@ -346,6 +348,7 @@
             <tbody id="productsBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
+        <div id="productsPagination" style="padding:0 16px;"></div>
       </div>
     </section>
 
@@ -758,6 +761,7 @@
             </tbody>
           </table>
         </div>
+        <div id="discountsPagination" style="padding:0 16px;"></div>
       </div>
 
       <!-- Products with Discounts -->
@@ -820,7 +824,118 @@
             <tbody id="usersBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
+        <div id="usersPagination" style="padding:0 16px;"></div>
       </div>
+    </section>
+
+    <!-- ─── PROFILE ──────────────────────────────────── -->
+    <section class="section" id="section-profile">
+
+      <div class="card" style="max-width:720px;">
+        <div class="card-header">
+          <span class="card-title">My Profile</span>
+        </div>
+        <div style="padding:1.2rem;">
+
+          <!-- Personal Information -->
+          <p class="field-hint" style="font-weight:600;color:var(--text);margin-bottom:0.75rem;">Personal Information</p>
+          <div class="form-row-3" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">First Name <span class="req">*</span></label>
+              <input type="text" id="profFname" class="form-input" placeholder="First name" autocomplete="given-name"/>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">M.I.</label>
+              <input type="text" id="profMi" class="form-input" placeholder="M.I." maxlength="3"/>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Last Name <span class="req">*</span></label>
+              <input type="text" id="profLname" class="form-input" placeholder="Last name" autocomplete="family-name"/>
+            </div>
+          </div>
+          <div class="form-row-2" style="margin-bottom:1rem;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Username <span class="req">*</span></label>
+              <input type="text" id="profUsername" class="form-input" placeholder="Username" autocomplete="username"/>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Email <span class="req">*</span></label>
+              <input type="email" id="profEmail" class="form-input" placeholder="Email address" autocomplete="email"/>
+            </div>
+          </div>
+          <div class="form-group" style="margin-bottom:1.5rem;">
+            <label class="form-label">Phone Number</label>
+            <div style="position:relative;max-width:320px;">
+              <input type="text" id="profPhone" class="form-input" placeholder="09XXXXXXXXX" autocomplete="tel" maxlength="11" style="width:100%;padding-right:48px;"/>
+              <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;user-select:none;line-height:0;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" style="width:22px;height:15px;border-radius:2px;display:block;">
+                  <rect width="900" height="600" fill="#CE1126"/>
+                  <rect width="900" height="300" fill="#0038A8"/>
+                  <polygon points="0,0 450,300 0,600" fill="#fff"/>
+                  <!-- Sun -->
+                  <g transform="translate(150,300)">
+                    <circle r="55" fill="#FCD116"/>
+                    <g fill="#FCD116">
+                      <line x1="0" y1="-85" x2="0" y2="-65" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="0" y1="65" x2="0" y2="85" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="-85" y1="0" x2="-65" y2="0" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="65" y1="0" x2="85" y2="0" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="-60" y1="-60" x2="-46" y2="-46" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="46" y1="46" x2="60" y2="60" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="60" y1="-60" x2="46" y2="-46" stroke="#FCD116" stroke-width="10"/>
+                      <line x1="-46" y1="46" x2="-60" y2="60" stroke="#FCD116" stroke-width="10"/>
+                    </g>
+                  </g>
+                  <!-- Stars -->
+                  <polygon points="55,47 58,56 67,56 60,62 63,71 55,65 47,71 50,62 43,56 52,56" fill="#FCD116"/>
+                  <polygon points="55,553 58,562 67,562 60,568 63,577 55,571 47,577 50,568 43,562 52,562" fill="#FCD116"/>
+                  <polygon points="395,294 398,303 407,303 400,309 403,318 395,312 387,318 390,309 383,303 392,303" fill="#FCD116"/>
+                </svg>
+              </span>
+            </div>
+          </div>
+
+          <!-- Divider -->
+          <div style="border-top:1px solid var(--border);margin-bottom:1.25rem;"></div>
+
+          <!-- Change Password -->
+          <p class="field-hint" style="font-weight:600;color:var(--text);margin-bottom:0.75rem;">Change Password <span class="field-hint" style="font-weight:400;">(leave blank to keep current)</span></p>
+          <div class="form-group">
+            <label class="form-label">Current Password</label>
+            <div style="position:relative;max-width:360px;">
+              <input type="password" id="profCurrentPw" class="form-input" placeholder="Enter current password" style="padding-right:40px;" oninput="checkProfDirty()"/>
+              <button type="button" class="btn-icon" onclick="togglePwVisibility('profCurrentPw', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+              </button>
+            </div>
+          </div>
+          <div class="form-row-2" style="margin-bottom:1.5rem;">
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">New Password</label>
+              <div style="position:relative;">
+                <input type="password" id="profNewPw" class="form-input" placeholder="Min. 8 characters" style="padding-right:40px;" oninput="checkProfDirty()"/>
+                <button type="button" class="btn-icon" onclick="togglePwVisibility('profNewPw', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                </button>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom:0;">
+              <label class="form-label">Confirm New Password</label>
+              <div style="position:relative;">
+                <input type="password" id="profConfirmPw" class="form-input" placeholder="Repeat new password" style="padding-right:40px;" oninput="checkProfDirty()"/>
+                <button type="button" class="btn-icon" onclick="togglePwVisibility('profConfirmPw', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Save -->
+          <button id="profSaveBtn" class="btn btn-solid-green" onclick="saveProfile()" disabled style="opacity:0.5;cursor:not-allowed;">Save Changes</button>
+
+        </div>
+      </div>
+
     </section>
 
   </main>
@@ -844,24 +959,24 @@
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Product Name <span class="req">*</span></label>
-            <input type="text" id="pName" class="form-input" required/>
+            <input type="text" id="pName" class="form-input" oninput="_prodCheckField('pName')"/>
           </div>
           <div class="form-group">
-            <label class="form-label">Brand</label>
-            <input type="text" id="pBrand" class="form-input" placeholder="Select or type a new brand..." list="brandList" autocomplete="off"/>
+            <label class="form-label">Brand <span class="req">*</span></label>
+            <input type="text" id="pBrand" class="form-input" placeholder="Select or type a new brand..." list="brandList" autocomplete="off" oninput="_prodCheckField('pBrand')"/>
             <datalist id="brandList"></datalist>
           </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Category <span class="req">*</span></label>
-            <input type="text" id="pCategory" class="form-input" required placeholder="Select or type a new category..." list="categoryList" autocomplete="off"/>
+            <input type="text" id="pCategory" class="form-input" placeholder="Select or type a new category..." list="categoryList" autocomplete="off" oninput="_prodCheckField('pCategory')"/>
             <datalist id="categoryList"></datalist>
             <span class="field-hint">Choose an existing category or type a new one.</span>
           </div>
           <div class="form-group">
             <label class="form-label">Price (₱) <span class="req">*</span></label>
-            <input type="number" id="pPrice" class="form-input" step="0.01" min="0" required/>
+            <input type="number" id="pPrice" class="form-input" step="0.01" min="0" oninput="_prodCheckField('pPrice')"/>
           </div>
         </div>
         <div class="form-group">
@@ -895,9 +1010,9 @@
 
         <!-- Net Weight + Unit -->
         <div class="form-group">
-          <label class="form-label">Net Weight / Volume <span style="font-weight:400;color:var(--text-muted);">(for shipping calculation)</span></label>
+          <label class="form-label">Net Weight / Volume <span class="req">*</span> <span style="font-weight:400;color:var(--text-muted);">(for shipping calculation)</span></label>
           <div style="display:flex;gap:8px;">
-            <input type="number" id="pNetWeight" class="form-input" min="0" step="0.01" placeholder="e.g. 0.5, 250, 1.2" style="flex:1;"/>
+            <input type="number" id="pNetWeight" class="form-input" min="0" step="0.01" placeholder="e.g. 0.5, 250, 1.2" style="flex:1;" oninput="_prodCheckField('pNetWeight')"/>
             <select id="pNetWeightUnit" class="form-input form-select" style="width:90px;">
               <option value="kg">kg</option>
               <option value="gram">gram</option>
@@ -921,7 +1036,7 @@
 
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeProductModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save Product</button>
+          <button type="submit" id="productSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Save Product</button>
         </div>
       </form>
     </div>
@@ -1028,7 +1143,7 @@
         </button>
         <div class="modal-footer" style="margin-top:12px;">
           <button type="button" class="btn btn-cancel" onclick="closeAddStockModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Submit All</button>
+          <button type="submit" id="addStockSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Submit All</button>
         </div>
       </form>
     </div>
@@ -1079,7 +1194,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeTransferModal()">Cancel</button>
-          <button type="submit" class="btn" style="background:#3b82f6;color:#fff;border-color:#3b82f6;">Transfer Stock</button>
+          <button type="submit" id="transferSubmitBtn" class="btn" style="background:#3b82f6;color:#fff;border-color:#3b82f6;opacity:0.45;cursor:not-allowed;" disabled>Transfer Stock</button>
         </div>
       </form>
     </div>
@@ -1137,7 +1252,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeAdjustModal()">Cancel</button>
-          <button type="submit" class="btn" style="background:#ef4444;color:#fff;">Deduct Stock</button>
+          <button type="submit" id="adjustSubmitBtn" class="btn" style="background:#ef4444;color:#fff;opacity:0.45;cursor:not-allowed;" disabled>Deduct Stock</button>
         </div>
       </form>
     </div>
@@ -1158,7 +1273,7 @@
         <div class="form-row-3">
           <div class="form-group">
             <label class="form-label">First Name <span class="req">*</span></label>
-            <input type="text" id="uFname" class="form-input" required/>
+            <input type="text" id="uFname" class="form-input" oninput="_userCheckField('uFname')"/>
           </div>
           <div class="form-group">
             <label class="form-label">MI</label>
@@ -1166,23 +1281,48 @@
           </div>
           <div class="form-group">
             <label class="form-label">Last Name <span class="req">*</span></label>
-            <input type="text" id="uLname" class="form-input" required/>
+            <input type="text" id="uLname" class="form-input" oninput="_userCheckField('uLname')"/>
           </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Email <span class="req">*</span></label>
-            <input type="email" id="uEmail" class="form-input" required/>
+            <input type="email" id="uEmail" class="form-input" oninput="_userCheckField('uEmail')"/>
           </div>
           <div class="form-group">
-            <label class="form-label">Phone</label>
-            <input type="tel" id="uPhone" class="form-input" maxlength="11" placeholder="09XXXXXXXXX"/>
+            <label class="form-label">Phone <span class="req">*</span></label>
+            <div style="position:relative;">
+              <input type="tel" id="uPhone" class="form-input" maxlength="11" placeholder="09XXXXXXXXX" style="padding-right:48px;" oninput="_userCheckField('uPhone')"/>
+              <span style="position:absolute;right:10px;top:50%;transform:translateY(-50%);pointer-events:none;user-select:none;line-height:0;">
+                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 900 600" style="width:22px;height:15px;border-radius:2px;display:block;">
+                  <rect width="900" height="600" fill="#CE1126"/>
+                  <rect width="900" height="300" fill="#0038A8"/>
+                  <polygon points="0,0 450,300 0,600" fill="#fff"/>
+                  <g transform="translate(150,300)">
+                    <circle r="55" fill="#FCD116"/>
+                    <line x1="0" y1="-85" x2="0" y2="-65" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="0" y1="65" x2="0" y2="85" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="-85" y1="0" x2="-65" y2="0" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="65" y1="0" x2="85" y2="0" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="-60" y1="-60" x2="-46" y2="-46" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="46" y1="46" x2="60" y2="60" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="60" y1="-60" x2="46" y2="-46" stroke="#FCD116" stroke-width="10"/>
+                    <line x1="-46" y1="46" x2="-60" y2="60" stroke="#FCD116" stroke-width="10"/>
+                  </g>
+                  <g fill="#FCD116">
+                    <polygon points="0,100 9,127 0,120 -9,127" transform="translate(75,150)"/>
+                    <polygon points="0,100 9,127 0,120 -9,127" transform="translate(75,150) rotate(120,0,300)"/>
+                    <polygon points="0,100 9,127 0,120 -9,127" transform="translate(75,150) rotate(240,0,300)"/>
+                  </g>
+                </svg>
+              </span>
+            </div>
           </div>
         </div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Username <span class="req">*</span></label>
-            <input type="text" id="uUsername" class="form-input" required/>
+            <input type="text" id="uUsername" class="form-input" oninput="_userCheckField('uUsername')"/>
           </div>
           <div class="form-group">
             <label class="form-label">Role <span class="req">*</span></label>
@@ -1200,11 +1340,16 @@
         </div>
         <div class="form-group" id="uPasswordGroup">
           <label class="form-label">Password <span class="req">*</span></label>
-          <input type="password" id="uPassword" class="form-input" placeholder="Minimum 8 characters"/>
+          <div style="position:relative;">
+            <input type="password" id="uPassword" class="form-input" placeholder="Minimum 8 characters" style="padding-right:40px;" oninput="_userCheckField('uPassword')"/>
+            <button type="button" class="btn-icon" onclick="togglePwVisibility('uPassword', this)" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>
+            </button>
+          </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeUserModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save</button>
+          <button type="submit" id="userSubmitBtn" class="btn btn-solid-green">Save</button>
         </div>
       </form>
     </div>
