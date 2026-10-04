@@ -8,6 +8,7 @@ import { isLoggedIn } from '../services/authService';
 import { addToCart } from '../services/cartService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 // ─── Discount Helper ──────────────────────────────────
 function getDiscountedPrice(product) {
@@ -27,6 +28,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const branchQty  = branchStock?.quantity ?? product._branchQty ?? product.quantity ?? 0;
   const branchName = branchStock?.branch?.branch_name || product._branchName || null;
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+  const insets = useSafeAreaInsets();
 
   const [quantity, setQty]   = useState(1);
   const [loadingCart, setLoadingCart] = useState(false);
@@ -169,7 +171,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     <View style={styles.container}>
 
       {/* Back Button */}
-      <TouchableOpacity style={styles.backBtn} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeMain')}>
+      <TouchableOpacity style={[styles.backBtn, { top: SPACING.xl + insets.top }]} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeMain')}>
         <Feather name="arrow-left" size={22} color={COLORS.white}/>
       </TouchableOpacity>
 
@@ -428,7 +430,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   container:             { flex:1, backgroundColor: COLORS.grayBg },
-  backBtn:               { position:'absolute', top: SPACING.xl, left: SPACING.md, zIndex:10, backgroundColor:'rgba(0,0,0,0.4)', borderRadius: RADIUS.full, padding:8 },
+  backBtn:               { position:'absolute', left: SPACING.md, zIndex:10, backgroundColor:'rgba(0,0,0,0.4)', borderRadius: RADIUS.full, padding:8 },
 
   // Image
   productImg:            { width:'100%', height:280 },
@@ -489,7 +491,7 @@ const styles = StyleSheet.create({
   btnBuy:                { backgroundColor: COLORS.primary },
   btnDisabled:           { backgroundColor: COLORS.grayLight },
   btnText:               { color: COLORS.white, fontWeight:'700', fontSize:14 },
-  
+
   // Old styles (keeping for backward compatibility if needed)
   cartBtn:               { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding:14, alignItems:'center' },
   cartBtnDisabled:       { backgroundColor: COLORS.grayLight },
@@ -501,16 +503,16 @@ const styles = StyleSheet.create({
   optionGroup:            { marginBottom: SPACING.md },
   optionGroupLabel:       { fontSize: 13, fontWeight: '700', color: COLORS.dark, marginBottom: 8 },
   optionChoicesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  optionChip:             { 
-    backgroundColor: COLORS.white, 
-    borderRadius: RADIUS.full, 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    borderWidth: 1.5, 
+  optionChip:             {
+    backgroundColor: COLORS.white,
+    borderRadius: RADIUS.full,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+    borderWidth: 1.5,
     borderColor: COLORS.grayBorder,
   },
-  optionChipSelected:     { 
-    backgroundColor: COLORS.primary, 
+  optionChipSelected:     {
+    backgroundColor: COLORS.primary,
     borderColor: COLORS.primary,
   },
   optionChipText:         { fontSize: 13, color: COLORS.dark, fontWeight: '500' },

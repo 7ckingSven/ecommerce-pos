@@ -62,16 +62,41 @@ def enableProguardInReleaseBuilds = false
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
- *
- * For example, to use the international variant, you can use:
- * `def jscFlavor = io.github.react-native-community:jsc-android-intl:2026004.+`
- *
- * The international variant includes ICU i18n library and necessary data
- * allowing to use e.g. `Date.toLocaleString` and `String.localeCompare` that
- * give correct results when using with locales other than en-US. Note that
- * this variant is about 6MiB larger per architecture than default.
  */
 def jscFlavor = 'io.github.react-native-community:jsc-android:2026004.+'
+
+// ─── Auto-increment version from version.properties ──────────────────────────
+def versionPropsFile = file("version.properties")
+def versionProps = new Properties()
+
+if (versionPropsFile.exists()) {
+    versionPropsFile.withInputStream { stream -> versionProps.load(stream) }
+} else {
+    versionProps['VERSION_CODE']  = '1'
+    versionProps['VERSION_MAJOR'] = '1'
+    versionProps['VERSION_MINOR'] = '0'
+}
+
+def _versionCode  = versionProps['VERSION_CODE'].toInteger()
+def _versionMajor = versionProps['VERSION_MAJOR'].toInteger()
+def _versionMinor = versionProps['VERSION_MINOR'].toInteger()
+
+// Bump only on release builds (not debug)
+gradle.taskGraph.whenReady { taskGraph ->
+    def isRelease = taskGraph.allTasks.any { it.name.contains('Release') }
+    if (isRelease) {
+        _versionCode  += 1
+        _versionMinor += 1
+
+        versionProps['VERSION_CODE']  = _versionCode.toString()
+        versionProps['VERSION_MAJOR'] = _versionMajor.toString()
+        versionProps['VERSION_MINOR'] = _versionMinor.toString()
+
+        versionPropsFile.withOutputStream { stream -> versionProps.store(stream, null) }
+        println ">>> Release build: version bumped to ${_versionMajor}.${_versionMinor} (code ${_versionCode})"
+    }
+}
+// ─────────────────────────────────────────────────────────────────────────────
 
 android {
     ndkVersion rootProject.ext.ndkVersion
@@ -84,8 +109,8 @@ android {
         applicationId "com.mobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 1
-        versionName "1.0"
+        versionCode _versionCode
+        versionName "${_versionMajor}.${_versionMinor}"
     }
     signingConfigs {
         debug {
@@ -99,8 +124,7 @@ android {
     applicationVariants.all { variant ->
         variant.outputs.all { output ->
             def versionName = variant.versionName
-            def buildType   = variant.buildType.name
-            outputFileName  = "TEFC-ECommerce-v${versionName}-${buildType}.apk"
+            outputFileName  = "TEFC-ECommerce_v${versionName}.apk"
         }
     }
 

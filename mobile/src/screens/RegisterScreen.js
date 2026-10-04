@@ -7,6 +7,7 @@ import Feather from 'react-native-vector-icons/Feather';
 import { register } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RegisterScreen({ navigation, route }) {
   const verifiedEmail = route?.params?.verifiedEmail || '';
@@ -18,6 +19,7 @@ export default function RegisterScreen({ navigation, route }) {
   const [legalModal,  setLegalModal]  = useState(null);
   const [psgcAddress,        setPsgcAddress]       = useState({});
   const [checkingDuplicate, setCheckingDuplicate] = useState(false);
+  const insets = useSafeAreaInsets();
   const [form, setForm] = useState({
     fname: '', mi: '', lname: '',
     email: verifiedEmail, username: '', phone_number: '',
@@ -116,7 +118,7 @@ export default function RegisterScreen({ navigation, route }) {
       style={styles.flex}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
-      <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
+      <ScrollView contentContainerStyle={[styles.container, { paddingTop: SPACING.lg + insets.top }]} keyboardShouldPersistTaps="handled">
 
         {/* Header */}
         <View style={styles.header}>
@@ -394,7 +396,7 @@ export default function RegisterScreen({ navigation, route }) {
 
 const styles = StyleSheet.create({
   flex:             { flex: 1, backgroundColor: COLORS.dark },
-  container:        { flexGrow: 1, padding: SPACING.md, paddingTop: SPACING.lg },
+  container:        { flexGrow: 1, padding: SPACING.md },
   header:           { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom: SPACING.lg },
   backBtn:          { width:36, height:36, alignItems:'center', justifyContent:'center' },
   headerTitle:      { fontSize:16, fontWeight:'700', color: COLORS.white },

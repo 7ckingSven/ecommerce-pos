@@ -11,6 +11,7 @@ import { getCustomerId, getCustomer } from '../services/authService';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const PAYMENT_METHODS = [
   { id: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'truck',      sub: 'Pay when your order arrives' },
@@ -21,6 +22,7 @@ export default function CheckoutScreen({ route, navigation }) {
   const { cartItems, total, branchId } = route.params;
 
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+  const insets = useSafeAreaInsets();
 
   const [payment,       setPayment]       = useState('cash_on_delivery');
   const [refNo,         setRefNo]         = useState('');
@@ -328,7 +330,7 @@ export default function CheckoutScreen({ route, navigation }) {
     <View style={styles.container}>
 
       {/* Header */}
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: SPACING.xl + insets.top }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Feather name="arrow-left" size={22} color={COLORS.white}/>
         </TouchableOpacity>
@@ -689,7 +691,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   container:          { flex: 1, backgroundColor: COLORS.grayBg },
-  header:             { backgroundColor: COLORS.dark, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md },
+  header:             { backgroundColor: COLORS.dark, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingBottom: SPACING.md },
   headerTitle:        { fontSize: 18, fontWeight: '700', color: COLORS.white },
   content:            { padding: SPACING.md, gap: SPACING.md },
 

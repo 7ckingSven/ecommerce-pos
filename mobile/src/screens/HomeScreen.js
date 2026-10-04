@@ -375,7 +375,7 @@ export default function HomeScreen({ navigation }) {
     <View style={styles.container}>
 
       {/* Status Bar — green to match header */}
-      <StatusBar backgroundColor="#16a34a" barStyle="light-content" translucent={false}/>
+      <StatusBar backgroundColor="#16a34a" barStyle="light-content" translucent={true}/>
 
       {/* Header — Compact */}
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
