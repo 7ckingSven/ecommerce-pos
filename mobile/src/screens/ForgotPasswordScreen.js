@@ -1,32 +1,49 @@
 import React, { useState } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
-  ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
+  ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 export default function ForgotPasswordScreen({ navigation }) {
   const [email,   setEmail]   = useState('');
   const [loading, setLoading] = useState(false);
+  const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
   async function handleSendOTP() {
     if (!email.trim()) {
-      Alert.alert('Required', 'Please enter your email address.');
+      showAlert({
+        type:    'warning',
+        title:   'Required',
+        message: 'Please enter your email address.',
+        buttons: [{ text: 'OK', style: 'primary' }],
+      });
       return;
     }
     setLoading(true);
     try {
       await api.post('/auth/forgot-password', { email: email.trim().toLowerCase() });
-      Alert.alert(
-        'OTP Sent!',
-        `A 6-digit OTP has been sent to ${email}. Check your inbox.`,
-        [{ text: 'OK', onPress: () => navigation.navigate('VerifyOTP', { email: email.trim().toLowerCase() }) }]
-      );
+      showAlert({
+        type:    'success',
+        title:   'OTP Sent!',
+        message: `A 6-digit OTP has been sent to ${email}. Check your inbox.`,
+        buttons: [{
+          text:    'OK',
+          style:   'primary',
+          onPress: () => navigation.navigate('VerifyOTP', { email: email.trim().toLowerCase() }),
+        }],
+      });
     } catch (e) {
       const msg = e?.response?.data?.error || 'Failed to send OTP. Please try again.';
-      Alert.alert('Error', msg);
+      showAlert({
+        type:    'error',
+        title:   'Error',
+        message: msg,
+        buttons: [{ text: 'OK', style: 'primary' }],
+      });
     } finally {
       setLoading(false);
     }
@@ -92,6 +109,8 @@ export default function ForgotPasswordScreen({ navigation }) {
         </View>
 
       </ScrollView>
+
+      <CustomAlert config={alertConfig} onHide={hideAlert} />
     </KeyboardAvoidingView>
   );
 }

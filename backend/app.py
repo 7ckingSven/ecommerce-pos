@@ -1882,38 +1882,59 @@ def api_auth_forgot_password():
     try:
         data  = request.get_json()
         email = data.get('email', '').strip().lower()
+        print(f'[forgot-password] received email: "{email}"')
         if not email:
             return jsonify({'error': 'Email is required.'}), 400
 
-        # Email is in customer table — get user_id from there
+        # Look up customer by email
         cust_res = supabase.table('customer').select('user_id, email').eq('email', email).execute()
+        print(f'[forgot-password] customer lookup result: {cust_res.data}')
         if not cust_res.data:
+            print(f'[forgot-password] email not found in customer table: {email}')
             return jsonify({'message': 'If this email exists, an OTP has been sent.'}), 200
 
         # Generate OTP
         otp        = str(random.randint(100000, 999999))
         expires_at = (datetime.now(timezone.utc) + timedelta(minutes=5)).isoformat()
+        print(f'[forgot-password] generated OTP for {email}')
 
         # Invalidate old OTPs
-        supabase.table('otp_codes').update({'used': True}).eq('email', email).eq('used', False).execute()
+        try:
+            supabase.table('otp_codes').update({'used': True}).eq('email', email).eq('used', False).execute()
+        except Exception as inv_err:
+            print(f'[forgot-password] WARNING: could not invalidate old OTPs: {inv_err}')
 
-        # Store new OTP
-        supabase.table('otp_codes').insert({
-            'email':      email,
-            'otp':        otp,
-            'expires_at': expires_at,
-            'used':       False,
-        }).execute()
+        # Store new OTP — if this fails, return error immediately
+        try:
+            supabase.table('otp_codes').insert({
+                'email':      email,
+                'otp':        otp,
+                'expires_at': expires_at,
+                'used':       False,
+            }).execute()
+            print(f'[forgot-password] OTP saved to otp_codes for {email}')
+        except Exception as ins_err:
+            print(f'[forgot-password] ERROR: failed to insert OTP: {ins_err}')
+            return jsonify({'error': 'Failed to generate OTP. Please try again.'}), 500
 
-        # Send email
-        sent = send_otp_email(email, otp)
+        # Send email — warn but don't hard-fail if email delivery fails
+        try:
+            sent = send_otp_email(email, otp)
+            if not sent:
+                print(f'[forgot-password] WARNING: email send returned False for {email}')
+        except Exception as email_err:
+            print(f'[forgot-password] WARNING: email send exception: {email_err}')
+            sent = False
+
         if not sent:
-            return jsonify({'error': 'Failed to send OTP. Please try again.'}), 500
+            return jsonify({'error': 'OTP was generated but email delivery failed. Please try again.'}), 500
 
         return jsonify({'message': 'If this email exists, an OTP has been sent.'}), 200
     except Exception as e:
-        print(f'Forgot password error: {e}')
-        return jsonify({'error': 'Something went wrong.'}), 500
+        import traceback
+        print(f'[forgot-password] UNHANDLED ERROR: {type(e).__name__}: {e}')
+        traceback.print_exc()
+        return jsonify({'error': f'Something went wrong: {str(e)}'}), 500
 
 
 @app.route('/api/auth/verify-otp', methods=['POST'])
@@ -1922,24 +1943,42 @@ def api_auth_verify_otp():
         data  = request.get_json()
         email = data.get('email', '').strip().lower()
         otp   = data.get('otp', '').strip()
+        print(f'[verify-otp] email="{email}" otp="{otp}"')
+
         if not email or not otp:
             return jsonify({'error': 'Email and OTP are required.'}), 400
 
         res = supabase.table('otp_codes').select('*').eq('email', email).eq('otp', otp).eq('used', False).execute()
+        print(f'[verify-otp] otp_codes lookup: {res.data}')
+
         if not res.data:
+            # Log all OTPs for this email to help diagnose issues
+            any_res = supabase.table('otp_codes').select('otp, used').eq('email', email).execute()
+            print(f'[verify-otp] all OTPs for email: {any_res.data}')
             return jsonify({'error': 'Invalid OTP. Please try again.'}), 400
 
-        otp_record = res.data[0]
-        expires_at_str = otp_record['expires_at'].replace('Z', '+00:00')
+        otp_record     = res.data[0]
+        expires_at_str = otp_record['expires_at']
+        # Supabase may return with or without 'Z' / offset — normalise to UTC-aware
+        if expires_at_str.endswith('Z'):
+            expires_at_str = expires_at_str[:-1] + '+00:00'
         expires_at = datetime.fromisoformat(expires_at_str)
-        if datetime.now(timezone.utc) > expires_at:
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        now = datetime.now(timezone.utc)
+        print(f'[verify-otp] expires_at={expires_at} now={now} expired={now > expires_at}')
+
+        if now > expires_at:
             return jsonify({'error': 'OTP has expired. Please request a new one.'}), 400
 
         supabase.table('otp_codes').update({'used': True}).eq('id', otp_record['id']).execute()
+        print(f'[verify-otp] OTP verified and marked used for {email}')
         return jsonify({'message': 'OTP verified.', 'email': email}), 200
     except Exception as e:
-        print(f'Verify OTP error: {e}')
-        return jsonify({'error': 'Something went wrong.'}), 500
+        import traceback
+        print(f'[verify-otp] UNHANDLED ERROR: {type(e).__name__}: {e}')
+        traceback.print_exc()
+        return jsonify({'error': f'Verification failed: {str(e)}'}), 500
 
 
 @app.route('/api/auth/reset-password', methods=['POST'])
@@ -1948,21 +1987,27 @@ def api_auth_reset_password():
         data         = request.get_json()
         email        = data.get('email', '').strip().lower()
         new_password = data.get('new_password', '')
+        print(f'[reset-password] email="{email}"')
+
         if not email or not new_password:
             return jsonify({'error': 'Email and new password are required.'}), 400
         if len(new_password) < 8:
             return jsonify({'error': 'Password must be at least 8 characters.'}), 400
 
         cust_res = supabase.table('customer').select('user_id').eq('email', email).execute()
+        print(f'[reset-password] customer lookup: {cust_res.data}')
         if not cust_res.data:
-            return jsonify({'error': 'User not found.'}), 404
+            return jsonify({'error': 'No account found with that email.'}), 404
 
         new_hash = hash_password(new_password)
         supabase.table('user').update({'password': new_hash}).eq('user_id', cust_res.data[0]['user_id']).execute()
+        print(f'[reset-password] password updated for {email}')
         return jsonify({'message': 'Password reset successfully.'}), 200
     except Exception as e:
-        print(f'Reset password error: {e}')
-        return jsonify({'error': 'Something went wrong.'}), 500
+        import traceback
+        print(f'[reset-password] UNHANDLED ERROR: {type(e).__name__}: {e}')
+        traceback.print_exc()
+        return jsonify({'error': f'Reset failed: {str(e)}'}), 500
 
 
 
