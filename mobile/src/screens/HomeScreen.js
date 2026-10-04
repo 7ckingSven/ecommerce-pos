@@ -128,12 +128,14 @@ export default function HomeScreen({ navigation }) {
   const [tempBrand,      setTempBrand]      = useState('');
   const SUGG_PER_PAGE = 10;
   const searchRef = useRef(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
 
   // Auto-refresh every 10 seconds when screen is focused
   useFocusEffect(
     useCallback(() => {
       isLoggedIn().then(setLoggedIn);
       loadProducts();
+      loadSearchHistory(); // Bug fix: was never called
 
       const timer = setInterval(() => {
         // Re-load but preserve current filters
@@ -378,7 +380,10 @@ export default function HomeScreen({ navigation }) {
       <StatusBar backgroundColor="#16a34a" barStyle="light-content" translucent={true}/>
 
       {/* Header — Compact */}
-      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+      <View
+        style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}
+        onLayout={e => setHeaderHeight(e.nativeEvent.layout.height)}
+      >
         <View style={styles.headerTop}>
           {searchFocused ? (
             <TouchableOpacity onPress={() => {
@@ -419,23 +424,22 @@ export default function HomeScreen({ navigation }) {
               </TouchableOpacity>
             )}
           </View>
-          {searchFocused && (
-            <TouchableOpacity
-              onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(true); }}
-              style={styles.filterIconBtn}
-            >
-              <Feather name="sliders" size={18} color="#fff"/>
-              {(selectedCat || selectedBrand) && (
-                <View style={styles.filterDot}/>
-              )}
-            </TouchableOpacity>
-          )}
+          {/* Bug fix: filter button always visible, not just when searchFocused */}
+          <TouchableOpacity
+            onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(true); }}
+            style={styles.filterIconBtn}
+          >
+            <Feather name="sliders" size={18} color="#fff"/>
+            {(selectedCat || selectedBrand) && (
+              <View style={styles.filterDot}/>
+            )}
+          </TouchableOpacity>
         </View>
       </View>
 
-      {/* Search Overlay */}
+      {/* Search Overlay — Bug fix: top dynamically uses measured header height */}
       {searchFocused && (
-        <View style={styles.searchOverlay}>
+        <View style={[styles.searchOverlay, { top: headerHeight }]}>
           <FlatList
             data={suggestions}
             keyExtractor={item => `${item.product_id}_${item._branchId || 'none'}`}
@@ -710,7 +714,7 @@ const styles = StyleSheet.create({
   // Search
   searchWrap:             { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, borderRadius: 10, paddingHorizontal: SPACING.sm, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   searchWrapFocused:      { borderColor: COLORS.primary, borderWidth: 1.5 },
-  searchOverlay:          { position: 'absolute', top: 50, left: 0, right: 0, bottom: 0, backgroundColor: COLORS.white, zIndex: 999, paddingTop: 8 },
+  searchOverlay:          { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: COLORS.white, zIndex: 999, paddingTop: 8 },
   historyHeader:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   historyTitle:           { fontSize: 13, fontWeight: '700', color: COLORS.dark },
   clearAll:               { fontSize: 12, color: COLORS.primary, fontWeight: '600' },

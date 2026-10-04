@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
-  FlatList, Image, Alert, ActivityIndicator, Modal,
+  FlatList, Image, Alert, ActivityIndicator, Modal, StatusBar,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
@@ -12,6 +13,7 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 export default function CartScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
   const [cart,       setCart]       = useState([]);
@@ -172,7 +174,8 @@ export default function CartScreen({ navigation }) {
 
   // ─── Not Logged In ────────────────────────────────────
   if (!loggedIn) return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
       <View style={styles.emptyWrap}>
         <Feather name="lock" size={48} color={COLORS.grayLight}/>
         <Text style={styles.emptyTitle}>Please log in</Text>
@@ -185,7 +188,8 @@ export default function CartScreen({ navigation }) {
   );
 
   if (loading) return (
-    <View style={[styles.container, styles.centered]}>
+    <View style={[styles.container, styles.centered, { paddingTop: insets.top }]}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
       <ActivityIndicator color={COLORS.primary} size="large"/>
     </View>
   );
@@ -195,9 +199,10 @@ export default function CartScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
 
       {error ? (
-        <View style={styles.emptyWrap}>
+        <View style={[styles.emptyWrap, { paddingTop: insets.top }]}>
           <Feather name="wifi-off" size={56} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Connection Error</Text>
           <Text style={styles.emptyText}>Could not load your cart. Please check your internet connection.</Text>
@@ -209,7 +214,7 @@ export default function CartScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       ) : cart.length === 0 ? (
-        <View style={styles.emptyWrap}>
+        <View style={[styles.emptyWrap, { paddingTop: insets.top }]}>
           <Feather name="shopping-cart" size={56} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Your cart is empty</Text>
           <Text style={styles.emptyText}>Add products to get started.</Text>
@@ -219,8 +224,12 @@ export default function CartScreen({ navigation }) {
         </View>
       ) : (
         <>
-          {/* Select All Row */}
-          <TouchableOpacity style={styles.selectAllRow} onPress={toggleAll} activeOpacity={0.7}>
+          {/* Select All Row — padded below the status bar */}
+          <TouchableOpacity
+            style={[styles.selectAllRow, { paddingTop: insets.top + 10 }]}
+            onPress={toggleAll}
+            activeOpacity={0.7}
+          >
             <View style={[styles.checkbox, allChecked && styles.checkboxChecked]}>
               {allChecked && <Feather name="check" size={12} color={COLORS.white}/>}
               {!allChecked && someChecked && (
@@ -355,7 +364,7 @@ export default function CartScreen({ navigation }) {
           />
 
           {/* Footer */}
-          <View style={styles.footer}>
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
             {/* Selected count */}
             <View style={styles.footerInfo}>
               <Text style={styles.footerCount}>
@@ -467,7 +476,7 @@ const styles = StyleSheet.create({
   headerSub:           { fontSize: 12, color: COLORS.grayLight, marginTop: 2 },
 
   // Select All
-  selectAllRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.white, paddingHorizontal: SPACING.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
+  selectAllRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.white, paddingHorizontal: SPACING.md, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   selectAllText:       { flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.dark },
   selectAllCount:      { fontSize: 12, color: COLORS.textMuted },
 

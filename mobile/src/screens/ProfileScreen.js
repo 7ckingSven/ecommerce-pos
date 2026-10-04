@@ -2,9 +2,10 @@ import React, { useState, useEffect } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, TextInput,
-  Modal, KeyboardAvoidingView, Platform,
+  Modal, KeyboardAvoidingView, Platform, StatusBar,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCustomer, logout, isLoggedIn } from '../services/authService';
 import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
@@ -41,6 +42,7 @@ function formatGender(gender) {
 }
 
 export default function ProfileScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const [customer,     setCustomer]     = useState(null);
   const [loading,      setLoading]      = useState(true);
   const [loggedIn,     setLoggedIn]     = useState(false);
@@ -229,7 +231,6 @@ export default function ProfileScreen({ navigation }) {
           phone_number: editForm.phone_number.trim(),
           address:      addressParts.join(', '),
           address_note: editForm.address_note?.trim() || '',
-          address_note: editForm.address_note?.trim() || '',
           username:     editForm.username.trim(),
         };
       } else if (editType === 'password') {
@@ -274,6 +275,7 @@ export default function ProfileScreen({ navigation }) {
 
   if (loading) return (
     <View style={[styles.container, { justifyContent:'center', alignItems:'center' }]}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
       <ActivityIndicator color={COLORS.primary} size="large"/>
     </View>
   );
@@ -284,7 +286,8 @@ export default function ProfileScreen({ navigation }) {
     : '?';
 
   if (!loggedIn) return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
       <View style={styles.emptyWrap}>
         <Feather name="user" size={48} color={COLORS.textMuted}/>
         <Text style={styles.emptyTitle}>Not Logged In</Text>
@@ -298,8 +301,12 @@ export default function ProfileScreen({ navigation }) {
 
   if (loggedIn) return (
     <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
 
-      <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + SPACING.md }]}
+        showsVerticalScrollIndicator={false}
+      >
 
         {/* Avatar */}
         <View style={styles.avatarSection}>

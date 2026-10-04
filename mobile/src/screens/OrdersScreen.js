@@ -1,10 +1,11 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
-  FlatList, ActivityIndicator, Modal, ScrollView, Image, Alert
+  FlatList, ActivityIndicator, Modal, ScrollView, Image, Alert, StatusBar
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getOrders } from '../services/orderService';
 import api from '../services/api';
 import { getCustomerId } from '../services/authService';
@@ -42,6 +43,7 @@ function statusColor(s) {
 }
 
 export default function OrdersScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
   const [orders,       setOrders]       = useState([]);
@@ -107,7 +109,8 @@ export default function OrdersScreen({ navigation }) {
 
   if (!loggedIn) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
         <View style={styles.emptyWrap}>
           <Feather name="lock" size={48} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Please log in</Text>
@@ -121,20 +124,22 @@ export default function OrdersScreen({ navigation }) {
   }
 
   if (loading) return (
-    <View style={[styles.container, { justifyContent:'center', alignItems:'center' }]}>
+    <View style={[styles.container, { justifyContent:'center', alignItems:'center', paddingTop: insets.top }]}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
       <ActivityIndicator color={COLORS.primary} size="large"/>
     </View>
   );
 
   return (
     <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
 
-      {/* Tab Bar - always stays at top */}
+      {/* Tab Bar - always stays at top, padded below status bar */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal:16, gap:8, alignItems:'center', paddingVertical:6 }}
-        style={{ maxHeight:46, minHeight:46 }}
+        style={{ maxHeight: 46 + insets.top, minHeight: 46 + insets.top, paddingTop: insets.top }}
       >
         {TABS.map(tab => {
           const count = tab.key==='all' ? orders.length : orders.filter(o=>o.status===tab.key).length;
@@ -357,8 +362,8 @@ export default function OrdersScreen({ navigation }) {
                     <View style={{ flex: 1 }}>
                       <Text style={styles.detailItemName}>Shipping Fee</Text>
                     </View>
-                    <Text style={[styles.detailItemPrice, { 
-                      color: selectedOrder.shipping_fee === 0 ? COLORS.primary : COLORS.dark 
+                    <Text style={[styles.detailItemPrice, {
+                      color: selectedOrder.shipping_fee === 0 ? COLORS.primary : COLORS.dark
                     }]}>
                       {Number(selectedOrder.shipping_fee || 0) === 0 ? 'FREE' : `₱${Number(selectedOrder.shipping_fee || 0).toFixed(2)}`}
                     </Text>
