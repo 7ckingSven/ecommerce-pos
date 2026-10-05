@@ -965,3 +965,35 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 }
 .search-btn:hover { background: var(--g-700); }
 .search-btn svg { width: 13px; height: 13px; stroke: currentColor; }
+
+/* ─── Skeleton Loading ───────────────────────────────────── */
+@keyframes shimmer {
+  0%   { background-position: -600px 0; }
+  100% { background-position:  600px 0; }
+}
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-2) 25%,
+    var(--hover)     50%,
+    var(--surface-2) 75%
+  );
+  background-size: 1200px 100%;
+  animation: shimmer 1.5s infinite linear;
+  border-radius: 4px;
+  display: inline-block;
+}
+/* Sizes */
+.sk-val   { height: 28px; width: 72px;  border-radius: 6px; }
+.sk-label { height: 12px; width: 90px;  border-radius: 4px; margin-bottom: 4px; }
+.sk-sub   { height: 11px; width: 60px;  border-radius: 4px; }
+.sk-icon  { width: 44px;  height: 44px; border-radius: 10px; flex-shrink: 0; }
+.sk-cell  { height: 14px; border-radius: 4px; display: block; }
+.sk-cell-sm  { width: 55%; }
+.sk-cell-md  { width: 70%; }
+.sk-cell-full{ width: 90%; }
+.sk-badge { height: 20px; width: 56px; border-radius: 999px; }
+.sk-img   { width: 36px;  height: 36px; border-radius: 6px; flex-shrink: 0; }
+.sk-block { height: 14px; border-radius: 4px; width: 80%; }
+/* Skeleton stat card */
+.stat-card .sk-icon { background: linear-gradient(90deg,var(--surface-2) 25%,var(--hover) 50%,var(--surface-2) 75%); background-size:1200px 100%; animation:shimmer 1.5s infinite linear; }

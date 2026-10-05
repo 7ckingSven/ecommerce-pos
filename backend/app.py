@@ -556,6 +556,11 @@ def logout():
     session.clear()
     return redirect(url_for('login'))
 
+# ─── PING (network banner health check) ───────────────
+@app.route('/ping')
+def ping():
+    return '', 204
+
 # ══════════════════════════════════════════════════════
 # MOBILE API ROUTES — React Native Customer App
 # ══════════════════════════════════════════════════════

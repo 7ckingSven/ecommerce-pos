@@ -1,0 +1,76 @@
+<!-- ─── NETWORK STATUS BANNER ───────────────────────── -->
+<div id="network-banner" role="alert" aria-live="polite" style="position:fixed;bottom:0;left:0;width:100%;z-index:99999;padding:12px 0;text-align:center;font-size:14px;font-weight:600;letter-spacing:0.3px;display:none;box-shadow:0 -2px 10px rgba(0,0,0,0.3);"></div>
+<script>
+(function () {
+  var style = document.createElement('style');
+  style.textContent = '@keyframes nb-spin { to { transform: rotate(360deg); } }';
+  document.head.appendChild(style);
+
+  const banner = document.getElementById('network-banner');
+  let hideTimer = null;
+  let isOffline = false;
+
+  function showOffline() {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    isOffline = true;
+    banner.textContent           = 'No Internet Connection! Please check your network settings.';
+    banner.style.backgroundColor = '#dc3545';
+    banner.style.color           = '#fff';
+    banner.style.display         = 'block';
+  }
+
+  function showReconnecting() {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    banner.innerHTML = '<span style="display:inline-flex;align-items:center;justify-content:center;gap:8px;">'
+      + '<span style="width:14px;height:14px;border:2px solid rgba(255,255,255,0.35);border-top-color:#fff;border-radius:50%;display:inline-block;animation:nb-spin 0.8s linear infinite;flex-shrink:0;"></span>'
+      + 'Reconnecting…</span>';
+    banner.style.backgroundColor = '#e67e22';
+    banner.style.color           = '#fff';
+    banner.style.display         = 'block';
+  }
+
+  function showBackOnline() {
+    if (hideTimer) { clearTimeout(hideTimer); hideTimer = null; }
+    isOffline = false;
+    banner.textContent           = 'Back Online!';
+    banner.style.backgroundColor = '#198754';
+    banner.style.color           = '#fff';
+    banner.style.display         = 'block';
+    hideTimer = setTimeout(function () {
+      banner.style.display = 'none';
+      banner.textContent   = '';
+    }, 3000);
+  }
+
+  function checkConnection() {
+    if (!isOffline) return; // only run checks when we know we're offline
+    showReconnecting();     // show orange spinner while ping is in flight
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 4000);
+    fetch(window.location.origin + '/ping', {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+      .then(function () { clearTimeout(t); showBackOnline(); })  // ping ok → green
+      .catch(function () { clearTimeout(t); showOffline();   }); // ping fail → back to red
+  }
+
+  // Initial check on page load
+  (function initialCheck() {
+    var ctrl = new AbortController();
+    var t = setTimeout(function () { ctrl.abort(); }, 4000);
+    fetch(window.location.origin + '/ping', {
+      method: 'HEAD',
+      cache: 'no-store',
+      signal: ctrl.signal,
+    })
+      .then(function () { clearTimeout(t); /* online, show nothing */ })
+      .catch(function () { clearTimeout(t); showOffline(); });
+  })();
+
+  setInterval(checkConnection, 5000);
+  window.addEventListener('offline', showOffline);
+  window.addEventListener('online',  checkConnection); // browser thinks online → attempt ping
+})();
+</script>

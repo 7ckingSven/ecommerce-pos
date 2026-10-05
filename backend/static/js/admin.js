@@ -1,3 +1,38 @@
+// ─── Skeleton Loading Helpers ────────────────────────
+/**
+ * skRow(cols)  — returns one <tr> with skeleton cells.
+ * skStatCard(id) — replaces stat-value + stat-sub with shimmer spans.
+ * skTable(tbodyId, cols, rows=5) — fills a tbody with skeleton rows.
+ * skStats(ids) — replaces an array of element IDs with shimmer values.
+ * clearSk(el) — removes the skeleton class from an element.
+ */
+function skCell(widthClass) {
+  return '<td><span class="skeleton sk-cell ' + (widthClass||'sk-cell-md') + '"></span></td>';
+}
+function skRow(cols) {
+  var cells = '';
+  cols.forEach(function(w){ cells += skCell(w); });
+  return '<tr>' + cells + '</tr>';
+}
+function skTable(tbodyId, colWidths, rows) {
+  var tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  rows = rows || 5;
+  var html = '';
+  for (var i = 0; i < rows; i++) html += skRow(colWidths);
+  tbody.innerHTML = html;
+}
+function skStats(ids) {
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '<span class="skeleton sk-val"></span>';
+  });
+}
+function skStatIcon(id) {
+  var el = document.getElementById(id);
+  if (el) el.innerHTML = '<span class="skeleton sk-icon"></span>';
+}
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
 const PROD_PAGE_SIZE = 12;
@@ -330,7 +365,10 @@ function showSection(name, el) {
       sidebarProfileBtn.style.background = '';
     }
   }
-  loaders[name] && loaders[name]();
+  if (loaders[name] && !_loadedSections.has(name)) {
+    _loadedSections.add(name);
+    loaders[name]();
+  }
   startAutoRefresh(name);
 }
 
@@ -466,6 +504,14 @@ var loaders = {
   profile:         loadProfile,
 };
 
+// ─── Section load-once cache ──────────────────────────
+// Tracks which sections have already fetched their data.
+// Call invalidateSection(name) after any mutation so the
+// next visit re-fetches fresh data.
+var _loadedSections = new Set();
+function invalidateSection(name) { _loadedSections.delete(name); }
+function invalidateAll() { _loadedSections.clear(); }
+
 // ─── BRANCHES (shared utility) ────────────────────────
 async function loadBranches() {
   try {
@@ -491,6 +537,16 @@ function populateBranchSelects(...selectIds) {
 
 // ─── OVERVIEW ─────────────────────────────────────────
 async function loadOverview() {
+  // ── Skeleton ──
+  skStats(['statProducts','statOrders','statSales','statSalesTripleE','statSalesFielCollince',
+           'statLowStock','statCriticalStock','statPending','statTodayRevenue','statOutOfStock',
+           'statActiveDiscounts','statPendingRequests']);
+  skTable('topSellingBody',    ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 4);
+  skTable('leastSellingBody',  ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 4);
+  skTable('pendingRequestsBody',['sk-cell-full','sk-cell-md','sk-cell-sm','sk-cell-md'], 4);
+  skTable('recentOrdersBody',  ['sk-cell-sm','sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 5);
+  skTable('lowStockBody',      ['sk-cell-full','sk-cell-md','sk-cell-sm','sk-cell-sm'], 5);
+  // ─────────────
   try {
     const [products, orders, payments, stockRequests, discounts] = await Promise.all([
       fetch('/api/admin/products').then(r => r.json()),
@@ -676,6 +732,10 @@ async function loadOverview() {
 
 // ─── PRODUCTS ─────────────────────────────────────────
 async function loadProducts() {
+  // ── Skeleton ──
+  skTable('productsBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-md',
+                           'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  // ─────────────
   try {
     const [prodRes, discRes] = await Promise.all([
       fetch('/api/admin/products'),
@@ -1182,7 +1242,7 @@ async function confirmProductToggle() {
     if (res.ok) {
       showToast(isActive ? 'Product deactivated.' : 'Product activated.');
       closeProductToggleModal();
-      loadProducts();
+      invalidateSection('products'); loadProducts();
     } else {
       showToast(isActive ? 'Failed to deactivate product.' : 'Failed to activate product.', 'error');
     }
@@ -1235,7 +1295,7 @@ async function submitProduct(e) {
     if (res.ok) {
       showToast(id ? 'Product updated!' : 'Product added!');
       closeProductModal();
-      loadProducts();
+      invalidateSection('products'); loadProducts();
     } else {
       const data = await res.json();
       showToast(data.error || 'Failed to save product.', 'error');
@@ -1489,6 +1549,18 @@ async function toggleInvVariantRow(productId, branchId, btnEl) {
 window.toggleInvVariantRow = toggleInvVariantRow;
 
 async function loadInventory() {
+  // ── Skeleton ──
+  skStats(['invStatRestock','invStatTransfer','invStatAdjust','invStatNet']);
+  document.getElementById('branchStockSummary').innerHTML =
+    '<div style="padding:1rem;display:flex;flex-direction:column;gap:10px;">' +
+    '<span class="skeleton sk-block" style="width:60%;height:14px;"></span>' +
+    '<span class="skeleton sk-block" style="width:80%;height:14px;"></span>' +
+    '<span class="skeleton sk-block" style="width:50%;height:14px;"></span>' +
+    '</div>';
+  skTable('inventoryBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
+                            'sk-cell-sm','sk-cell-sm','sk-cell-md','sk-cell-md',
+                            'sk-cell-sm','sk-cell-full'], 8);
+  // ─────────────
   try {
     const [invRes, prodRes] = await Promise.all([
       fetch('/api/admin/inventory'),
@@ -1738,7 +1810,7 @@ window.filterBranchStockLevel = filterBranchStockLevel;
 // ─── ADD STOCK Modal ─────────────────────────────────
 
 async function openAddStockModal() {
-  if (!allProducts.length) await loadProducts();
+  if (!allProducts.length) { invalidateSection('products'); await loadProducts(); }
   if (!allBranches.length) await loadBranches();
 
   // Populate branch select
@@ -2094,7 +2166,7 @@ async function submitAddStock(e) {
         : `${items.length} product(s) added successfully!`;
       showToast(msg);
       closeAddStockModal();
-      loadInventory(); loadProducts();
+      invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
     } else {
       showToast('Some items failed to add. Please check.', 'error');
     }
@@ -2105,7 +2177,7 @@ async function submitAddStock(e) {
   }
 }
 async function openTransferModal() {
-  if (!allProducts.length) await loadProducts();
+  if (!allProducts.length) { invalidateSection('products'); await loadProducts(); }
   if (!allBranches.length) await loadBranches();
 
   // Replace product select with autocomplete
@@ -2230,7 +2302,7 @@ async function submitTransfer(e) {
     if (res.ok) {
       showToast('Stock transferred successfully!');
       closeTransferModal();
-      loadInventory(); loadProducts();
+      invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to transfer stock.', 'error');
@@ -2241,7 +2313,7 @@ async function submitTransfer(e) {
 // ─── ADJUST STOCK Modal ───────────────────────────────
 
 async function openAdjustModal() {
-  if (!allProducts.length) await loadProducts();
+  if (!allProducts.length) { invalidateSection('products'); await loadProducts(); }
   if (!allBranches.length) await loadBranches();
 
   // Replace product select with autocomplete
@@ -2318,7 +2390,7 @@ async function submitAdjust(e) {
     if (res.ok) {
       showToast(`Stock adjusted — ${qty} unit(s) deducted (${reason}).`);
       closeAdjustModal();
-      loadInventory(); loadProducts();
+      invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to adjust stock.', 'error');
@@ -2332,6 +2404,10 @@ function closeInventoryModal() { closeAddStockModal(); }
 
 // ─── ORDERS ───────────────────────────────────────────
 async function loadOrders() {
+  // ── Skeleton ──
+  skTable('ordersBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
+                         'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  // ─────────────
   try {
     const res  = await fetch('/api/admin/orders?limit=80');
     const data = await res.json();
@@ -3099,6 +3175,14 @@ function exportSalesExcel() {
 window.exportSalesExcel = exportSalesExcel;
 
 async function loadSales() {
+  // ── Skeleton ──
+  skStats(['salesTotal','salesOnline','salesWalkin','salesCustomers']);
+  skStats(['branchTE_revenue','branchTE_orders','branchTE_walkin','branchTE_online',
+           'branchFC_revenue','branchFC_orders','branchFC_walkin','branchFC_online']);
+  skTable('paymentBreakdownBody', ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
+  skTable('topProductsBody',      ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
+  skTable('leastProductsBody',    ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
+  // ─────────────
   try {
     const [orders, customers] = await Promise.all([
       fetch('/api/admin/orders?limit=500').then(r => r.json()),
@@ -3129,6 +3213,10 @@ let currentAssignDiscountId = null;
 let assignProductState      = []; // { product_id, product_name, checked }
 
 async function loadDiscounts() {
+  // ── Skeleton ──
+  skTable('discountsBody',          ['sk-cell-full','sk-cell-md','sk-cell-full','sk-cell-sm'], 5);
+  skTable('discountedProductsBody', ['sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 5);
+  // ─────────────
   try {
     const [discRes, prodRes] = await Promise.all([
       fetch('/api/admin/discounts'),
@@ -3289,7 +3377,7 @@ async function removeProductDiscount(productId, name) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ product_ids: [productId] }),
     });
-    if (res.ok) { showToast('Discount removed from product.'); loadDiscounts(); }
+    if (res.ok) { showToast('Discount removed from product.'); invalidateSection('discounts'); loadDiscounts(); }
     else showToast('Failed to remove discount.', 'error');
   } catch (e) { showToast('Error.', 'error'); }
 }
@@ -3331,7 +3419,7 @@ async function deleteDiscount(id, name) {
   if (!confirm(`Delete discount "${name}"? It will be removed from all assigned products.`)) return;
   try {
     const res = await fetch(`/api/admin/discounts/${id}`, { method: 'DELETE' });
-    if (res.ok) { showToast('Discount deleted.'); loadDiscounts(); }
+    if (res.ok) { showToast('Discount deleted.'); invalidateSection('discounts'); loadDiscounts(); }
     else showToast('Failed to delete discount.', 'error');
   } catch (e) { showToast('Error.', 'error'); }
 }
@@ -3373,7 +3461,7 @@ async function submitDiscount(e) {
     if (res.ok) {
       showToast(id ? 'Discount updated!' : 'Discount created!');
       closeDiscountModal();
-      loadDiscounts();
+      invalidateSection('discounts'); loadDiscounts();
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to save discount.', 'error');
@@ -3491,12 +3579,16 @@ async function submitAssign() {
     await Promise.all(requests);
     showToast('Discount assignments updated!');
     closeAssignModal();
-    loadDiscounts();
+    invalidateSection('discounts'); loadDiscounts();
   } catch (e) { showToast('Error updating assignments.', 'error'); }
 }
 
 // ─── USERS ────────────────────────────────────────────
 async function loadUsers() {
+  // ── Skeleton ──
+  skTable('usersBody', ['sk-cell-full','sk-cell-md','sk-cell-full','sk-cell-sm',
+                        'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  // ─────────────
   try {
     if (!allBranches.length) await loadBranches();
     const res = await fetch('/api/admin/users');
@@ -3748,7 +3840,7 @@ async function toggleUserStatus(id, currentStatus) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),
     });
-    if (res.ok) { showToast('User status updated!'); loadUsers(); }
+    if (res.ok) { showToast('User status updated!'); invalidateSection('users'); loadUsers(); }
     else showToast('Failed to update user.', 'error');
   } catch (e) { showToast('Error.', 'error'); }
 }
@@ -3805,7 +3897,7 @@ async function submitUser(e) {
     if (res.ok) {
       showToast(id ? 'Staff updated successfully!' : 'Staff added successfully!');
       closeUserModal();
-      loadUsers();
+      invalidateSection('users'); loadUsers();
     } else {
       showToast(resData.error || 'Failed to save staff.', 'error');
     }
@@ -3859,6 +3951,12 @@ window.changePOPage = changePOPage;
 window.changeSRPage = changeSRPage;
 
 async function loadPurchaseOrders() {
+  // ── Skeleton ──
+  skTable('stockRequestsBody', ['sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-md',
+                                'sk-cell-md','sk-cell-sm','sk-cell-full','sk-cell-sm','sk-cell-sm'], 6);
+  skTable('poBody', ['sk-cell-sm','sk-cell-full','sk-cell-sm','sk-cell-sm',
+                     'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 5);
+  // ─────────────
   try {
     const [reqRes, poRes] = await Promise.all([
       fetch('/api/admin/stock-requests'),
@@ -3981,7 +4079,7 @@ async function submitReview(status) {
     if (res.ok) {
       showToast(`Request ${status}!`);
       closeReviewRequestModal();
-      loadPurchaseOrders();
+      invalidateSection('purchase_orders'); loadPurchaseOrders();
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed.', 'error');
@@ -4121,7 +4219,7 @@ async function submitCreatePO() {
       const data = await res.json();
       showToast(`PO ${data.po_number} created!`);
       closeCreatePOModal();
-      loadPurchaseOrders();
+      invalidateSection('purchase_orders'); loadPurchaseOrders();
       // Show digital receipt
       const receiptItems = items.map(i => ({
         product_name: allProducts.find(p => p.product_id === i.product_id)?.product_name || '—',
@@ -4422,8 +4520,8 @@ async function submitPOReceive(poId) {
     if (res.ok) {
       showToast('PO marked as received!');
       closePODetailModal();
-      loadPurchaseOrders();
-      loadInventory();
+      invalidateSection('purchase_orders'); loadPurchaseOrders();
+      invalidateSection('inventory'); loadInventory();
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to receive PO.', 'error');
@@ -4448,8 +4546,8 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
       if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = status === 'received' ? 'Mark as Received ✓' : 'Mark as Ordered'; }
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
-      loadPurchaseOrders();
-      if (status === 'received') loadInventory();
+      invalidateSection('purchase_orders'); loadPurchaseOrders();
+      if (status === 'received') { invalidateSection('inventory'); loadInventory(); }
       // Show receipt when marked as ordered or received
       if (status === 'ordered' || status === 'received') {
         const items   = po?.po_item || [];
@@ -4466,7 +4564,7 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
 
 document.addEventListener('DOMContentLoaded', async function () {
   await loadBranches();
-  loadProducts();
+  _loadedSections.add('products'); loadProducts();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');
@@ -4588,6 +4686,12 @@ function _profValidate() {
 }
 
 async function loadProfile() {
+  // ── Skeleton ──
+  ['profFname','profMi','profLname','profUsername','profEmail','profPhone'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.value = ''; el.placeholder = 'Loading...'; }
+  });
+  // ─────────────
   try {
     const res  = await fetch('/auth/profile');
     const data = await res.json();

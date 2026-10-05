@@ -1,3 +1,27 @@
+// ─── Skeleton Loading Helpers ────────────────────────
+function skCell(widthClass) {
+  return '<td><span class="skeleton sk-cell ' + (widthClass||'sk-cell-md') + '"></span></td>';
+}
+function skRow(cols) {
+  var cells = '';
+  cols.forEach(function(w){ cells += skCell(w); });
+  return '<tr>' + cells + '</tr>';
+}
+function skTable(tbodyId, colWidths, rows) {
+  var tbody = document.getElementById(tbodyId);
+  if (!tbody) return;
+  rows = rows || 5;
+  var html = '';
+  for (var i = 0; i < rows; i++) html += skRow(colWidths);
+  tbody.innerHTML = html;
+}
+function skStats(ids) {
+  ids.forEach(function(id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = '<span class="skeleton sk-val"></span>';
+  });
+}
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
 const SR_PAGE_SIZE   = 12;
@@ -296,7 +320,10 @@ function showSection(name, el) {
       sidebarProfileBtn.style.background = '';
     }
   }
-  loaders[name] && loaders[name]();
+  if (loaders[name] && !_loadedSections.has(name)) {
+    _loadedSections.add(name);
+    loaders[name]();
+  }
   startAutoRefresh(name);
 }
 
@@ -308,6 +335,11 @@ var loaders = {
   requests:  loadRequests,
   profile:   loadProfile,
 };
+
+// ─── Section load-once cache ──────────────────────────
+var _loadedSections = new Set();
+function invalidateSection(name) { _loadedSections.delete(name); }
+function invalidateAll() { _loadedSections.clear(); }
 
 
 // ─── Button Loading Helper ────────────────────────────
@@ -497,6 +529,22 @@ function populateBranchSelects() {
 // POS
 // ══════════════════════════════════════════════════════
 async function loadPosProducts() {
+  // ── Skeleton ──
+  var posGrid = document.getElementById('posProducts');
+  if (posGrid) {
+    var skCards = '';
+    for (var i = 0; i < 8; i++) {
+      skCards += '<div style="background:var(--card-bg);border:1px solid var(--border);border-radius:12px;overflow:hidden;display:flex;flex-direction:column;">' +
+        '<div class="skeleton" style="width:100%;height:120px;border-radius:0;"></div>' +
+        '<div style="padding:10px;display:flex;flex-direction:column;gap:6px;">' +
+        '<span class="skeleton sk-cell sk-cell-full" style="height:13px;"></span>' +
+        '<span class="skeleton sk-cell sk-cell-sm" style="height:12px;"></span>' +
+        '</div></div>';
+    }
+    posGrid.innerHTML = skCards;
+    posGrid.style.cssText = 'display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:10px;';
+  }
+  // ─────────────
   try {
     const res   = await fetch('/api/products');
     const rawAll = await res.json();
@@ -1098,10 +1146,10 @@ async function processOrder() {
       const receiptDiscount = { id: discId, name: discName, pct: discPct, amount: discAmt };
       setButtonLoading(processBtn, false);
       clearOrder();
-      loadPosProducts();
+      invalidateSection('pos'); loadPosProducts();
       loadPosDiscounts();
-      loadOrders();
-      loadSummary();
+      invalidateSection('orders'); loadOrders();
+      invalidateSection('summary'); loadSummary();
       showToast('Order processed successfully!');
       showReceipt(data, receiptItems, receiptReceived, receiptPayment, receiptRefNo, receiptCustomer, receiptDiscount);
     } else {
@@ -1325,6 +1373,13 @@ function renderInvHistory(data) {
 }
 
 async function loadInventory() {
+  // ── Skeleton ──
+  skStats(['invTotalProducts','invLowStock','invCriticalStock','invOutOfStock','invRecentRestocks']);
+  skTable('invProductsBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
+                              'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  skTable('invHistoryBody',  ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
+                              'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-full'], 6);
+  // ─────────────
   // Save expanded variant rows before DOM rebuild
   const expandedRows = saveStaffExpandedRows();
 
@@ -1710,6 +1765,10 @@ function viewStaffOrderItems(order) {
 
 
 async function loadOrders() {
+  // ── Skeleton ──
+  skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
+                              'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  // ─────────────
   try {
     const res  = await fetch('/api/staff/orders?limit=50');
     const data = await res.json();
@@ -1950,6 +2009,11 @@ async function updateOrderStatus(id, status) {
 let allSummaryOrders = []; // store all orders for date filtering
 
 async function loadSummary() {
+  // ── Skeleton ──
+  skStats(['summaryToday','summaryOrders','summaryWalkin','summaryOnline']);
+  skTable('summaryTodayBody', ['sk-cell-sm','sk-cell-full','sk-cell-md',
+                               'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 6);
+  // ─────────────
   try {
     const res = await fetch('/api/staff/orders?limit=1000');
     const raw = await res.json();
@@ -2037,6 +2101,10 @@ function resetSummaryDate() {
 // ─── STOCK REQUESTS ───────────────────────────────────
 
 async function loadRequests() {
+  // ── Skeleton ──
+  skTable('requestsBody', ['sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-sm',
+                           'sk-cell-md','sk-cell-sm','sk-cell-full'], 6);
+  // ─────────────
   try {
     const res  = await fetch('/api/staff/stock-requests');
     const data = await res.json();
@@ -2127,7 +2195,7 @@ function getReqVariantOptions() {
 }
 
 async function openRequestModal() {
-  if (!invProducts.length) await loadInventory();
+  if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
   const sel = document.getElementById('reqProduct');
   if (sel) {
     // Use branch_stock quantity for this branch, fallback to product.quantity
@@ -2180,7 +2248,7 @@ async function submitRequest(e) {
     if (res.ok) {
       showToast('Stock request submitted!');
       closeRequestModal();
-      loadRequests();
+      invalidateSection('requests'); loadRequests();
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to submit request.', 'error');
@@ -2192,7 +2260,7 @@ async function submitRequest(e) {
 
 document.addEventListener('DOMContentLoaded', async () => {
   await loadBranches();
-  await loadPosProducts();
+  _loadedSections.add('pos'); await loadPosProducts();
   await loadPosDiscounts();
 
   // Restore last section from URL hash or localStorage
@@ -2304,6 +2372,12 @@ function _profValidate() {
 }
 
 async function loadProfile() {
+  // ── Skeleton ──
+  ['profFname','profMi','profLname','profUsername','profEmail','profPhone'].forEach(function(id) {
+    var el = document.getElementById(id);
+    if (el) { el.value = ''; el.placeholder = 'Loading...'; }
+  });
+  // ─────────────
   try {
     const res  = await fetch('/auth/profile');
     const data = await res.json();
