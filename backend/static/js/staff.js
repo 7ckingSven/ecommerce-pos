@@ -174,10 +174,7 @@ const pageTitles = {
 };
 
 
-// ─── Auto Refresh (5 seconds) ─────────────────────────
-let autoRefreshTimer = null;
-const AUTO_REFRESH_SECTIONS = ['orders', 'inventory', 'pos'];
-const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
+// ─── Visibility-based Refresh ────────────────────────
 
 
 // ─── Preserve expanded rows + filter states across refresh ─────────────────
@@ -256,42 +253,55 @@ function restoreStaffFilterStates(states) {
   }
 }
 
-function startAutoRefresh(section) {
-  stopAutoRefresh();
-  if (!AUTO_REFRESH_SECTIONS.includes(section)) return;
-  autoRefreshTimer = setInterval(() => {
+function forceRefreshSection(btn) {
+  const section = localStorage.getItem('staff-section') || 'pos';
+  if (!loaders[section]) return;
+
+  // Spin + lock the ↻ button; stop after load or 5s max
+  function stopBtn() {
+    if (!btn) return;
+    btn.classList.remove('spinning');
+  }
+  if (btn) {
+    btn.classList.add('spinning');
+    setTimeout(stopBtn, 5000);
+  }
+
+  const expandedRows = saveStaffExpandedRows();
+  const filterStates = saveStaffFilterStates();
+  const origRender   = window.renderInvHistory;
+  window.renderInvHistory = function(data) {
+    if (origRender) origRender(data);
+    restoreStaffExpandedRows(expandedRows);
+    restoreStaffFilterStates(filterStates);
+    window.renderInvHistory = origRender;
+    stopBtn();
+  };
+  invalidateSection(section);
+  _loadedSections.add(section);
+  lockSidebar();
+  loaders[section]();
+  setTimeout(unlockSidebar, 1000);
+}
+
+// Refresh current section when user returns to tab
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    const section = localStorage.getItem('staff-section') || 'pos';
     if (loaders[section]) {
       const expandedRows = saveStaffExpandedRows();
       const filterStates = saveStaffFilterStates();
       const origRender   = window.renderInvHistory;
-
       window.renderInvHistory = function(data) {
         if (origRender) origRender(data);
         restoreStaffExpandedRows(expandedRows);
         restoreStaffFilterStates(filterStates);
         window.renderInvHistory = origRender;
       };
-
-      lockSidebar();
+      invalidateSection(section);
+      _loadedSections.add(section);
       loaders[section]();
-      setTimeout(unlockSidebar, 1000);
     }
-  }, AUTO_REFRESH_INTERVAL);
-}
-
-function stopAutoRefresh() {
-  if (autoRefreshTimer) {
-    clearInterval(autoRefreshTimer);
-    autoRefreshTimer = null;
-  }
-}
-
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    stopAutoRefresh();
-  } else {
-    const section = localStorage.getItem('staff-section') || 'pos';
-    startAutoRefresh(section);
   }
 });
 
@@ -324,7 +334,6 @@ function showSection(name, el) {
     _loadedSections.add(name);
     loaders[name]();
   }
-  startAutoRefresh(name);
 }
 
 var loaders = {

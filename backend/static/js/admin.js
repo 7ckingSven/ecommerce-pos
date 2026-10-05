@@ -203,10 +203,7 @@ var pageTitles = {
 };
 
 
-// ─── Auto Refresh (5 seconds) ─────────────────────────
-let autoRefreshTimer = null;
-const AUTO_REFRESH_SECTIONS = ['overview', 'orders', 'inventory'];
-const AUTO_REFRESH_INTERVAL = 30000; // 30 seconds
+// ─── Visibility-based Refresh ────────────────────────
 
 
 // ─── Preserve expanded rows + filter states across refresh ─────────────────
@@ -290,53 +287,68 @@ function restoreFilterStates(states) {
   }
 }
 
-function startAutoRefresh(section) {
-  stopAutoRefresh(); // clear any existing timer
-  if (!AUTO_REFRESH_SECTIONS.includes(section)) return;
-  autoRefreshTimer = setInterval(() => {
+function forceRefreshSection(btn) {
+  const section = localStorage.getItem('admin-section') || 'overview';
+  if (!loaders[section]) return;
+
+  // Spin + lock the ↻ button; stop after load or 5s max
+  function stopBtn() {
+    if (!btn) return;
+    btn.classList.remove('spinning');
+  }
+  if (btn) {
+    btn.classList.add('spinning');
+    setTimeout(stopBtn, 5000);
+  }
+
+  const expandedRows  = saveExpandedRows();
+  const filterStates  = saveFilterStates();
+  const origInventory = renderInventory;
+  const origOrders    = renderOrders;
+  window.renderInventory = function(data) {
+    origInventory(data);
+    restoreExpandedRows(expandedRows);
+    restoreFilterStates(filterStates);
+    window.renderInventory = origInventory;
+    stopBtn();
+  };
+  window.renderOrders = function(data) {
+    origOrders(data);
+    restoreFilterStates(filterStates);
+    window.renderOrders = origOrders;
+    stopBtn();
+  };
+  invalidateSection(section);
+  _loadedSections.add(section);
+  lockSidebar();
+  loaders[section]();
+  setTimeout(unlockSidebar, 1000);
+}
+
+// Refresh current section when user returns to tab
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) {
+    const section = localStorage.getItem('admin-section') || 'overview';
     if (loaders[section]) {
       const expandedRows  = saveExpandedRows();
       const filterStates  = saveFilterStates();
       const origInventory = renderInventory;
       const origOrders    = renderOrders;
-
-      // Patch renderInventory to restore after render
       window.renderInventory = function(data) {
         origInventory(data);
         restoreExpandedRows(expandedRows);
         restoreFilterStates(filterStates);
         window.renderInventory = origInventory;
       };
-
-      // Patch renderOrders to restore after render
       window.renderOrders = function(data) {
         origOrders(data);
         restoreFilterStates(filterStates);
         window.renderOrders = origOrders;
       };
-
-      lockSidebar();
+      invalidateSection(section);
+      _loadedSections.add(section);
       loaders[section]();
-      setTimeout(unlockSidebar, 1000);
     }
-  }, AUTO_REFRESH_INTERVAL);
-}
-
-function stopAutoRefresh() {
-  if (autoRefreshTimer) {
-    clearInterval(autoRefreshTimer);
-    autoRefreshTimer = null;
-  }
-}
-
-// Stop refresh when tab is hidden
-document.addEventListener('visibilitychange', () => {
-  if (document.hidden) {
-    stopAutoRefresh();
-  } else {
-    // Resume for current section
-    const section = localStorage.getItem('admin-section') || 'overview';
-    startAutoRefresh(section);
   }
 });
 
@@ -369,7 +381,6 @@ function showSection(name, el) {
     _loadedSections.add(name);
     loaders[name]();
   }
-  startAutoRefresh(name);
 }
 
 
