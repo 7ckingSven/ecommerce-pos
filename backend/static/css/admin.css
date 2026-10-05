@@ -196,6 +196,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   flex-direction: column;
   gap: 0.75rem;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 /* Theme Toggle */
@@ -839,10 +840,75 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   .dashboard-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 768px) {
-  .sidebar { transform: translateX(-100%); width: 240px !important; }
-  .sidebar.mobile-open { transform: translateX(0); }
+  .sidebar {
+    transform: translateX(-100%);
+    width: 240px !important;
+    transition: transform var(--transition), width var(--transition);
+    pointer-events: none;
+  }
+  .sidebar.collapsed {
+    width: 240px !important;
+    transform: translateX(-100%);
+    pointer-events: none;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0) !important;
+    width: 240px !important;
+    pointer-events: auto;
+  }
+  .sidebar.collapsed + .main,
   .main { margin-left: 0 !important; }
   .stat-grid { grid-template-columns: 1fr 1fr; }
+
+  /* ── Mobile: never hide nav labels regardless of .collapsed state ── */
+  .sidebar.collapsed .nav-item {
+    justify-content: flex-start !important;
+    padding: 9px 12px !important;
+    gap: 10px !important;
+  }
+  .sidebar.collapsed .nav-item span {
+    opacity: 1 !important;
+    width: auto !important;
+    overflow: visible !important;
+    pointer-events: auto !important;
+  }
+  .sidebar.collapsed .nav-section-label {
+    opacity: 0.5 !important;
+    height: auto !important;
+  }
+  .sidebar.collapsed .theme-toggle {
+    justify-content: flex-start !important;
+    padding: 8px 12px !important;
+  }
+  .sidebar.collapsed .theme-icon-dark span,
+  .sidebar.collapsed .theme-icon-light span {
+    opacity: 1 !important;
+    width: auto !important;
+    overflow: visible !important;
+  }
+  .sidebar.collapsed .sidebar-brand-text {
+    opacity: 1 !important;
+    width: auto !important;
+  }
+  .sidebar.collapsed .sidebar-brand {
+    justify-content: flex-start !important;
+    padding: 1.2rem 12px !important;
+  }
+  /* Always show footer on mobile */
+  .sidebar-footer {
+    flex-shrink: 0 !important;
+    overflow: visible !important;
+  }
+  .sidebar-nav {
+    overflow-y: auto !important;
+    flex: 1 !important;
+    min-height: 0 !important;
+  }
+}
+@media (max-width: 480px) {
+  .topbar-date { display: none; }
+  .form-row-2,
+  .form-row-3 { grid-template-columns: 1fr; }
 }
 /* ─── Branch Stock Summary ──────────────────────────── */
 .branch-stock-grid {

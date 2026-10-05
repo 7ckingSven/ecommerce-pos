@@ -367,6 +367,15 @@ function showSection(name, el) {
   document.getElementById('pageSub').textContent   = pageTitles[name][1];
   window.location.hash = name;
   localStorage.setItem('admin-section', name);
+  // Auto-close sidebar on mobile when a nav item is tapped
+  if (window.innerWidth <= 768) {
+    const sidebar = document.getElementById('sidebar');
+    if (sidebar && sidebar.classList.contains('mobile-open')) {
+      sidebar.classList.remove('mobile-open');
+      const backdrop = document.getElementById('sidebarBackdrop');
+      if (backdrop) backdrop.remove();
+    }
+  }
   // Profile sidebar active indicator
   const sidebarProfileBtn = document.getElementById('sidebarProfileBtn');
   if (sidebarProfileBtn) {
@@ -437,8 +446,28 @@ setInterval(updateTopbarDate, 60000);
 function toggleSidebar() {
   const sidebar = document.getElementById('sidebar');
   if (!sidebar) return;
-  sidebar.classList.toggle('collapsed');
-  localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+  if (window.innerWidth <= 768) {
+    // Mobile: slide in/out via mobile-open; ensure collapsed doesn't fight width
+    sidebar.classList.remove('collapsed');
+    const isOpen = sidebar.classList.toggle('mobile-open');
+    // Ensure/remove backdrop
+    let backdrop = document.getElementById('sidebarBackdrop');
+    if (isOpen) {
+      if (!backdrop) {
+        backdrop = document.createElement('div');
+        backdrop.id = 'sidebarBackdrop';
+        backdrop.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:99;';
+        backdrop.addEventListener('click', toggleSidebar);
+        document.body.appendChild(backdrop);
+      }
+    } else {
+      if (backdrop) backdrop.remove();
+    }
+  } else {
+    // Desktop: collapse/expand
+    sidebar.classList.toggle('collapsed');
+    localStorage.setItem('sidebarCollapsed', sidebar.classList.contains('collapsed'));
+  }
 }
 window.toggleSidebar = toggleSidebar;
 
@@ -446,7 +475,7 @@ window.toggleSidebar = toggleSidebar;
 (function() {
   const sidebar   = document.getElementById('sidebar');
   const collapsed = localStorage.getItem('sidebarCollapsed');
-  if (sidebar && collapsed === 'true') sidebar.classList.add('collapsed');
+  if (sidebar && collapsed === 'true' && window.innerWidth > 768) sidebar.classList.add('collapsed');
 })();
 
 
