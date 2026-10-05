@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
-  FlatList, Image, Alert, ActivityIndicator, Modal, StatusBar,
+  FlatList, Image, Alert, Modal, StatusBar,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -11,6 +11,8 @@ import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
+import SkeletonLoader from '../components/SkeletonLoader';
+import NetworkBanner from '../components/NetworkBanner';
 
 export default function CartScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -187,12 +189,7 @@ export default function CartScreen({ navigation }) {
     </View>
   );
 
-  if (loading) return (
-    <View style={[styles.container, styles.centered, { paddingTop: insets.top }]}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
-      <ActivityIndicator color={COLORS.primary} size="large"/>
-    </View>
-  );
+  if (loading) return (<SkeletonLoader type="cart" count={4} />);
 
   // Safety check for undefined cart items
   const safeCart = Array.isArray(cart) ? cart : [];
@@ -200,6 +197,7 @@ export default function CartScreen({ navigation }) {
   return (
     <View style={styles.container}>
       <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <NetworkBanner />
 
       {error ? (
         <View style={[styles.emptyWrap, { paddingTop: insets.top }]}>

@@ -9,6 +9,7 @@ import { addToCart } from '../services/cartService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import NetworkBanner from '../components/NetworkBanner';
 
 // ─── Discount Helper ──────────────────────────────────
 function getDiscountedPrice(product) {
@@ -169,6 +170,7 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      <NetworkBanner />
 
       {/* Back Button */}
       <TouchableOpacity style={[styles.backBtn, { top: SPACING.xl + insets.top }]} onPress={() => navigation.canGoBack() ? navigation.goBack() : navigation.navigate('HomeMain')}>

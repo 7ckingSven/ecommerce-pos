@@ -10,8 +10,8 @@ export const API_BASE_URL = ENV === 'emulator'
   : 'https://api.tefcecommerce.shop/api';           // Real phone → Render (custom domain)
 
 // ─── App Info ─────────────────────────────────────────
-export const APP_NAME     = 'Triple E & Fiel Collince';
-export const APP_SUBTITLE = 'General Merchandise';
+export const APP_NAME     = 'TEFC ECommerce';
+export const APP_SUBTITLE = 'Triple E & Fiel Collince General Merchandise';
 
 // ─── Colors ───────────────────────────────────────────
 export const COLORS = {

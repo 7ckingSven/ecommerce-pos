@@ -15,6 +15,8 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import api from '../services/api';
+import SkeletonLoader from '../components/SkeletonLoader';
+import NetworkBanner from '../components/NetworkBanner';
 
 function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const inStock    = (product._branchQty || product.quantity || 0) > 0;
@@ -554,9 +556,12 @@ export default function HomeScreen({ navigation }) {
         </View>
       )}
 
+      {/* Network Banner */}
+      <NetworkBanner />
+
       {/* Products */}
       {loading ? (
-        <ActivityIndicator color={COLORS.primary} style={{ marginTop: SPACING.xl }}/>
+        <SkeletonLoader type="product" count={6} />
       ) : (
         <FlatList
           data={products}
@@ -614,9 +619,12 @@ export default function HomeScreen({ navigation }) {
               : categories;
             return (
               <>
-                <Text style={styles.filterDropLabel}>
-                  Category {tempBrand ? <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>({availableCats.length} available)</Text> : null}
-                </Text>
+                {/* Section label with accent bar */}
+                <View style={styles.filterSectionLabel}>
+                  <View style={styles.filterAccentBar}/>
+                  <Text style={styles.filterDropLabel}>Category</Text>
+                  {tempBrand ? <Text style={styles.filterDropCount}>({availableCats.length} available)</Text> : null}
+                </View>
                 <ScrollView style={styles.filterDropBox} nestedScrollEnabled>
                   {[{ id: '', name: 'All Categories' }, ...availableCats.map(c => ({ id: c, name: c }))].map(item => (
                     <TouchableOpacity
@@ -624,9 +632,13 @@ export default function HomeScreen({ navigation }) {
                       style={[styles.filterDropItem, tempCat === item.id && styles.filterDropItemActive]}
                       onPress={() => setTempCat(item.id)}
                     >
-                      <Text style={[styles.filterDropItemText, tempCat === item.id && styles.filterDropItemTextActive]}>
-                        {item.name}
-                      </Text>
+                      {tempCat === item.id && item.id !== '' ? (
+                        <View style={styles.filterSelectedPill}>
+                          <Text style={styles.filterDropItemTextActive}>{item.name}</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.filterDropItemText}>{item.name}</Text>
+                      )}
                       {tempCat === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
                     </TouchableOpacity>
                   ))}
@@ -642,9 +654,12 @@ export default function HomeScreen({ navigation }) {
               : brands;
             return (
               <>
-                <Text style={styles.filterDropLabel}>
-                  Brand {tempCat ? <Text style={{ color: COLORS.textMuted, fontWeight: '400' }}>({availableBrands.length} available)</Text> : null}
-                </Text>
+                {/* Section label with accent bar */}
+                <View style={styles.filterSectionLabel}>
+                  <View style={styles.filterAccentBar}/>
+                  <Text style={styles.filterDropLabel}>Brand</Text>
+                  {tempCat ? <Text style={styles.filterDropCount}>({availableBrands.length} available)</Text> : null}
+                </View>
                 <ScrollView style={styles.filterDropBox} nestedScrollEnabled>
                   {[{ id: '', name: 'All Brands' }, ...availableBrands.map(b => ({ id: b, name: b }))].map(item => (
                     <TouchableOpacity
@@ -652,16 +667,19 @@ export default function HomeScreen({ navigation }) {
                       style={[styles.filterDropItem, tempBrand === item.id && styles.filterDropItemActive]}
                       onPress={() => {
                         setTempBrand(item.id);
-                        // Reset category if it's not available for this brand
                         if (item.id && tempCat) {
                           const catsForBrand = [...new Set(allProducts.filter(p => p.brand?.trim() === item.id).map(p => p.category?.trim()).filter(Boolean))];
                           if (!catsForBrand.includes(tempCat)) setTempCat('');
                         }
                       }}
                     >
-                      <Text style={[styles.filterDropItemText, tempBrand === item.id && styles.filterDropItemTextActive]}>
-                        {item.name}
-                      </Text>
+                      {tempBrand === item.id && item.id !== '' ? (
+                        <View style={styles.filterSelectedPill}>
+                          <Text style={styles.filterDropItemTextActive}>{item.name}</Text>
+                        </View>
+                      ) : (
+                        <Text style={styles.filterDropItemText}>{item.name}</Text>
+                      )}
                       {tempBrand === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
                     </TouchableOpacity>
                   ))}
@@ -688,6 +706,13 @@ export default function HomeScreen({ navigation }) {
               }}
             >
               <Text style={styles.filterApplyText}>Apply</Text>
+              {(tempCat || tempBrand) ? (
+                <View style={styles.filterApplyBadge}>
+                  <Text style={styles.filterApplyBadgeText}>
+                    {(tempCat ? 1 : 0) + (tempBrand ? 1 : 0)}
+                  </Text>
+                </View>
+              ) : null}
             </TouchableOpacity>
           </View>
         </View>
@@ -737,25 +762,33 @@ const styles = StyleSheet.create({
   filterSection:          { marginBottom: 6, marginTop: SPACING.sm },
   filterIconBtn:          { padding: 6, marginLeft: 6, position: 'relative' },
   filterDot:              { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
-  activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6 },
+  activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6, backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   activeTag:              { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.primaryBorder },
   activeTagText:          { fontSize: 11, color: COLORS.primary, fontWeight: '600' },
   filterOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   filterModal:            { backgroundColor: COLORS.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: SPACING.md, paddingBottom: 32, maxHeight: '80%' },
-  filterHandle:           { width: 40, height: 4, backgroundColor: COLORS.grayBorder, borderRadius: 2, alignSelf: 'center', marginBottom: SPACING.sm },
+  filterHandle:           { width: 44, height: 5, backgroundColor: COLORS.grayLight, borderRadius: 3, alignSelf: 'center', marginBottom: SPACING.sm },
   filterModalHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
   filterModalTitle:       { fontSize: 16, fontWeight: '700', color: COLORS.dark },
-  filterDropLabel:        { fontSize: 12, fontWeight: '700', color: COLORS.dark, marginBottom: 6, marginTop: SPACING.sm },
+  // Section label with colored accent bar
+  filterSectionLabel:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, marginTop: SPACING.sm },
+  filterAccentBar:        { width: 3, height: 14, backgroundColor: COLORS.primary, borderRadius: 2 },
+  filterDropLabel:        { fontSize: 12, fontWeight: '700', color: COLORS.dark },
+  filterDropCount:        { fontSize: 11, fontWeight: '400', color: COLORS.textMuted },
   filterDropBox:          { maxHeight: 150, borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, marginBottom: 8 },
   filterDropItem:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.sm, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   filterDropItemActive:   { backgroundColor: COLORS.primaryBg },
   filterDropItemText:     { fontSize: 13, color: COLORS.dark },
-  filterDropItemTextActive: { color: COLORS.primary, fontWeight: '600' },
-  filterBtnRow:           { flexDirection: 'row', gap: 12, marginTop: SPACING.md },
-  filterCancelBtn:        { flex: 1, paddingVertical: 12, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.primary, alignItems: 'center' },
-  filterCancelText:       { fontSize: 14, fontWeight: '600', color: COLORS.primary },
-  filterApplyBtn:         { flex: 1, paddingVertical: 12, borderRadius: RADIUS.sm, backgroundColor: COLORS.primary, borderWidth: 1.5, borderColor: COLORS.primary, alignItems: 'center' },
-  filterApplyText:        { fontSize: 14, fontWeight: '600', color: '#fff' },
+  filterDropItemTextActive: { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
+  // Pill chip on selected item
+  filterSelectedPill:     { backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: COLORS.primaryBorder },
+  filterBtnRow:           { flexDirection: 'row', gap: 10, marginTop: SPACING.md },
+  filterCancelBtn:        { flex: 1, paddingVertical: 13, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.grayBorder, alignItems: 'center' },
+  filterCancelText:       { fontSize: 14, fontWeight: '600', color: COLORS.textMuted },
+  filterApplyBtn:         { flex: 2, paddingVertical: 14, borderRadius: RADIUS.sm, backgroundColor: COLORS.primary, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  filterApplyText:        { fontSize: 14, fontWeight: '700', color: '#fff' },
+  filterApplyBadge:       { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: RADIUS.full, paddingHorizontal: 7, paddingVertical: 1, minWidth: 20, alignItems: 'center' },
+  filterApplyBadgeText:   { fontSize: 12, fontWeight: '700', color: '#fff' },
   filterLabel:            { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, paddingHorizontal: SPACING.md, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
   catChip:                { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: COLORS.grayBorder },
   catChipActive:          { backgroundColor: COLORS.primary, borderColor: COLORS.primary },

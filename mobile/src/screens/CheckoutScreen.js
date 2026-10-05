@@ -12,6 +12,7 @@ import { launchImageLibrary } from 'react-native-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import NetworkBanner from '../components/NetworkBanner';
 
 const PAYMENT_METHODS = [
   { id: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'truck',      sub: 'Pay when your order arrives' },
@@ -328,6 +329,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      <NetworkBanner />
 
       {/* Header */}
       <View style={[styles.header, { paddingTop: SPACING.xl + insets.top }]}>

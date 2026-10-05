@@ -12,6 +12,8 @@ import { getCustomerId } from '../services/authService';
 import { isLoggedIn } from '../services/authService';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
+import SkeletonLoader from '../components/SkeletonLoader';
+import NetworkBanner from '../components/NetworkBanner';
 
 // ─── Delivery Estimate Helper ────────────────────────
 function getDeliveryEstimate(order) {
@@ -123,16 +125,12 @@ export default function OrdersScreen({ navigation }) {
     );
   }
 
-  if (loading) return (
-    <View style={[styles.container, { justifyContent:'center', alignItems:'center', paddingTop: insets.top }]}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
-      <ActivityIndicator color={COLORS.primary} size="large"/>
-    </View>
-  );
+  if (loading) return (<SkeletonLoader type="order" count={5} />);
 
   return (
     <View style={styles.container}>
       <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <NetworkBanner />
 
       {/* Tab Bar - always stays at top, padded below status bar */}
       <ScrollView

@@ -11,6 +11,8 @@ import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import PSGCAddressPicker, { psgcToAddressString, addressStringToParts } from '../components/PSGCAddressPicker';
+import SkeletonLoader from '../components/SkeletonLoader';
+import NetworkBanner from '../components/NetworkBanner';
 
 function InfoRow({ icon, label, value }) {
   return (
@@ -273,12 +275,7 @@ export default function ProfileScreen({ navigation }) {
     });
   }
 
-  if (loading) return (
-    <View style={[styles.container, { justifyContent:'center', alignItems:'center' }]}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
-      <ActivityIndicator color={COLORS.primary} size="large"/>
-    </View>
-  );
+  if (loading) return (<SkeletonLoader type="profile" />);
 
   // ─── Not Logged In ───────────────────────────────────
   const initials = customer
@@ -302,6 +299,7 @@ export default function ProfileScreen({ navigation }) {
   if (loggedIn) return (
     <View style={styles.container}>
       <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <NetworkBanner />
 
       <ScrollView
         contentContainerStyle={[styles.content, { paddingTop: insets.top + SPACING.md }]}
