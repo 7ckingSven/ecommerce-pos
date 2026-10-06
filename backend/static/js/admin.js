@@ -4424,8 +4424,8 @@ function openPODetail(poId) {
   footer.innerHTML = `<button type="button" class="btn btn-cancel" onclick="closePODetailModal()">Close</button>`;
   if (po.status === 'draft') {
     footer.innerHTML += `
-      <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
-      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
+      <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled', this)">Cancel PO</button>
+      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered', this)">Mark as Ordered</button>`;
   } else if (po.status === 'ordered') {
     // Build per-item receive + distribute UI
     const itemRows = items.map((item, idx) => {
@@ -4469,7 +4469,7 @@ function openPODetail(poId) {
         <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
         ${itemRows}
       </div>
-      <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Mark as Received ✓</button>`;
+      <button id="markReceivedBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;" onclick="submitPOReceive('${poId}')">Mark as Received ✓</button>`;
 
     // Run initial validation to set counter labels
     setTimeout(validatePODistribution, 0);
@@ -4512,11 +4512,12 @@ function validatePODistribution() {
     var errEl   = document.getElementById('distError_' + idx);
     var countEl = document.getElementById('distCount_' + idx);
     var over    = distTotal > recvQty;
+    var under   = distTotal < recvQty;
     var none    = recvQty <= 0;
 
     if (countEl) {
       countEl.textContent = 'Distributed: ' + distTotal + ' / ' + recvQty + ' received';
-      countEl.style.color = over ? '#ef4444' : distTotal === recvQty ? 'var(--g-400)' : 'var(--text-muted)';
+      countEl.style.color = (over || under) ? '#ef4444' : (distTotal === recvQty && recvQty > 0) ? 'var(--g-400)' : 'var(--text-muted)';
     }
     if (errEl) {
       if (over) {
@@ -4525,16 +4526,23 @@ function validatePODistribution() {
       } else if (none) {
         errEl.textContent = '⚠ Enter the actually received quantity above (must be > 0)';
         errEl.style.display = '';
+      } else if (under) {
+        errEl.textContent = '⚠ Distribution (' + distTotal + ') must match received quantity (' + recvQty + ') exactly';
+        errEl.style.display = '';
       } else {
         errEl.style.display = 'none';
       }
     }
 
-    if (over || none || distTotal === 0) allValid = false;
+    if (over || under || none) allValid = false;
   });
 
   var btn = document.getElementById('markReceivedBtn');
-  if (btn) btn.disabled = !allValid;
+  if (btn) {
+    btn.disabled      = !allValid;
+    btn.style.opacity = allValid ? '1' : '0.45';
+    btn.style.cursor  = allValid ? 'pointer' : 'not-allowed';
+  }
 }
 
 async function submitPOReceive(poId) {
@@ -4560,7 +4568,7 @@ async function submitPOReceive(poId) {
   });
 
   var btn = document.getElementById('markReceivedBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; btn.style.opacity = '0.7'; btn.style.cursor = 'not-allowed'; }
 
   try {
     const res = await fetch('/api/admin/purchase-orders/' + poId, {
@@ -4576,17 +4584,18 @@ async function submitPOReceive(poId) {
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to receive PO.', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
     }
   } catch (e) {
     showToast('Error submitting.', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
   }
 }
 
-async function updatePOStatus(poId, status, branchId = null, branches = null) {
+async function updatePOStatus(poId, status, btn = null, branchId = null, branches = null) {
   const po = allPOs.find(p => p.po_id === poId);
-  const activeBtn = document.getElementById(status === 'received' ? 'markReceivedBtn' : 'markOrderedBtn');
+  const originalText = btn ? btn.textContent : null;
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
   try {
     const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
       method: 'PUT',
@@ -4594,7 +4603,6 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
       body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId, branches: branches }),
     });
     if (res.ok) {
-      if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = status === 'received' ? 'Mark as Received ✓' : 'Mark as Ordered'; }
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
@@ -4608,8 +4616,12 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to update PO.', 'error');
+      if (btn) { btn.disabled = false; btn.textContent = originalText; }
     }
-  } catch (e) { if (createBtn) { setButtonLoading(createBtn, false); } showToast('Error.', 'error'); }
+  } catch (e) {
+    showToast('Error.', 'error');
+    if (btn) { btn.disabled = false; btn.textContent = originalText; }
+  }
 }
 
 
