@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View, Text, Image, TouchableOpacity, TextInput, StyleSheet,
   ScrollView, Alert, ActivityIndicator, FlatList, Dimensions,
@@ -32,6 +32,7 @@ export default function ProductDetailScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
 
   const [quantity, setQty]   = useState(1);
+  const [qtyText,  setQtyText] = useState('1');
   const [loadingCart, setLoadingCart] = useState(false);
   const [loadingBuy,  setLoadingBuy]  = useState(false);
   const [activeIdx,       setActiveIdx]       = useState(0);
@@ -60,20 +61,38 @@ export default function ProductDetailScreen({ route, navigation }) {
       showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${product.quantity} unit(s) available.` });
       return;
     }
-    setQty(q => q + 1);
+    const next = quantity + 1;
+    setQty(next);
+    setQtyText(String(next));
   }
-  function decrement() { if (quantity > 1) setQty(q => q - 1); }
+  function decrement() {
+    if (quantity > 1) {
+      const next = quantity - 1;
+      setQty(next);
+      setQtyText(String(next));
+    }
+  }
 
-  function handleQtyInput(val) {
-    const num = parseInt(val.replace(/[^0-9]/g, '')) || 1;
+  // Clear the field on focus so typing starts fresh instead of appending
+  // to the existing value (classic controlled-TextInput append bug on
+  // Android even with selectTextOnFocus), then parse/clamp on blur/submit.
+  function handleQtyFocus() {
+    setQtyText('');
+  }
+  function handleQtyChangeText(val) {
+    setQtyText(val.replace(/[^0-9]/g, ''));
+  }
+  function commitQtyText() {
+    const num = parseInt(qtyText, 10) || 0;
+    let final = num;
     if (num > product.quantity) {
       showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${product.quantity} unit(s) available.` });
-      setQty(product.quantity);
+      final = product.quantity;
     } else if (num < 1) {
-      setQty(1);
-    } else {
-      setQty(num);
+      final = 1;
     }
+    setQty(final);
+    setQtyText(String(final));
   }
 
   async function handleAddToCart() {
@@ -312,8 +331,11 @@ export default function ProductDetailScreen({ route, navigation }) {
                 </TouchableOpacity>
                 <TextInput
                   style={styles.qtyInput}
-                  value={String(quantity)}
-                  onChangeText={handleQtyInput}
+                  value={qtyText}
+                  onFocus={handleQtyFocus}
+                  onChangeText={handleQtyChangeText}
+                  onBlur={commitQtyText}
+                  onSubmitEditing={commitQtyText}
                   keyboardType="number-pad"
                   maxLength={4}
                   selectTextOnFocus

@@ -2604,6 +2604,39 @@ function viewOrderItems(order) {
   `);
 }
 
+// Orders only move forward one step at a time: pending -> processing -> out_for_delivery -> completed.
+// Completed/cancelled orders are terminal and the dropdown locks.
+const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery', out_for_delivery: 'completed' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled' };
+
+// Orders list hierarchy — active orders (pending/processing/out for delivery)
+// always float above Completed/Cancelled, and within the same tier the
+// order that's been waiting longest (oldest created_at) shows first (FIFO),
+// so staff/admin naturally work the oldest pending order first.
+const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4 };
+const ORDER_DONE_TIER = 4; // completed/cancelled
+function sortOrdersHierarchy(orders) {
+  return [...orders].sort((a, b) => {
+    const pa = ORDER_STATUS_PRIORITY[a.status] ?? 5;
+    const pb = ORDER_STATUS_PRIORITY[b.status] ?? 5;
+    if (pa !== pb) return pa - pb;
+    const da = new Date(a.created_at || a.date || 0).getTime();
+    const db = new Date(b.created_at || b.date || 0).getTime();
+    // Active tiers (pending/processing/out for delivery): oldest first (FIFO).
+    // Done tier (completed/cancelled): newest first, so the oldest sinks to the very bottom.
+    return pa === ORDER_DONE_TIER ? db - da : da - db;
+  });
+}
+
+function orderStatusSelectHtml(orderId, status, updateFnName) {
+  const locked = status === 'completed' || status === 'cancelled';
+  const next   = ORDER_STATUS_FLOW[status];
+  const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
+    + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
+  return `<select class="filter-select" style="font-size:11px;padding:4px 8px;" ${locked ? 'disabled' : ''}
+      onchange="${updateFnName}('${orderId}', this.value)">${options}</select>`;
+}
+
 function renderOrders(orders) {
   const paged = paginate(orders, ordersPage);
   document.getElementById('ordersBody').innerHTML = paged.length
@@ -2629,14 +2662,7 @@ function renderOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
-            <select class="filter-select" style="font-size:11px;padding:4px 8px;"
-              onchange="updateOrderStatus('${o.order_id}', this.value)">
-              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
-              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
-              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
-              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
-              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
-            </select>
+            ${orderStatusSelectHtml(o.order_id, o.status, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -2653,7 +2679,7 @@ async function updateOrderStatus(id, status) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
-    if (res.ok) showToast('Order status updated!');
+    if (res.ok) { showToast('Order status updated!'); loadOrders(); }
     else showToast('Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
 }
@@ -2697,7 +2723,7 @@ function applyAdminOrderFilters() {
           || type.includes(adminOrderSearchText);
     });
   }
-  renderOrders(filtered);
+  renderOrders(sortOrdersHierarchy(filtered));
 }
 
 // ─── SALES REPORTS ────────────────────────────────────
@@ -4424,8 +4450,8 @@ function openPODetail(poId) {
   footer.innerHTML = `<button type="button" class="btn btn-cancel" onclick="closePODetailModal()">Close</button>`;
   if (po.status === 'draft') {
     footer.innerHTML += `
-      <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled', this)">Cancel PO</button>
-      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered', this)">Mark as Ordered</button>`;
+      <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
+      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
   } else if (po.status === 'ordered') {
     // Build per-item receive + distribute UI
     const itemRows = items.map((item, idx) => {
@@ -4469,7 +4495,7 @@ function openPODetail(poId) {
         <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
         ${itemRows}
       </div>
-      <button id="markReceivedBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;" onclick="submitPOReceive('${poId}')">Mark as Received ✓</button>`;
+      <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Mark as Received ✓</button>`;
 
     // Run initial validation to set counter labels
     setTimeout(validatePODistribution, 0);
@@ -4512,12 +4538,11 @@ function validatePODistribution() {
     var errEl   = document.getElementById('distError_' + idx);
     var countEl = document.getElementById('distCount_' + idx);
     var over    = distTotal > recvQty;
-    var under   = distTotal < recvQty;
     var none    = recvQty <= 0;
 
     if (countEl) {
       countEl.textContent = 'Distributed: ' + distTotal + ' / ' + recvQty + ' received';
-      countEl.style.color = (over || under) ? '#ef4444' : (distTotal === recvQty && recvQty > 0) ? 'var(--g-400)' : 'var(--text-muted)';
+      countEl.style.color = over ? '#ef4444' : distTotal === recvQty ? 'var(--g-400)' : 'var(--text-muted)';
     }
     if (errEl) {
       if (over) {
@@ -4526,23 +4551,16 @@ function validatePODistribution() {
       } else if (none) {
         errEl.textContent = '⚠ Enter the actually received quantity above (must be > 0)';
         errEl.style.display = '';
-      } else if (under) {
-        errEl.textContent = '⚠ Distribution (' + distTotal + ') must match received quantity (' + recvQty + ') exactly';
-        errEl.style.display = '';
       } else {
         errEl.style.display = 'none';
       }
     }
 
-    if (over || under || none) allValid = false;
+    if (over || none || distTotal === 0) allValid = false;
   });
 
   var btn = document.getElementById('markReceivedBtn');
-  if (btn) {
-    btn.disabled      = !allValid;
-    btn.style.opacity = allValid ? '1' : '0.45';
-    btn.style.cursor  = allValid ? 'pointer' : 'not-allowed';
-  }
+  if (btn) btn.disabled = !allValid;
 }
 
 async function submitPOReceive(poId) {
@@ -4568,7 +4586,7 @@ async function submitPOReceive(poId) {
   });
 
   var btn = document.getElementById('markReceivedBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; btn.style.opacity = '0.7'; btn.style.cursor = 'not-allowed'; }
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
 
   try {
     const res = await fetch('/api/admin/purchase-orders/' + poId, {
@@ -4584,18 +4602,17 @@ async function submitPOReceive(poId) {
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to receive PO.', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
     }
   } catch (e) {
     showToast('Error submitting.', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; btn.style.opacity = '1'; btn.style.cursor = 'pointer'; }
+    if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
   }
 }
 
-async function updatePOStatus(poId, status, btn = null, branchId = null, branches = null) {
+async function updatePOStatus(poId, status, branchId = null, branches = null) {
   const po = allPOs.find(p => p.po_id === poId);
-  const originalText = btn ? btn.textContent : null;
-  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+  const activeBtn = document.getElementById(status === 'received' ? 'markReceivedBtn' : 'markOrderedBtn');
   try {
     const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
       method: 'PUT',
@@ -4603,6 +4620,7 @@ async function updatePOStatus(poId, status, btn = null, branchId = null, branche
       body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId, branches: branches }),
     });
     if (res.ok) {
+      if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = status === 'received' ? 'Mark as Received ✓' : 'Mark as Ordered'; }
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
@@ -4616,12 +4634,8 @@ async function updatePOStatus(poId, status, btn = null, branchId = null, branche
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to update PO.', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = originalText; }
     }
-  } catch (e) {
-    showToast('Error.', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = originalText; }
-  }
+  } catch (e) { if (createBtn) { setButtonLoading(createBtn, false); } showToast('Error.', 'error'); }
 }
 
 

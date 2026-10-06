@@ -1750,6 +1750,39 @@ function updateOrdersBadge(orders) {
   }
 }
 
+// Orders only move forward one step at a time: pending -> processing -> out_for_delivery -> completed.
+// Completed/cancelled orders are terminal and the dropdown locks.
+const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery', out_for_delivery: 'completed' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled' };
+
+// Orders list hierarchy — active orders (pending/processing/out for delivery)
+// always float above Completed/Cancelled, and within the same tier the
+// order that's been waiting longest (oldest created_at) shows first (FIFO),
+// so staff/admin naturally work the oldest pending order first.
+const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4 };
+const ORDER_DONE_TIER = 4; // completed/cancelled
+function sortOrdersHierarchy(orders) {
+  return [...orders].sort((a, b) => {
+    const pa = ORDER_STATUS_PRIORITY[a.status] ?? 5;
+    const pb = ORDER_STATUS_PRIORITY[b.status] ?? 5;
+    if (pa !== pb) return pa - pb;
+    const da = new Date(a.created_at || a.date || 0).getTime();
+    const db = new Date(b.created_at || b.date || 0).getTime();
+    // Active tiers (pending/processing/out for delivery): oldest first (FIFO).
+    // Done tier (completed/cancelled): newest first, so the oldest sinks to the very bottom.
+    return pa === ORDER_DONE_TIER ? db - da : da - db;
+  });
+}
+
+function orderStatusSelectHtml(orderId, status, updateFnName) {
+  const locked = status === 'completed' || status === 'cancelled';
+  const next   = ORDER_STATUS_FLOW[status];
+  const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
+    + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
+  return `<select class="filter-select" style="font-size:11px;padding:4px 8px;" ${locked ? 'disabled' : ''}
+      onchange="${updateFnName}('${orderId}', this.value)">${options}</select>`;
+}
+
 function renderStaffOrders(orders) {
   const paged = paginate(orders, staffOrdersPage);
   document.getElementById('staffOrdersBody').innerHTML = paged.length
@@ -1776,14 +1809,7 @@ function renderStaffOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
-            <select class="filter-select" style="font-size:11px;padding:4px 8px;"
-              onchange="updateOrderStatus('${o.order_id}', this.value)">
-              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
-              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
-              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
-              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
-              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
-            </select>
+            ${orderStatusSelectHtml(o.order_id, o.status, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -1960,14 +1986,7 @@ function renderStaffOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
-            <select class="filter-select" style="font-size:11px;padding:4px 8px;"
-              onchange="updateOrderStatus('${o.order_id}', this.value)">
-              <option value="pending"          ${o.status==='pending'          ?'selected':''}>Pending</option>
-              <option value="processing"       ${o.status==='processing'       ?'selected':''}>Processing</option>
-              <option value="out_for_delivery" ${o.status==='out_for_delivery' ?'selected':''}>Out for Delivery</option>
-              <option value="completed"        ${o.status==='completed'        ?'selected':''}>Completed</option>
-              <option value="cancelled"        ${o.status==='cancelled'        ?'selected':''}>Cancelled</option>
-            </select>
+            ${orderStatusSelectHtml(o.order_id, o.status, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
@@ -2123,7 +2142,7 @@ function applyStaffOrderFilters() {
           || type.includes(staffOrderSearchText);
     });
   }
-  renderStaffOrders(filtered);
+  renderStaffOrders(sortOrdersHierarchy(filtered));
 }
 window.filterStaffOrderType = filterStaffOrderType;
 
@@ -2134,7 +2153,7 @@ async function updateOrderStatus(id, status) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
-    if (res.ok) showToast('Order status updated!');
+    if (res.ok) { showToast('Order status updated!'); loadOrders(); }
     else showToast('Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
 }

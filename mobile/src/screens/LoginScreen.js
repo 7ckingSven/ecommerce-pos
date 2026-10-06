@@ -18,10 +18,24 @@ export default function LoginScreen({ navigation }) {
 
   const canSubmit = loginInput.trim() !== '' && password.trim() !== '';
 
+  // Go back to wherever the user came from (e.g. the product they were
+  // trying to Buy Now / Add to Cart) instead of always landing on Home.
+  // Login/Register are always pushed on top of an existing 'Main' instance
+  // (Splash lands on Main via `replace`, never on Login), so popToTop()
+  // reliably returns to that original Main — with its nested screen history
+  // (like ProductDetail) intact — even after a multi-step signup detour.
+  function goToMainOrBack() {
+    if (navigation.canGoBack()) {
+      navigation.popToTop();
+    } else {
+      navigation.replace('Main');
+    }
+  }
+
   // Auto-navigate if already logged in
   useEffect(() => {
     isLoggedIn().then(logged => {
-      if (logged) navigation.replace('Main');
+      if (logged) goToMainOrBack();
     });
   }, []);
 
@@ -51,7 +65,7 @@ export default function LoginScreen({ navigation }) {
         console.log('FCM token save error:', fcmErr);
       }
 
-      navigation.replace('Main');
+      goToMainOrBack();
     } catch (err) {
       const status = err.response?.status;
       const msg    = err.response?.data?.error || 'Something went wrong. Please try again.';

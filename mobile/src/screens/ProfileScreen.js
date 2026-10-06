@@ -152,6 +152,16 @@ export default function ProfileScreen({ navigation }) {
       if (!editForm.lname?.trim()) {
         showAlert({ type: 'warning', title: 'Required', message: 'Last name is required.' }); return;
       }
+      const nameRegex = /^[A-Za-zÑñ\s-]+$/;
+      if (!nameRegex.test(editForm.fname.trim())) {
+        showAlert({ type: 'warning', title: 'Invalid First Name', message: 'First name can only contain letters, spaces, and hyphens.' }); return;
+      }
+      if (!nameRegex.test(editForm.lname.trim())) {
+        showAlert({ type: 'warning', title: 'Invalid Last Name', message: 'Last name can only contain letters, spaces, and hyphens.' }); return;
+      }
+      if (editForm.mi?.trim() && !nameRegex.test(editForm.mi.trim())) {
+        showAlert({ type: 'warning', title: 'Invalid Middle Initial', message: 'Middle initial can only contain letters.' }); return;
+      }
       if (editForm.dob?.trim()) {
         const dobRegex = /^\d{4}-\d{2}-\d{2}$/;
         if (!dobRegex.test(editForm.dob.trim())) {
@@ -466,9 +476,9 @@ export default function ProfileScreen({ navigation }) {
               {editType === 'personal' && (
                 <View style={styles.modalBody}>
                   {[
-                    { key:'fname',  label:'First Name *',   placeholder:'Juan' },
-                    { key:'mi',     label:'Middle Initial',  placeholder:'S.' },
-                    { key:'lname',  label:'Last Name *',     placeholder:'Dela Cruz' },
+                    { key:'fname',  label:'First Name *',   placeholder:'Juan',       isName:true },
+                    { key:'mi',     label:'Middle Initial',  placeholder:'S.',         isName:true },
+                    { key:'lname',  label:'Last Name *',     placeholder:'Dela Cruz',  isName:true },
                     { key:'dob',    label:'Date of Birth',   placeholder:'YYYY-MM-DD' },
                   ].map(f => (
                     <View key={f.key} style={styles.fieldWrap}>
@@ -476,7 +486,7 @@ export default function ProfileScreen({ navigation }) {
                       <TextInput
                         style={styles.fieldInput}
                         value={editForm[f.key]}
-                        onChangeText={v => updateField(f.key, v)}
+                        onChangeText={v => updateField(f.key, f.isName ? v.replace(/[^A-Za-zÑñ\s-]/g, '') : v)}
                         placeholder={f.placeholder}
                         placeholderTextColor={COLORS.textMuted}
                       />

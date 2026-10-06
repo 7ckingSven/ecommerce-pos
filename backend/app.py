@@ -1121,6 +1121,108 @@ def api_mark_order_received(order_id):
         return jsonify({'error': str(e)}), 500
 
 
+# Customer self-cancel: only while status is still 'pending' and within a 2-hour
+# window from when the order was placed (enforced server-side, not just on the
+# button's visibility on mobile). Reason is optional. Mirrors the stock-return
+# logic used by admin/staff cancellation so branch/variant/product quantities
+# stay accurate either way.
+CUSTOMER_CANCEL_WINDOW_HOURS = 2
+
+@app.route('/api/orders/<order_id>/cancel', methods=['POST'])
+def api_cancel_order(order_id):
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data   = request.get_json() or {}
+        reason = (data.get('reason') or '').strip()
+
+        order_res = supabase.table('order').select(
+            'order_id, status, customer_id, created_at, branch_id, order_item(product_id, qty, selected_options)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+        order = order_res.data[0]
+        if str(order.get('customer_id')) != str(customer_id):
+            return jsonify({'error': 'Unauthorized.'}), 403
+        if order.get('status') != 'pending':
+            return jsonify({'error': 'This order can no longer be cancelled.'}), 400
+
+        # Enforce the 2-hour window server-side (the mobile button hiding is UX only)
+        created_raw = order.get('created_at')
+        if created_raw:
+            from datetime import datetime, timezone
+            normalized = str(created_raw).replace(' ', 'T')
+            if not (normalized.endswith('Z') or '+' in normalized[10:]):
+                normalized += '+00:00'
+            else:
+                normalized = normalized.replace('Z', '+00:00')
+            try:
+                created_dt = datetime.fromisoformat(normalized)
+                if created_dt.tzinfo is None:
+                    created_dt = created_dt.replace(tzinfo=timezone.utc)
+                elapsed_hours = (datetime.now(timezone.utc) - created_dt).total_seconds() / 3600
+                if elapsed_hours > CUSTOMER_CANCEL_WINDOW_HOURS:
+                    return jsonify({'error': 'The 2-hour cancellation window has passed.'}), 400
+            except Exception as parse_err:
+                print(f'Cancel window parse warning: {parse_err}')
+
+        supabase.table('order').update({
+            'status':         'cancelled',
+            'cancel_reason':  reason or None,
+            'cancelled_by':   'customer',
+        }).eq('order_id', order_id).execute()
+
+        # Return stock to branch/variant/product totals
+        br_id = order.get('branch_id')
+        for item in order.get('order_item', []):
+            pid  = item.get('product_id')
+            qty  = int(item.get('qty', 0))
+            opts = item.get('selected_options', {})
+            if not pid or not qty:
+                continue
+            bs = None
+            if br_id:
+                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                if bs.data:
+                    supabase.table('branch_stock').update({
+                        'quantity': bs.data[0]['quantity'] + qty
+                    }).eq('product_id', pid).eq('branch_id', br_id).execute()
+            if opts and br_id:
+                try:
+                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
+                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                    if match:
+                        supabase.table('variant_stock').update({
+                            'quantity': match[0]['quantity'] + qty
+                        }).eq('id', match[0]['id']).execute()
+                except Exception as vs_err:
+                    print(f'Variant stock restore warning: {vs_err}')
+            pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+            if pr.data:
+                supabase.table('product').update({
+                    'quantity': pr.data[0]['quantity'] + qty
+                }).eq('product_id', pid).execute()
+            try:
+                supabase.table('inventory').insert({
+                    'product_id':      pid,
+                    'staff_id':        None,
+                    'quantity_added':  qty,
+                    'quantity_before': (bs.data[0]['quantity'] if br_id and bs and bs.data else 0),
+                    'quantity_after':  (bs.data[0]['quantity'] + qty if br_id and bs and bs.data else qty),
+                    'to_branch_id':    br_id,
+                    'variant_options': opts if opts else None,
+                    'note':            f'Cancelled by customer — Order #{order_id[:8].upper()}',
+                }).execute()
+            except Exception as log_err:
+                print(f'Cancel inventory log warning: {log_err}')
+
+        return jsonify({'message': 'Order cancelled.'}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/upload/gcash-receipt', methods=['POST'])
 def upload_gcash_receipt():
     customer_id = request.headers.get('X-Customer-ID')
