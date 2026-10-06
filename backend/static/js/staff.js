@@ -820,8 +820,7 @@ function renderOrderItems() {
         <p>No items added yet</p>
         <span>Search and click a product to add</span>
       </div>`;
-    const checkBtn = document.getElementById('processOrderBtn');
-    if (checkBtn) checkBtn.disabled = true;
+    validateCheckoutButton();
     return;
   }
   wrap.innerHTML = orderItems.map(item => `
@@ -837,8 +836,7 @@ function renderOrderItems() {
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>`).join('');
-  const checkBtn2 = document.getElementById('processOrderBtn');
-  if (checkBtn2) checkBtn2.disabled = false;
+  validateCheckoutButton();
 }
 
 
@@ -1087,6 +1085,7 @@ function selectPayment(method, el) {
   el.classList.add('active');
   document.getElementById('posRefNo').style.display     = method === 'gcash' ? 'flex' : 'none';
   document.getElementById('posCashInput').style.display = method === 'walk_in_cash' ? 'flex' : 'none';
+  validateCheckoutButton();
 }
 
 function computeChange() {
@@ -1099,6 +1098,34 @@ function computeChange() {
   const input    = document.getElementById('posChange');
   input.value       = change >= 0 ? peso(change) : '—';
   input.style.color = change >= 0 ? 'var(--g-400)' : '#ef4444';
+  validateCheckoutButton();
+}
+
+// ─── Checkout button validation ───────────────────────
+// Disables Process Order unless the cart has items AND the
+// selected payment method has valid, sufficient input.
+function validateCheckoutButton() {
+  const btn = document.getElementById('processOrderBtn');
+  if (!btn) return;
+
+  if (!orderItems.length) {
+    btn.disabled = true;
+    return;
+  }
+
+  if (selectedPayment === 'walk_in_cash') {
+    const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+    const sel      = document.getElementById('posDiscount');
+    const discPct  = sel?.options[sel.selectedIndex]?.dataset?.pct ? parseFloat(sel.options[sel.selectedIndex].dataset.pct) : 0;
+    const total    = subtotal - (subtotal * discPct / 100);
+    const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
+    btn.disabled = !(received > 0 && received >= total);
+  } else if (selectedPayment === 'gcash') {
+    const refNo = (document.getElementById('posGcashRef').value || '').trim();
+    btn.disabled = !/^\d{13}$/.test(refNo);
+  } else {
+    btn.disabled = false;
+  }
 }
 
 async function processOrder() {
