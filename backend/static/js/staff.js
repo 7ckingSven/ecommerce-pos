@@ -1441,7 +1441,7 @@ async function loadInventory() {
   // ── Skeleton ──
   skStats(['invTotalProducts','invLowStock','invCriticalStock','invOutOfStock','invRecentRestocks']);
   skTable('invProductsBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
-                              'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+                              'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
   skTable('invHistoryBody',  ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
                               'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-full'], 6);
   // ─────────────
@@ -1587,6 +1587,12 @@ function renderInvProducts(products) {
         const qty = bs ? bs.quantity : 0;
         return `
         <tr>
+          <td>
+            ${p.image_url
+              ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" class="product-img-cell" style="width:32px;height:32px;" alt="${p.product_name}"/>`
+              : `<div class="product-img-placeholder" style="width:32px;height:32px;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:16px;height:16px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`
+            }
+          </td>
           <td style='cursor:pointer;' onclick="toggleStaffVariantRow('${p.product_id}', this.querySelector('.staff-expand-btn'))"><span class='staff-expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
           <td>${p.brand || '—'}</td>
           <td>${p.category}</td>
@@ -1602,16 +1608,81 @@ function renderInvProducts(products) {
               ? '<span class="badge badge--yellow">Low Stock</span>'
               : '<span class="badge badge--green">In Stock</span>'
           }</td>
+          <td>
+            <button class="btn-icon" onclick="event.stopPropagation();viewStaffProductDetails('${p.product_id}')" title="View Product Details">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </td>
         </tr>
         <tr id="staffVarRow_${p.product_id}" style="display:none;background:var(--surface);">
-          <td colspan="6" style="padding:0;">
+          <td colspan="8" style="padding:0;">
             <div class="staff-variant-content" style="padding:8px 16px;"></div>
           </td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="6" class="table-empty">No products found</td></tr>';
+    : '<tr><td colspan="8" class="table-empty">No products found</td></tr>';
   renderPager('staffInvPagination', products.length, staffInvPage, 'changeStaffInvPage');
 }
+
+/* ── Read-only Product Details modal (Staff) ───────────── */
+function viewStaffProductDetails(productId) {
+  const p = invProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+
+  const bs  = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+  const qty = bs ? bs.quantity : 0;
+  const stockColor = qty <= 0 ? '#ef4444' : qty <= 10 ? '#eab308' : 'var(--g-400)';
+  const imgHtml = p.image_url
+    ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;background:var(--surface-2);flex-shrink:0;" alt="${p.product_name}"/>`
+    : `<div class="product-img-placeholder" style="width:80px;height:80px;border-radius:10px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:28px;height:28px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
+
+  const groups = p.option_groups || [];
+  const variantsHtml = groups.length
+    ? `<div style="margin-top:12px;">
+         <label class="form-label" style="font-size:11px;">Available Variants</label>
+         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
+           ${groups.map(g => `
+             <div style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;">
+               <strong>${g.label}:</strong> ${(g.choices || []).join(', ') || '—'}
+             </div>`).join('')}
+         </div>
+       </div>`
+    : '';
+
+  showGenericModal(`
+    <div style="padding:1rem 1rem 0.75rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <strong style="font-size:15px;">Product Details</strong>
+      <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">&times;</button>
+    </div>
+    <div style="padding:1rem;">
+      <div style="display:flex;gap:14px;margin-bottom:14px;">
+        ${imgHtml}
+        <div style="min-width:0;">
+          <div style="font-size:16px;font-weight:700;color:var(--text);">${p.product_name}</div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">${p.brand || '—'} • ${p.category || '—'}</div>
+          <div style="margin-top:6px;">${badge(p.status)}</div>
+        </div>
+      </div>
+      <div class="form-row-2" style="margin-bottom:10px;">
+        <div>
+          <label class="form-label" style="font-size:11px;">Price</label>
+          <div style="font-weight:700;font-size:14px;color:var(--text);">${peso(p.price)}</div>
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px;">Stock (this branch)</label>
+          <div style="font-weight:700;font-size:14px;color:${stockColor};">${qty} units</div>
+        </div>
+      </div>
+      ${p.description ? `
+        <div style="margin-bottom:10px;">
+          <label class="form-label" style="font-size:11px;">Description</label>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:2px;">${p.description}</div>
+        </div>` : ''}
+      ${variantsHtml}
+    </div>
+  `);
+}
+window.viewStaffProductDetails = viewStaffProductDetails;
 
 function filterInventorySearch(q) {
   const filtered = invProducts.filter(p =>
