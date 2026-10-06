@@ -2226,100 +2226,306 @@ function changeSrPage(page) { srPage = page; renderRequestsPage(); }
 window.changeSrPage = changeSrPage;
 
 
-function loadReqVariants(productId) {
-  const wrap = document.getElementById('reqVariantWrap');
-  const cont = document.getElementById('reqVariantSelects');
-  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+async function openRequestModal(btn) {
+  btn = btn || document.querySelector('[onclick^="openRequestModal"]');
+  setButtonLoading(btn, true);
+  try {
+    if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
 
-  const product = invProducts.find(p => p.product_id === productId);
-  const groups  = product?.option_groups || [];
+    // Clear and add first product row
+    document.getElementById('reqItems').innerHTML = '';
+    reqRowCount = 0;
+    document.getElementById('reqNote').value = '';
+    addReqItemRow();
+    _setReqBtn(false);
 
-  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+    // Live check — item row inputs (event delegation)
+    document.getElementById('reqItems')?.addEventListener('input',  _reqUpdateBtn);
+    document.getElementById('reqItems')?.addEventListener('change', _reqUpdateBtn);
 
-  wrap.style.display = 'block';
-  cont.innerHTML = groups.map(g => `
-    <div style="flex:1;min-width:120px;">
-      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
-      <select id="reqVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
-        <option value="">All (no specific variant)</option>
-        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
-      </select>
-    </div>
-  `).join('');
-}
-
-function getReqVariantOptions() {
-  const cont = document.getElementById('reqVariantSelects');
-  if (!cont) return {};
-  const opts = {};
-  cont.querySelectorAll('select').forEach(sel => {
-    const label = sel.id.replace('reqVariantOpt_', '').replace(/_/g, ' ');
-    if (sel.value) opts[label] = sel.value;
-  });
-  return Object.keys(opts).length > 0 ? opts : {};
-}
-
-async function openRequestModal() {
-  if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
-  const sel = document.getElementById('reqProduct');
-  if (sel) {
-    // Use branch_stock quantity for this branch, fallback to product.quantity
-    sel.innerHTML = '<option value="">Select product</option>' +
-      invProducts.map(p => {
-        const branchStock = p.branch_stock?.find(bs => bs.branch_id === staffBranchId);
-        const stock = branchStock ? branchStock.quantity : p.quantity || 0;
-        return `<option value="${p.product_id}" data-stock="${stock}">${p.product_name} (Stock: ${stock})</option>`;
-      }).join('');
+    document.getElementById('requestModalOverlay')?.classList.add('open');
+    document.getElementById('requestModal')?.classList.add('open');
+  } finally {
+    setButtonLoading(btn, false);
   }
-  document.getElementById('requestModalOverlay')?.classList.add('open');
-  document.getElementById('requestModal')?.classList.add('open');
 }
 
 function closeRequestModal() {
   document.getElementById('requestModalOverlay')?.classList.remove('open');
   document.getElementById('requestModal')?.classList.remove('open');
   document.getElementById('requestForm')?.reset();
-  document.getElementById('reqCurrentStock').value = '';
-  const reqVarWrap = document.getElementById('reqVariantWrap');
-  if (reqVarWrap) reqVarWrap.style.display = 'none';
+  document.getElementById('reqItems').innerHTML = '';
+  reqRowCount = 0;
+  _setReqBtn(false);
 }
 
-function updateCurrentStock(sel) {
-  const opt   = sel.options[sel.selectedIndex];
-  const stock = opt?.dataset?.stock;
-  document.getElementById('reqCurrentStock').value = stock !== undefined && stock !== '' ? `${stock} units` : '';
+/* ── Stock Request rows (mirrors Admin's Add Stock multi-item pattern) ──── */
+let reqRowCount = 0;
+
+function buildReqProductAutocomplete(container, { inputId, hiddenId, onSelect }) {
+  function stockLabel(p) {
+    const branchStock = p.branch_stock?.find(bs => bs.branch_id === staffBranchId);
+    const stock = branchStock ? branchStock.quantity : p.quantity || 0;
+    return `Stock: ${stock}`;
+  }
+
+  const input  = container.querySelector(`#${inputId}`);
+  const hidden = container.querySelector(`#${hiddenId}`);
+  if (!input || !hidden) return;
+
+  // Fixed-position list appended to body — escapes modal overflow clipping
+  const list = document.createElement('div');
+  list.style.cssText = [
+    'display:none',
+    'position:fixed',
+    'background:var(--card-bg)',
+    'border:1px solid var(--border)',
+    'border-radius:8px',
+    'z-index:9999',
+    'max-height:200px',
+    'overflow-y:auto',
+    'box-shadow:0 8px 24px rgba(0,0,0,0.4)',
+  ].join(';');
+  document.body.appendChild(list);
+
+  function positionList() {
+    const rect = input.getBoundingClientRect();
+    list.style.top   = (rect.bottom + 2) + 'px';
+    list.style.left  = rect.left + 'px';
+    list.style.width = rect.width + 'px';
+  }
+
+  function showSuggestions(q) {
+    const term = (q || '').toLowerCase().trim();
+    list.innerHTML = '';
+    if (!term) { list.style.display = 'none'; return; }
+    const matches = invProducts.filter(p =>
+      (p.product_name || '').toLowerCase().includes(term)
+    ).slice(0, 10);
+    if (!matches.length) {
+      list.innerHTML = `<div style="padding:8px 12px;font-size:12px;color:var(--text-muted);">No products found</div>`;
+      positionList();
+      list.style.display = 'block';
+      return;
+    }
+    matches.forEach(p => {
+      const item = document.createElement('div');
+      item.className = 'ac-item';
+      item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);background:var(--card-bg);';
+      item.innerHTML = `<span style="font-weight:500;">${p.product_name}</span><span style="font-size:11px;color:var(--text-muted);margin-left:6px;">${stockLabel(p)}</span>`;
+      item.addEventListener('mousedown', e => { e.preventDefault(); selectProduct(p); });
+      list.appendChild(item);
+    });
+    positionList();
+    list.style.display = 'block';
+  }
+
+  function selectProduct(p) {
+    hidden.value = p.product_id;
+    input.value  = p.product_name;
+    list.style.display = 'none';
+    const clearBtn = container.querySelector('.ac-clear');
+    if (clearBtn) clearBtn.style.display = 'inline-flex';
+    input.readOnly = true;
+    input.style.background = 'var(--surface)';
+    if (onSelect) onSelect(p);
+  }
+
+  function clearSelection() {
+    hidden.value = '';
+    input.value  = '';
+    input.readOnly = false;
+    input.style.background = '';
+    list.style.display = 'none';
+    const clearBtn = container.querySelector('.ac-clear');
+    if (clearBtn) clearBtn.style.display = 'none';
+    if (onSelect) onSelect(null);
+  }
+
+  input.addEventListener('input',  () => showSuggestions(input.value));
+  input.addEventListener('focus',  () => { if (!input.readOnly) showSuggestions(input.value); });
+  input.addEventListener('blur',   () => setTimeout(() => { list.style.display = 'none'; }, 150));
+  input.closest('.modal')?.addEventListener('scroll', positionList);
+
+  const clearBtn = container.querySelector('.ac-clear');
+  if (clearBtn) clearBtn.addEventListener('click', clearSelection);
+
+  container._acClear = () => { clearSelection(); list.remove(); };
+}
+
+function reqProductAcHTML(inputId, hiddenId) {
+  return `
+    <div style="display:flex;align-items:center;gap:4px;">
+      <input id="${inputId}" type="text" class="form-input" placeholder="Type to search product..." autocomplete="off"
+        style="flex:1;" />
+      <button type="button" class="ac-clear" title="Clear"
+        style="display:none;align-items:center;justify-content:center;width:26px;height:26px;border:none;background:#ef4444;color:#fff;border-radius:6px;cursor:pointer;font-size:14px;flex-shrink:0;">×</button>
+    </div>
+    <input id="${hiddenId}" type="hidden" required />`;
+}
+
+function addReqItemRow() {
+  reqRowCount++;
+  const rowId  = 'reqRow_' + reqRowCount;
+  const wrap   = document.getElementById('reqItems');
+  const row    = document.createElement('div');
+  row.id       = rowId;
+  row.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;position:relative;';
+
+  const inputId  = `reqInput_${reqRowCount}`;
+  const hiddenId = `reqHidden_${reqRowCount}`;
+
+  row.innerHTML = `
+    ${reqRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove();_reqUpdateBtn();" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
+    <div class="form-group" style="margin-bottom:8px;">
+      <label class="form-label" style="font-size:11px;">Product <span class="req">*</span></label>
+      ${reqProductAcHTML(inputId, hiddenId)}
+    </div>
+    <div class="req-variant-wrap" style="display:none;margin-bottom:8px;">
+      <label class="form-label" style="font-size:11px;">Variant <span style="font-size:10px;color:var(--text-muted);">(optional)</span></label>
+      <div class="req-variant-selects" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+    </div>
+    <div class="form-row-2" style="margin:0;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label" style="font-size:11px;">Quantity Needed <span class="req">*</span></label>
+        <input type="number" class="form-input req-qty" min="1" required placeholder="e.g. 20"/>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label" style="font-size:11px;">Current Stock</label>
+        <input type="text" class="form-input req-current-stock" disabled placeholder="Select product first"/>
+      </div>
+    </div>
+  `;
+  wrap.appendChild(row);
+
+  buildReqProductAutocomplete(row, {
+    inputId, hiddenId,
+    onSelect: (p) => {
+      loadReqRowVariantsByProduct(p, rowId);
+      const stockEl = row.querySelector('.req-current-stock');
+      if (stockEl) {
+        if (p) {
+          const branchStock = p.branch_stock?.find(bs => bs.branch_id === staffBranchId);
+          const stock = branchStock ? branchStock.quantity : p.quantity || 0;
+          stockEl.value = `${stock} units`;
+        } else {
+          stockEl.value = '';
+        }
+      }
+      _reqUpdateBtn();
+    },
+  });
+}
+window.addReqItemRow = addReqItemRow;
+
+function loadReqRowVariantsByProduct(product, rowId) {
+  const row  = document.getElementById(rowId);
+  const wrap = row.querySelector('.req-variant-wrap');
+  const cont = row.querySelector('.req-variant-selects');
+  if (!product) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  const groups = product.option_groups || [];
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:100px;">
+      <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select req-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
+        <option value="">Any</option>
+        ${(g.choices||[]).map(c => `<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
+function _setReqBtn(enabled) {
+  const btn = document.getElementById('reqSubmitBtn');
+  if (!btn) return;
+  btn.disabled      = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.45';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
+}
+
+function _reqUpdateBtn() {
+  const rows = document.querySelectorAll('#reqItems > div');
+  if (!rows.length) { _setReqBtn(false); return; }
+  const allValid = Array.from(rows).every(row => {
+    const hidden = row.querySelector('input[type="hidden"]');
+    const qty    = row.querySelector('.req-qty');
+    return hidden?.value && qty?.value && parseInt(qty.value) >= 1;
+  });
+  _setReqBtn(allValid);
 }
 
 async function submitRequest(e) {
   e.preventDefault();
   const reqBtn = e.submitter || document.querySelector('#requestForm button[type="submit"]');
   setButtonLoading(reqBtn, true);
-  const productId = document.getElementById('reqProduct').value;
-  const qty       = parseInt(document.getElementById('reqQty').value);
-  const note      = document.getElementById('reqNote').value;
+
+  const note = document.getElementById('reqNote').value;
+  const rows = document.querySelectorAll('#reqItems > div');
+
+  if (!rows.length) {
+    showToast('Please add at least one product.', 'error');
+    setButtonLoading(reqBtn, false);
+    return;
+  }
+
+  const items = [];
+  let hasError = false;
+  rows.forEach(function(row) {
+    const hiddenInput = row.querySelector('input[type="hidden"]');
+    const qtyInput     = row.querySelector('.req-qty');
+    const productId    = hiddenInput?.value;
+    const qty          = parseInt(qtyInput?.value || '0');
+
+    if (!productId || qty <= 0) { hasError = true; return; }
+
+    const variantOpts = {};
+    row.querySelectorAll('.req-variant-opt').forEach(function(vs) {
+      if (vs.value) variantOpts[vs.dataset.label] = vs.value;
+    });
+
+    items.push({
+      product_id:      productId,
+      quantity_needed: qty,
+      variant_options: Object.keys(variantOpts).length ? variantOpts : null,
+    });
+  });
+
+  if (hasError || !items.length) {
+    showToast('Please fill in all product rows correctly.', 'error');
+    setButtonLoading(reqBtn, false);
+    return;
+  }
 
   try {
-    const res = await fetch('/api/staff/stock-requests', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        product_id:      productId,
-        quantity_needed: qty,
-        note:            note,
-        branch_id:       staffBranchId,
-        variant_options: (() => { const v = getReqVariantOptions(); return Object.keys(v).length > 0 ? v : null; })()
-      }),
-    });
-    if (res.ok) {
-      showToast('Stock request submitted!');
+    let allOk = true;
+    for (const item of items) {
+      const res = await fetch('/api/staff/stock-requests', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id:      item.product_id,
+          quantity_needed: item.quantity_needed,
+          note:            note,
+          branch_id:       staffBranchId,
+          variant_options: item.variant_options,
+        }),
+      });
+      if (!res.ok) allOk = false;
+    }
+    if (allOk) {
+      showToast(`${items.length} stock request${items.length !== 1 ? 's' : ''} submitted!`);
       closeRequestModal();
       invalidateSection('requests'); loadRequests();
     } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to submit request.', 'error');
+      showToast('Some requests failed to submit. Please check.', 'error');
     }
-  } catch (e) { showToast('Error submitting request.', 'error'); }
-  finally { setButtonLoading(reqBtn, false); }
+  } catch (err) {
+    showToast('Error submitting request.', 'error');
+  } finally {
+    setButtonLoading(reqBtn, false);
+  }
 }
 
 
