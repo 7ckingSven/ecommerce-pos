@@ -2216,7 +2216,18 @@ function renderRequestsPage() {
           <td><span class="badge badge--${statusColor}">${r.status}</span></td>
           <td style="font-size:12px;">${r.note || '—'}</td>
           <td style="font-size:12px;color:${r.status === 'rejected' ? '#ef4444' : 'inherit'};">${r.admin_note || '—'}</td>
-          <td>${new Date(r.created_at).toLocaleDateString('en-PH')}</td>
+          <td>${(() => {
+            const raw = r.created_at;
+            if (!raw) return '—';
+            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+            const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+            const h = d.getUTCHours(), m = d.getUTCMinutes();
+            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+            return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
+          })()}</td>
         </tr>`;
       }).join('')
     : '<tr><td colspan="7" class="table-empty">No stock requests yet</td></tr>';

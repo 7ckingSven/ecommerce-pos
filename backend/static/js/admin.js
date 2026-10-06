@@ -4044,7 +4044,18 @@ function renderStockRequests(requests) {
           <td>${r.branch?.branch_name || '—'}</td>
           <td>${badge(r.status)}</td>
           <td style="font-size:12px;">${r.note || '—'}</td>
-          <td>${new Date(r.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+          <td>${(() => {
+            const raw = r.created_at;
+            if (!raw) return '—';
+            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+            const months = ['January','February','March','April','May','June','July','August','September','October','November','December'];
+            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
+            const h = d.getUTCHours(), m = d.getUTCMinutes();
+            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
+            return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
+          })()}</td>
           <td>
             <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${r.product?.product_name}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
