@@ -1382,6 +1382,9 @@ function printReceipt() {
 function getStaffMovementType(i) {
   const note = (i.note || '').toLowerCase();
   const qty  = Number(i.quantity_added);
+  // Checked first — a cancelled order's note also contains "order #", which
+  // would otherwise be misread as a Sale below.
+  if (note.includes('[cancelled]')) return 'cancelled';
   if (note.includes('sale') || note.includes('order #')) return 'sale';
   if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id)) return 'transfer';
   if (note.includes('[loss]') || note.includes('[damaged]') || note.includes('adjustment')) return 'adjustment';
@@ -1425,6 +1428,8 @@ function renderInvHistory(data) {
               ${(() => {
                 const note = (i.note || '').toLowerCase();
                 const qty  = Number(i.quantity_added);
+                if (note.includes('[cancelled]'))
+                  return '<span style="background:rgba(239,68,68,0.1);color:#ef4444;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">✕ Cancelled</span>';
                 if (note.includes('sale') || note.includes('order #'))
                   return '<span style="background:rgba(245,158,11,0.1);color:#f59e0b;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">🛒 Sale</span>';
                 if (note.includes('po received') || note.includes('restock') || qty > 0)

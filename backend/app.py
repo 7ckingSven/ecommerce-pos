@@ -1204,6 +1204,11 @@ def api_cancel_order(order_id):
                     'quantity': pr.data[0]['quantity'] + qty
                 }).eq('product_id', pid).execute()
             try:
+                # Tagged with [CANCELLED] so the Admin/Staff Stock Movement History
+                # dropdown can reliably classify this row (instead of it being
+                # mistaken for a Sale or a plain Restock), and the reason the
+                # customer gave is included so staff can see why stock came back.
+                reason_text = f' — Reason: {reason}' if reason else ''
                 supabase.table('inventory').insert({
                     'product_id':      pid,
                     'staff_id':        None,
@@ -1212,7 +1217,7 @@ def api_cancel_order(order_id):
                     'quantity_after':  (bs.data[0]['quantity'] + qty if br_id and bs and bs.data else qty),
                     'to_branch_id':    br_id,
                     'variant_options': opts if opts else None,
-                    'note':            f'Cancelled by customer — Order #{order_id[:8].upper()}',
+                    'note':            f'[CANCELLED] Order #{order_id[:8].upper()} — Cancelled by customer{reason_text}',
                 }).execute()
             except Exception as log_err:
                 print(f'Cancel inventory log warning: {log_err}')

@@ -1670,6 +1670,10 @@ async function loadInventory() {
 function getMovementType(i) {
   const note = (i.note || '').toLowerCase();
   const qty  = Number(i.quantity_added);
+  // Checked first — a cancelled order's note also contains "Order #", which
+  // would otherwise be misread as a Sale below.
+  if (note.includes('[cancelled]'))
+    return { label: 'Cancelled', color: '#ef4444', icon: '✕', bg: 'rgba(239,68,68,0.1)' };
   if (note.includes('[loss]') || note.includes('[stolen]') || note.includes('[damaged]') || note.includes('[expired]') || note.includes('[other]') || note.includes('adjustment'))
     return { label: 'Adjustment', color: '#ef4444', icon: '↓', bg: 'rgba(239,68,68,0.1)' };
   if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id))
