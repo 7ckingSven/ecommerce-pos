@@ -2462,6 +2462,8 @@ async function loadOrders() {
       const db = parseTs(b.created_at || b.date);
       return db - da;
     });
+    populateOrderYearFilter(allOrders);
+    populateOrderDayOptions();
     applyAdminOrderFilters();
     updateAdminOrdersBadge(allOrders);
   } catch (e) { console.error('Orders error:', e); }
@@ -2687,6 +2689,9 @@ async function updateOrderStatus(id, status) {
 let adminOrderTypeFilter   = '';
 let adminOrderStatusFilter = '';
 let adminOrderSearchText   = '';
+let adminOrderYearFilter   = '';
+let adminOrderMonthFilter  = '';
+let adminOrderDayFilter    = '';
 
 function filterOrders(type) {
   adminOrderTypeFilter = type;
@@ -2707,10 +2712,133 @@ function filterOrderSearch(val) {
 }
 window.filterOrderSearch = filterOrderSearch;
 
+// ─── Date (Year / Month / Day) Filter ─────────────────
+// Uses the same +8h (PH time) normalization as the Date column in
+// renderOrders(), so the filter matches what's shown on screen.
+function getOrderDateParts(o) {
+  const raw = o.created_at || o.date || null;
+  if (!raw) return null;
+  const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+  const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+  const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+function populateOrderYearFilter(orders) {
+  const sel = document.getElementById('adminOrderYearFilter');
+  if (!sel) return;
+  const years = [...new Set(orders.map(o => getOrderDateParts(o)?.year).filter(Boolean))].sort((a, b) => b - a);
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  if (years.map(String).includes(current)) sel.value = current;
+}
+
+// Number of days to list for the Day dropdown, given the current
+// Year/Month selection — accounts for 30/31-day months and leap Februaries.
+function daysInMonthFor(year, month) {
+  if (!month) return 31; // no month chosen yet — show the generic max
+  const m = parseInt(month, 10);
+  if (m === 2) {
+    if (year) {
+      const y = parseInt(year, 10);
+      const isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+      return isLeap ? 29 : 28;
+    }
+    return 29; // year unknown — stay permissive for Feb
+  }
+  return [4, 6, 9, 11].includes(m) ? 30 : 31;
+}
+
+function populateOrderDayOptions() {
+  const sel = document.getElementById('adminOrderDayFilter');
+  if (!sel) return;
+  const max     = daysInMonthFor(adminOrderYearFilter, adminOrderMonthFilter);
+  const current = sel.value;
+  let opts = '<option value="">All Days</option>';
+  for (let d = 1; d <= max; d++) opts += `<option value="${String(d).padStart(2, '0')}">${d}</option>`;
+  sel.innerHTML = opts;
+  if (current && parseInt(current, 10) <= max) {
+    sel.value = current;
+  } else {
+    sel.value = '';
+    adminOrderDayFilter = '';
+  }
+}
+
+function filterOrderYear(year) {
+  adminOrderYearFilter = year;
+  populateOrderDayOptions();
+  ordersPage = 1;
+  applyAdminOrderFilters();
+}
+window.filterOrderYear = filterOrderYear;
+
+function filterOrderMonth(month) {
+  adminOrderMonthFilter = month;
+  populateOrderDayOptions();
+  ordersPage = 1;
+  applyAdminOrderFilters();
+}
+window.filterOrderMonth = filterOrderMonth;
+
+function filterOrderDay(day) {
+  adminOrderDayFilter = day;
+  ordersPage = 1;
+  applyAdminOrderFilters();
+}
+window.filterOrderDay = filterOrderDay;
+
+// Clears every Orders filter: search, type, status, year, month, day.
+function clearAdminOrderFilters() {
+  adminOrderTypeFilter   = '';
+  adminOrderStatusFilter = '';
+  adminOrderSearchText   = '';
+  adminOrderYearFilter   = '';
+  adminOrderMonthFilter  = '';
+  adminOrderDayFilter    = '';
+
+  const typeSel   = document.getElementById('adminOrderTypeFilter');
+  const statusSel = document.getElementById('adminOrderStatusFilter');
+  const yearSel   = document.getElementById('adminOrderYearFilter');
+  const monthSel  = document.getElementById('adminOrderMonthFilter');
+  const searchBox = document.getElementById('orderSearchInput');
+  if (typeSel)   typeSel.value   = '';
+  if (statusSel) statusSel.value = '';
+  if (yearSel)   yearSel.value   = '';
+  if (monthSel)  monthSel.value  = '';
+  if (searchBox) searchBox.value = '';
+  populateOrderDayOptions();
+
+  ordersPage = 1;
+  applyAdminOrderFilters();
+}
+window.clearAdminOrderFilters = clearAdminOrderFilters;
+
+// Greys out / disables the Clear Filters button when no filter is active.
+function updateAdminClearFiltersState() {
+  const btn = document.getElementById('adminClearFiltersBtn');
+  if (!btn) return;
+  const anyActive = !!(adminOrderTypeFilter || adminOrderStatusFilter || adminOrderSearchText ||
+                       adminOrderYearFilter || adminOrderMonthFilter || adminOrderDayFilter);
+  btn.disabled = !anyActive;
+  btn.style.opacity = anyActive ? '1' : '0.5';
+  btn.style.cursor  = anyActive ? 'pointer' : 'not-allowed';
+}
+
 function applyAdminOrderFilters() {
+  updateAdminClearFiltersState();
   let filtered = allOrders;
   if (adminOrderTypeFilter)   filtered = filtered.filter(o => o.order_type === adminOrderTypeFilter);
   if (adminOrderStatusFilter) filtered = filtered.filter(o => o.status === adminOrderStatusFilter);
+  if (adminOrderYearFilter) {
+    filtered = filtered.filter(o => String(getOrderDateParts(o)?.year) === adminOrderYearFilter);
+  }
+  if (adminOrderMonthFilter) {
+    filtered = filtered.filter(o => String(getOrderDateParts(o)?.month).padStart(2, '0') === adminOrderMonthFilter);
+  }
+  if (adminOrderDayFilter) {
+    filtered = filtered.filter(o => String(getOrderDateParts(o)?.day).padStart(2, '0') === adminOrderDayFilter);
+  }
   if (adminOrderSearchText) {
     filtered = filtered.filter(o => {
       const customer = o.customer ? (o.customer.fname + ' ' + o.customer.lname).toLowerCase() : 'walk-in';

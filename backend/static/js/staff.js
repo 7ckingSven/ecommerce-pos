@@ -1940,6 +1940,8 @@ async function loadOrders() {
       const db = new Date(b.created_at || b.date || 0);
       return db - da;
     });
+    populateStaffOrderYearFilter(staffOrders);
+    populateStaffOrderDayOptions();
     applyStaffOrderFilters();
     updateOrdersBadge(staffOrders);
   } catch (e) { console.error('Orders error:', e); }
@@ -2106,6 +2108,9 @@ function viewStaffOrderItems(order) {
 let staffOrderTypeFilter   = '';
 let staffOrderStatusFilter = '';
 let staffOrderSearchText   = '';
+let staffOrderYearFilter   = '';
+let staffOrderMonthFilter  = '';
+let staffOrderDayFilter    = '';
 
 function filterStaffOrderType(type) {
   staffOrderTypeFilter = type;
@@ -2126,10 +2131,133 @@ function filterStaffOrderSearch(val) {
 }
 window.filterStaffOrderSearch = filterStaffOrderSearch;
 
+// ─── Date (Year / Month / Day) Filter ─────────────────
+// Uses the same +8h (PH time) normalization as the Date column in
+// renderStaffOrders(), so the filter matches what's shown on screen.
+function getStaffOrderDateParts(o) {
+  const raw = o.created_at || o.date || null;
+  if (!raw) return null;
+  const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+  const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+  const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
+  return { year: d.getUTCFullYear(), month: d.getUTCMonth() + 1, day: d.getUTCDate() };
+}
+
+function populateStaffOrderYearFilter(orders) {
+  const sel = document.getElementById('staffOrderYearFilter');
+  if (!sel) return;
+  const years = [...new Set(orders.map(o => getStaffOrderDateParts(o)?.year).filter(Boolean))].sort((a, b) => b - a);
+  const current = sel.value;
+  sel.innerHTML = '<option value="">All Years</option>' + years.map(y => `<option value="${y}">${y}</option>`).join('');
+  if (years.map(String).includes(current)) sel.value = current;
+}
+
+// Number of days to list for the Day dropdown, given the current
+// Year/Month selection — accounts for 30/31-day months and leap Februaries.
+function staffDaysInMonthFor(year, month) {
+  if (!month) return 31; // no month chosen yet — show the generic max
+  const m = parseInt(month, 10);
+  if (m === 2) {
+    if (year) {
+      const y = parseInt(year, 10);
+      const isLeap = (y % 4 === 0 && y % 100 !== 0) || (y % 400 === 0);
+      return isLeap ? 29 : 28;
+    }
+    return 29; // year unknown — stay permissive for Feb
+  }
+  return [4, 6, 9, 11].includes(m) ? 30 : 31;
+}
+
+function populateStaffOrderDayOptions() {
+  const sel = document.getElementById('staffOrderDayFilter');
+  if (!sel) return;
+  const max     = staffDaysInMonthFor(staffOrderYearFilter, staffOrderMonthFilter);
+  const current = sel.value;
+  let opts = '<option value="">All Days</option>';
+  for (let d = 1; d <= max; d++) opts += `<option value="${String(d).padStart(2, '0')}">${d}</option>`;
+  sel.innerHTML = opts;
+  if (current && parseInt(current, 10) <= max) {
+    sel.value = current;
+  } else {
+    sel.value = '';
+    staffOrderDayFilter = '';
+  }
+}
+
+function filterStaffOrderYear(year) {
+  staffOrderYearFilter = year;
+  populateStaffOrderDayOptions();
+  staffOrdersPage = 1;
+  applyStaffOrderFilters();
+}
+window.filterStaffOrderYear = filterStaffOrderYear;
+
+function filterStaffOrderMonth(month) {
+  staffOrderMonthFilter = month;
+  populateStaffOrderDayOptions();
+  staffOrdersPage = 1;
+  applyStaffOrderFilters();
+}
+window.filterStaffOrderMonth = filterStaffOrderMonth;
+
+function filterStaffOrderDay(day) {
+  staffOrderDayFilter = day;
+  staffOrdersPage = 1;
+  applyStaffOrderFilters();
+}
+window.filterStaffOrderDay = filterStaffOrderDay;
+
+// Clears every Orders filter: search, type, status, year, month, day.
+function clearStaffOrderFilters() {
+  staffOrderTypeFilter   = '';
+  staffOrderStatusFilter = '';
+  staffOrderSearchText   = '';
+  staffOrderYearFilter   = '';
+  staffOrderMonthFilter  = '';
+  staffOrderDayFilter    = '';
+
+  const typeSel   = document.getElementById('staffOrderTypeFilter');
+  const statusSel = document.getElementById('staffOrderStatusFilter');
+  const yearSel   = document.getElementById('staffOrderYearFilter');
+  const monthSel  = document.getElementById('staffOrderMonthFilter');
+  const searchBox = document.getElementById('staffOrderSearchInput');
+  if (typeSel)   typeSel.value   = '';
+  if (statusSel) statusSel.value = '';
+  if (yearSel)   yearSel.value   = '';
+  if (monthSel)  monthSel.value  = '';
+  if (searchBox) searchBox.value = '';
+  populateStaffOrderDayOptions();
+
+  staffOrdersPage = 1;
+  applyStaffOrderFilters();
+}
+window.clearStaffOrderFilters = clearStaffOrderFilters;
+
+// Greys out / disables the Clear Filters button when no filter is active.
+function updateStaffClearFiltersState() {
+  const btn = document.getElementById('staffClearFiltersBtn');
+  if (!btn) return;
+  const anyActive = !!(staffOrderTypeFilter || staffOrderStatusFilter || staffOrderSearchText ||
+                       staffOrderYearFilter || staffOrderMonthFilter || staffOrderDayFilter);
+  btn.disabled = !anyActive;
+  btn.style.opacity = anyActive ? '1' : '0.5';
+  btn.style.cursor  = anyActive ? 'pointer' : 'not-allowed';
+}
+
 function applyStaffOrderFilters() {
+  updateStaffClearFiltersState();
   let filtered = staffOrders;
   if (staffOrderTypeFilter)   filtered = filtered.filter(o => o.order_type === staffOrderTypeFilter);
   if (staffOrderStatusFilter) filtered = filtered.filter(o => o.status === staffOrderStatusFilter);
+  if (staffOrderYearFilter) {
+    filtered = filtered.filter(o => String(getStaffOrderDateParts(o)?.year) === staffOrderYearFilter);
+  }
+  if (staffOrderMonthFilter) {
+    filtered = filtered.filter(o => String(getStaffOrderDateParts(o)?.month).padStart(2, '0') === staffOrderMonthFilter);
+  }
+  if (staffOrderDayFilter) {
+    filtered = filtered.filter(o => String(getStaffOrderDateParts(o)?.day).padStart(2, '0') === staffOrderDayFilter);
+  }
   if (staffOrderSearchText) {
     filtered = filtered.filter(o => {
       const customer = o.customer ? (o.customer.fname + ' ' + o.customer.lname).toLowerCase() : 'walk-in';
