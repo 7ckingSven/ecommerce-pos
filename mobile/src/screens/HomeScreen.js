@@ -18,7 +18,10 @@ import api from '../services/api';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
 
-function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
+// Memoized so a HomeScreen re-render (typing in search, a refresh tick, etc.)
+// doesn't force every visible card to re-render — only cards whose own
+// product data actually changed re-render.
+const ProductCard = React.memo(function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const inStock    = (product._branchQty || product.quantity || 0) > 0;
   const branchName = product._branchName || null;
 
@@ -33,9 +36,14 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
       onPress={() => onPress(product)}
       activeOpacity={0.85}
     >
-      {/* Product Image */}
+      {/* Product Image — resizeMode="contain" inside a fixed-size, centered
+          wrap so the whole product shows (letterboxed if needed) instead of
+          "cover" cropping off whichever edges don't match the card's
+          aspect ratio. */}
       {(product.image_urls?.length ? product.image_urls[0] : product.image_url)
-        ? <Image source={{ uri: product.image_urls?.length ? product.image_urls[0] : product.image_url }} style={styles.productImg} resizeMode="cover"/>
+        ? <View style={styles.productImgWrap}>
+            <Image source={{ uri: product.image_urls?.length ? product.image_urls[0] : product.image_url }} style={styles.productImg} resizeMode="contain"/>
+          </View>
         : <View style={styles.productImgPlaceholder}>
             <Feather name="shopping-bag" size={32} color={COLORS.primary}/>
           </View>
@@ -103,6 +111,22 @@ function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
       </View>
     </TouchableOpacity>
   );
+});
+
+// ─── Sort Options (M4) ────────────────────────────────
+const SORT_OPTIONS = [
+  { id: 'relevance',    name: 'Relevance' },
+  { id: 'price_asc',    name: 'Price: Low to High' },
+  { id: 'price_desc',   name: 'Price: High to Low' },
+  { id: 'best_selling', name: 'Best Selling' },
+];
+
+function sortProducts(list, sort) {
+  const arr = [...list];
+  if (sort === 'price_asc')    arr.sort((a, b) => Number(a.price) - Number(b.price));
+  if (sort === 'price_desc')   arr.sort((a, b) => Number(b.price) - Number(a.price));
+  if (sort === 'best_selling') arr.sort((a, b) => Number(b.total_sold || 0) - Number(a.total_sold || 0));
+  return arr; // 'relevance' — keep the default/unsorted order
 }
 
 export default function HomeScreen({ navigation }) {
@@ -118,6 +142,7 @@ export default function HomeScreen({ navigation }) {
   const [search,      setSearch]      = useState('');
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
+  const [error,       setError]       = useState(false);
   const { cartCount, refreshCartCount } = useCart();
   const [loggedIn,      setLoggedIn]      = useState(false);
   const [searchFocused,  setSearchFocused]  = useState(false);
@@ -128,25 +153,43 @@ export default function HomeScreen({ navigation }) {
   const [filterVisible,  setFilterVisible]  = useState(false);
   const [tempCat,        setTempCat]        = useState('');
   const [tempBrand,      setTempBrand]      = useState('');
+  const [selectedSort,   setSelectedSort]   = useState('relevance');
+  const [tempSort,       setTempSort]       = useState('relevance');
   const SUGG_PER_PAGE = 10;
   const searchRef = useRef(null);
   const [headerHeight, setHeaderHeight] = useState(0);
 
-  // Auto-refresh every 10 seconds when screen is focused
+  // Kept as a ref (not plain state) so loadProductsSilent — called from the
+  // tabPress listener below, which may be holding an older closure — always
+  // reads the LATEST filter/sort values instead of whatever existed when
+  // that listener was created.
+  const liveFiltersRef = useRef({ cat: '', brand: '', search: '', sort: 'relevance' });
+  useEffect(() => {
+    liveFiltersRef.current = { cat: selectedCat, brand: selectedBrand, search, sort: selectedSort };
+  }, [selectedCat, selectedBrand, search, selectedSort]);
+
+  // Load once whenever the Home screen gains focus — no background polling
+  // (matches the web dashboards: data loads on view, refresh is on-demand).
   useFocusEffect(
     useCallback(() => {
       isLoggedIn().then(setLoggedIn);
       loadProducts();
       loadSearchHistory(); // Bug fix: was never called
-
-      const timer = setInterval(() => {
-        // Re-load but preserve current filters
-        loadProductsSilent();
-      }, 10000); // 10 seconds
-
-      return () => clearInterval(timer); // cleanup on blur
     }, [])
   );
+
+  // Tapping the "Home" tab while already on it refreshes the data in place
+  // (filters/sort preserved) — the mobile equivalent of the web dashboard's
+  // manual ↻ refresh-section button. Home is nested in a Stack inside the
+  // Tab navigator, so the tabPress event lives on the parent (tab) navigator.
+  useEffect(() => {
+    const unsubscribe = navigation.getParent()?.addListener('tabPress', () => {
+      if (navigation.isFocused()) {
+        loadProductsSilent();
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   // ─── Auth Guard with redirect back ───────────────────
   async function requireLogin(action, params = {}) {
@@ -164,6 +207,7 @@ export default function HomeScreen({ navigation }) {
 
   async function loadProducts() {
     try {
+      setError(false);
       // Always fetch ALL products — filter client-side to preserve chip list
       const data = await getProducts('');
       // Expand products by branch — one card per branch with stock
@@ -194,6 +238,7 @@ export default function HomeScreen({ navigation }) {
       setBrands(brnds);
     } catch (e) {
       console.error('Load products error:', e);
+      setError(true);
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -224,14 +269,16 @@ export default function HomeScreen({ navigation }) {
         }
       });
       setAllProducts(expanded);
-      // Re-apply current filters silently
-      applyFilters(selectedCat, selectedBrand, search, expanded);
+      // Re-apply current filters silently — read from the ref (always live),
+      // not the closed-over state vars, which may be stale inside this timer.
+      const { cat, brand, search: q, sort } = liveFiltersRef.current;
+      applyFilters(cat, brand, q, expanded, sort);
     } catch (e) {
       // Silent fail - don't disrupt user
     }
   }
 
-  function applyFilters(cat, brand, q, sourceProducts) {
+  function applyFilters(cat, brand, q, sourceProducts, sort) {
     let filtered = sourceProducts || allProducts; // already expanded by branch
     if (cat)   filtered = filtered.filter(p => p.category?.trim() === cat);
     if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand);
@@ -240,6 +287,7 @@ export default function HomeScreen({ navigation }) {
       p.brand?.toLowerCase().includes(q.toLowerCase()) ||
       p.category?.toLowerCase().includes(q.toLowerCase())
     );
+    filtered = sortProducts(filtered, sort !== undefined ? sort : selectedSort);
     setProducts(filtered);
   }
 
@@ -353,33 +401,57 @@ export default function HomeScreen({ navigation }) {
 
   // ─── Add to Cart (requires login) ────────────────────
   async function handleAddToCart(product) {
-    const ok = await requireLogin('addToCart', { product_id: product.product_id });
+    const branchId = (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null;
+    // Pass the full product (not just its id) + branchId so LoginScreen can
+    // resume straight into ProductDetail for this exact product after login.
+    const ok = await requireLogin('addToCart', { product, branchId });
     if (!ok) return;
     // Go to ProductDetail so customer can select option groups first
-    navigation.navigate('ProductDetail', { product, branchId: (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null });
+    navigation.navigate('ProductDetail', { product, branchId });
   }
 
   // ─── Buy Now (requires login → ProductDetail) ────────
   async function handleBuyNow(product) {
-    const ok = await requireLogin('buyNow', { product });
+    const branchId = (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null;
+    const ok = await requireLogin('buyNow', { product, branchId });
     if (!ok) return;
     // Navigate to ProductDetail — customer selects options then buys
-    navigation.navigate('ProductDetail', { product, branchId: (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null });
+    navigation.navigate('ProductDetail', { product, branchId });
   }
 
   function onRefresh() {
     setRefreshing(true);
     setSelectedCat('');
     setSelectedBrand('');
+    setSelectedSort('relevance');
     setSearch('');
     loadProducts();
   }
 
+  function handleProductPress(p) {
+    navigation.navigate('ProductDetail', {
+      product:  p,
+      branchId: p._branchId || (p.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null
+    });
+  }
+
+  // Stable function identities so the memoized ProductCard doesn't re-render
+  // just because HomeScreen re-rendered for an unrelated reason.
+  const renderProductItem = useCallback(({ item }) => (
+    <ProductCard
+      product={item}
+      onPress={handleProductPress}
+      onAddToCart={handleAddToCart}
+      onBuyNow={handleBuyNow}
+    />
+  ), []);
+
   return (
     <View style={styles.container}>
 
-      {/* Status Bar — green to match header */}
-      <StatusBar backgroundColor="#16a34a" barStyle="light-content" translucent={true}/>
+      {/* Status Bar — COLORS.primary to match header (and the bottom nav's
+          active-tab green / Cart, Orders & Profile headers) */}
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
 
       {/* Header — Compact */}
       <View
@@ -428,11 +500,11 @@ export default function HomeScreen({ navigation }) {
           </View>
           {/* Bug fix: filter button always visible, not just when searchFocused */}
           <TouchableOpacity
-            onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(true); }}
+            onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setTempSort(selectedSort); setFilterVisible(true); }}
             style={styles.filterIconBtn}
           >
             <Feather name="sliders" size={18} color="#fff"/>
-            {(selectedCat || selectedBrand) && (
+            {(selectedCat || selectedBrand || selectedSort !== 'relevance') && (
               <View style={styles.filterDot}/>
             )}
           </TouchableOpacity>
@@ -510,7 +582,9 @@ export default function HomeScreen({ navigation }) {
                   onPress={() => handleSuggestionTap(item)}
                 >
                   {item.image_url ? (
-                    <Image source={{ uri: item.image_url }} style={styles.suggCardImg}/>
+                    <View style={[styles.suggCardImg, { backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }]}>
+                      <Image source={{ uri: item.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="contain"/>
+                    </View>
                   ) : (
                     <View style={[styles.suggCardImg, { backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' }]}>
                       <Feather name="image" size={24} color={COLORS.grayLight}/>
@@ -536,8 +610,14 @@ export default function HomeScreen({ navigation }) {
       )}
 
       {/* Active Filter Tags */}
-      {(selectedCat || selectedBrand) && (
+      {(selectedCat || selectedBrand || selectedSort !== 'relevance') && (
         <View style={styles.activeFiltersRow}>
+          {selectedSort !== 'relevance' && (
+            <TouchableOpacity style={styles.activeTag} onPress={() => { setSelectedSort('relevance'); applyFilters(selectedCat, selectedBrand, search, null, 'relevance'); }}>
+              <Text style={styles.activeTagText}>{SORT_OPTIONS.find(s => s.id === selectedSort)?.name}</Text>
+              <Feather name="x" size={11} color={COLORS.primary}/>
+            </TouchableOpacity>
+          )}
           {selectedCat && (
             <TouchableOpacity style={styles.activeTag} onPress={() => { setSelectedCat(''); applyFilters('', selectedBrand, search); }}>
               <Text style={styles.activeTagText}>{selectedCat}</Text>
@@ -550,7 +630,7 @@ export default function HomeScreen({ navigation }) {
               <Feather name="x" size={11} color={COLORS.primary}/>
             </TouchableOpacity>
           )}
-          <TouchableOpacity onPress={() => { setSelectedCat(''); setSelectedBrand(''); applyFilters('', '', search); }}>
+          <TouchableOpacity onPress={() => { setSelectedCat(''); setSelectedBrand(''); setSelectedSort('relevance'); applyFilters('', '', search, null, 'relevance'); }}>
             <Text style={{ fontSize: 11, color: COLORS.error, fontWeight: '600' }}>Clear All</Text>
           </TouchableOpacity>
         </View>
@@ -562,13 +642,33 @@ export default function HomeScreen({ navigation }) {
       {/* Products */}
       {loading ? (
         <SkeletonLoader type="product" count={6} />
+      ) : error ? (
+        <View style={styles.errorWrap}>
+          <Feather name="wifi-off" size={56} color={COLORS.grayLight}/>
+          <Text style={styles.errorTitle}>Connection Error</Text>
+          <Text style={styles.errorText}>Could not load products. Please check your internet connection.</Text>
+          <TouchableOpacity
+            style={styles.retryBtn}
+            onPress={() => { setError(false); setLoading(true); loadProducts(); }}
+          >
+            <Text style={styles.retryBtnText}>Try Again</Text>
+          </TouchableOpacity>
+        </View>
       ) : (
         <FlatList
           data={products}
-          keyExtractor={item => item.product_id}
+          // Products are expanded one card per branch (see loadProducts), so
+          // the same product_id can appear more than once in this list.
+          // Keying by product_id alone gave duplicate keys, which breaks
+          // React's ability to diff/recycle rows correctly in the
+          // VirtualizedList — this was the real cause behind the "large
+          // list that is slow to update" warning, not raw list size.
+          keyExtractor={item => `${item.product_id}_${item._branchId || 'none'}`}
           numColumns={2}
           columnWrapperStyle={styles.productRow}
-          contentContainerStyle={styles.productList}
+          // Extra bottom padding so the last row can scroll clear of the
+          // now-floating (position:'absolute') tab bar in AppNavigator.
+          contentContainerStyle={[styles.productList, { paddingBottom: SPACING.md + 60 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={COLORS.primary}/>
@@ -579,17 +679,7 @@ export default function HomeScreen({ navigation }) {
               <Text style={styles.emptyText}>No products found</Text>
             </View>
           }
-          renderItem={({ item }) => (
-            <ProductCard
-              product={item}
-              onPress={p => navigation.navigate('ProductDetail', {
-                product:  p,
-                branchId: p._branchId || (p.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null
-              })}
-              onAddToCart={handleAddToCart}
-              onBuyNow={handleBuyNow}
-            />
-          )}
+          renderItem={renderProductItem}
         />
       )}
       <CustomAlert config={alertConfig} onHide={hideAlert}/>
@@ -604,12 +694,36 @@ export default function HomeScreen({ navigation }) {
           {/* Title */}
           <View style={styles.filterModalHeader}>
             <Text style={styles.filterModalTitle}>Filters</Text>
-            <TouchableOpacity onPress={() => { setTempCat(''); setTempBrand(''); }}>
+            <TouchableOpacity onPress={() => { setTempCat(''); setTempBrand(''); setTempSort('relevance'); }}>
               <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600' }}>Reset</Text>
             </TouchableOpacity>
             <TouchableOpacity onPress={() => setFilterVisible(false)}>
               <Feather name="x" size={20} color={COLORS.textMuted}/>
             </TouchableOpacity>
+          </View>
+
+          {/* Sort By */}
+          <View style={styles.filterSectionLabel}>
+            <View style={styles.filterAccentBar}/>
+            <Text style={styles.filterDropLabel}>Sort By</Text>
+          </View>
+          <View style={styles.filterDropBox}>
+            {SORT_OPTIONS.map(item => (
+              <TouchableOpacity
+                key={item.id}
+                style={[styles.filterDropItem, tempSort === item.id && styles.filterDropItemActive]}
+                onPress={() => setTempSort(item.id)}
+              >
+                {tempSort === item.id ? (
+                  <View style={styles.filterSelectedPill}>
+                    <Text style={styles.filterDropItemTextActive}>{item.name}</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.filterDropItemText}>{item.name}</Text>
+                )}
+                {tempSort === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
+              </TouchableOpacity>
+            ))}
           </View>
 
           {/* Category Dropdown — filtered by selected brand */}
@@ -692,7 +806,7 @@ export default function HomeScreen({ navigation }) {
           <View style={styles.filterBtnRow}>
             <TouchableOpacity
               style={styles.filterCancelBtn}
-              onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setFilterVisible(false); }}
+              onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setTempSort(selectedSort); setFilterVisible(false); }}
             >
               <Text style={styles.filterCancelText}>Cancel</Text>
             </TouchableOpacity>
@@ -701,15 +815,16 @@ export default function HomeScreen({ navigation }) {
               onPress={() => {
                 setSelectedCat(tempCat);
                 setSelectedBrand(tempBrand);
-                applyFilters(tempCat, tempBrand, search);
+                setSelectedSort(tempSort);
+                applyFilters(tempCat, tempBrand, search, null, tempSort);
                 setFilterVisible(false);
               }}
             >
               <Text style={styles.filterApplyText}>Apply</Text>
-              {(tempCat || tempBrand) ? (
+              {(tempCat || tempBrand || tempSort !== 'relevance') ? (
                 <View style={styles.filterApplyBadge}>
                   <Text style={styles.filterApplyBadgeText}>
-                    {(tempCat ? 1 : 0) + (tempBrand ? 1 : 0)}
+                    {(tempCat ? 1 : 0) + (tempBrand ? 1 : 0) + (tempSort !== 'relevance' ? 1 : 0)}
                   </Text>
                 </View>
               ) : null}
@@ -726,7 +841,7 @@ const styles = StyleSheet.create({
   container:              { flex: 1, backgroundColor: COLORS.grayBg },
 
   // Header
-  header:                 { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm, backgroundColor: '#16a34a', shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
+  header:                 { paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.sm, backgroundColor: COLORS.primary, shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
   headerTop:              { flexDirection: 'row', alignItems: 'center', gap: 10 },
 
   headerGreeting:         { fontSize: 12, color: COLORS.grayLight },
@@ -799,7 +914,8 @@ const styles = StyleSheet.create({
   productList:            { padding: SPACING.md, paddingTop: SPACING.sm, gap: SPACING.sm },
   productRow:             { gap: SPACING.sm },
   productCard:            { flex: 1, backgroundColor: COLORS.white, borderRadius: RADIUS.md, overflow: 'hidden', ...SHADOW.sm },
-  productImg:             { height: 110, width: '100%' },
+  productImgWrap:         { height: 110, width: '100%', backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  productImg:             { height: '100%', width: '100%' },
   productImgPlaceholder:  { height: 110, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
 
   // Discount badge
@@ -844,4 +960,11 @@ const styles = StyleSheet.create({
   // Empty
   emptyWrap:              { alignItems: 'center', marginTop: SPACING.xxl, gap: SPACING.sm },
   emptyText:              { fontSize: 14, color: COLORS.textMuted },
+
+  // Connection Error
+  errorWrap:              { flex: 1, alignItems: 'center', justifyContent: 'center', padding: SPACING.xl, gap: SPACING.sm },
+  errorTitle:             { fontSize: 18, fontWeight: '700', color: COLORS.dark },
+  errorText:              { fontSize: 13, color: COLORS.textSecondary, textAlign: 'center' },
+  retryBtn:               { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.lg, paddingVertical: 12, marginTop: SPACING.sm },
+  retryBtnText:           { color: COLORS.white, fontWeight: '700', fontSize: 14 },
 });

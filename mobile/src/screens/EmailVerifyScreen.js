@@ -5,7 +5,7 @@ import {
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
-import { API_BASE_URL } from '../utils/constants';
+import api from '../services/api';
 
 export default function EmailVerifyScreen({ navigation }) {
   const [email,   setEmail]   = useState('');
@@ -17,19 +17,19 @@ export default function EmailVerifyScreen({ navigation }) {
     if (!canSubmit) return;
     setLoading(true);
     try {
-      const res  = await fetch(`${API_BASE_URL}/auth/send-email-otp`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email: email.trim().toLowerCase() }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        navigation.navigate('EmailOTP', { email: email.trim().toLowerCase() });
-      } else {
-        Alert.alert('Error', data.error || 'Failed to send OTP. Please try again.');
-      }
+      // Uses the shared `api` (axios) instance instead of a raw fetch() —
+      // that instance carries a 30s timeout meant specifically for Render
+      // free-tier cold starts (see api.js). A raw fetch() has no such
+      // allowance and could throw "Network request failed" before a
+      // sleeping backend even finished waking up.
+      await api.post('/auth/send-email-otp', { email: email.trim().toLowerCase() });
+      navigation.navigate('EmailOTP', { email: email.trim().toLowerCase() });
     } catch (e) {
-      Alert.alert('Error', 'Network error. Please try again.');
+      if (e.response) {
+        Alert.alert('Error', e.response.data?.error || 'Failed to send OTP. Please try again.');
+      } else {
+        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+      }
     } finally {
       setLoading(false);
     }

@@ -21,6 +21,7 @@ import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 
 import { View, Text, StyleSheet } from 'react-native';
+import { BlurView } from '@react-native-community/blur';
 import { COLORS } from '../utils/constants';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CartProvider } from '../utils/CartContext';
@@ -93,13 +94,44 @@ function MainTabs() {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        // Real frosted-glass look (like Messenger) — tabBarBackground below
+        // renders a native BlurView behind the bar, with a white tint layered
+        // on top of it so the blur and the transparency mix together instead
+        // of competing. tabBarStyle's own backgroundColor is now transparent
+        // since the tint lives inside tabBarBackground instead.
+        tabBarBackground: () => (
+          <BlurView
+            style={StyleSheet.absoluteFill}
+            blurType="light"
+            blurAmount={20}
+            reducedTransparencyFallbackColor={COLORS.white}
+          >
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.70)' }]}/>
+          </BlurView>
+        ),
         tabBarStyle: {
-          backgroundColor:  COLORS.white,
+          backgroundColor:  'transparent',
           borderTopWidth:   1,
           borderTopColor:   COLORS.grayBorder,
           height:           60 + insets.bottom,
           paddingBottom:    insets.bottom + 4,
           paddingTop:       8,
+          // Floats the bar over the screen instead of reserving its own
+          // strip — without this, nothing ever renders underneath it, so
+          // the transparency only ever showed the plain screen background,
+          // never any cards/content. Each screen adds matching bottom
+          // padding so its last items scroll clear of the floating bar.
+          position:         'absolute',
+          left:             0,
+          right:            0,
+          bottom:           0,
+          // React Navigation's default tab bar shadow is a solid-ish
+          // rectangle — with an opaque background you'd never notice it,
+          // but against a semi-transparent one it shows through as a faint
+          // "cut square" edge. Zeroed out on both platforms.
+          elevation:        0,
+          shadowOpacity:    0,
+          shadowColor:      'transparent',
         },
         tabBarShowLabel:      true,
         tabBarLabelStyle:     { fontSize: 10, fontWeight: '600' },

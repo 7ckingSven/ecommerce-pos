@@ -96,6 +96,7 @@ export default function OrdersScreen({ navigation }) {
 
   const [orders,       setOrders]       = useState([]);
   const [loading,      setLoading]      = useState(true);
+  const [error,        setError]        = useState(false);
   const [loggedIn,     setLoggedIn]     = useState(false);
   const [selectedOrder,   setSelectedOrder]   = useState(null);
   const [activeTab,       setActiveTab]       = useState('all');
@@ -106,7 +107,8 @@ export default function OrdersScreen({ navigation }) {
   const [cancelling,       setCancelling]       = useState(false);
   const [, forceTick]     = useState(0); // re-render periodically to tick down the cancel window
 
-  // Auto-refresh every 10 seconds when screen is focused
+  // Load once whenever the Orders screen gains focus — no background polling
+  // (matches the web dashboards: data loads on view, refresh is on-demand).
   useFocusEffect(
     useCallback(() => {
       isLoggedIn().then(logged => {
@@ -114,16 +116,21 @@ export default function OrdersScreen({ navigation }) {
         if (logged) loadOrders();
         else setLoading(false);
       });
-
-      const timer = setInterval(() => {
-        isLoggedIn().then(logged => {
-          if (logged) loadOrders();
-        });
-      }, 10000); // 10 seconds
-
-      return () => clearInterval(timer); // cleanup on blur
     }, [])
   );
+
+  // Tapping the "Orders" tab while already on it refreshes the list — the
+  // mobile equivalent of the web dashboard's manual ↻ refresh-section button.
+  // Orders is a direct Tab.Screen (not nested in a Stack), so its own
+  // navigation prop already belongs to the tab navigator — no getParent() needed.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('tabPress', () => {
+      if (navigation.isFocused()) {
+        isLoggedIn().then(logged => { if (logged) loadOrders(); });
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
 
   const TABS = [
     { key: 'all', label: 'All' }, { key: 'pending', label: 'Pending' },
@@ -151,10 +158,12 @@ export default function OrdersScreen({ navigation }) {
 
   async function loadOrders() {
     try {
+      setError(false);
       const data = await getOrders();
       setOrders(data);
     } catch (e) {
       console.error('Orders error:', e);
+      setError(true);
     } finally {
       setLoading(false);
     }
@@ -191,8 +200,11 @@ export default function OrdersScreen({ navigation }) {
 
   if (!loggedIn) {
     return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <View style={styles.container}>
+        <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+        <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+          <Text style={styles.headerTitle}>My Orders</Text>
+        </View>
         <View style={styles.emptyWrap}>
           <Feather name="lock" size={48} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Please log in</Text>
@@ -205,19 +217,47 @@ export default function OrdersScreen({ navigation }) {
     );
   }
 
-  if (loading) return (<SkeletonLoader type="order" count={5} />);
+  if (loading) return (
+    <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Orders</Text>
+      </View>
+      <SkeletonLoader type="order" count={5} />
+    </View>
+  );
+
+  if (error) return (
+    <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Orders</Text>
+      </View>
+      <View style={styles.emptyWrap}>
+        <Feather name="wifi-off" size={48} color={COLORS.grayLight}/>
+        <Text style={styles.emptyTitle}>Connection Error</Text>
+        <Text style={styles.emptyText}>Could not load your orders. Please check your internet connection.</Text>
+        <TouchableOpacity style={styles.loginBtn} onPress={() => { setError(false); setLoading(true); loadOrders(); }}>
+          <Text style={styles.loginBtnText}>Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Orders</Text>
+      </View>
       <NetworkBanner />
 
-      {/* Tab Bar - always stays at top, padded below status bar */}
+      {/* Tab Bar - always stays at top of content (header above now handles the status-bar/notch area) */}
       <ScrollView
         horizontal
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={{ paddingHorizontal:16, gap:8, alignItems:'center', paddingVertical:6 }}
-        style={{ maxHeight: 46 + insets.top, minHeight: 46 + insets.top, paddingTop: insets.top }}
+        style={{ maxHeight: 46, minHeight: 46 }}
       >
         {TABS.map(tab => {
           const count = tab.key==='all' ? orders.length : orders.filter(o=>o.status===tab.key).length;
@@ -253,7 +293,9 @@ export default function OrdersScreen({ navigation }) {
         <FlatList
           data={filteredOrders}
           keyExtractor={item => item.order_id}
-          contentContainerStyle={styles.list}
+          // Extra bottom padding so the last card can scroll clear of the
+          // now-floating (position:'absolute') tab bar in AppNavigator.
+          contentContainerStyle={[styles.list, { paddingBottom: SPACING.md + 60 + insets.bottom }]}
           showsVerticalScrollIndicator={false}
           onRefresh={loadOrders}
           refreshing={loading}
@@ -487,7 +529,7 @@ export default function OrdersScreen({ navigation }) {
                   </View>
                 )}
                 <View style={styles.detailTotalRow}>
-                  <Text style={styles.detailTotalLabel}>Grand Total</Text>
+                  <Text style={styles.detailTotalLabel}>Total</Text>
                   <Text style={styles.detailTotalValue}>₱{Number(selectedOrder?.total || 0).toFixed(2)}</Text>
                 </View>
               </View>
@@ -635,7 +677,9 @@ export default function OrdersScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container:        { flex:1, backgroundColor: COLORS.grayBg },
-  header:           { backgroundColor: COLORS.dark, paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md },
+  // Header — COLORS.primary so it matches the bottom nav's active-tab
+  // green (and HomeScreen's header) instead of drifting to its own shade.
+  header:           { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.md, shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
   headerTitle:      { fontSize:18, fontWeight:'700', color: COLORS.white },
   headerSub:        { fontSize:12, color: COLORS.grayLight, marginTop:2 },
   list:             { padding: SPACING.md, gap: SPACING.sm },

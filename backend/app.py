@@ -1,5 +1,6 @@
 import json
 import random
+import traceback
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_cors import CORS
 # Resend email API (replaces Flask-Mail)
@@ -10,6 +11,7 @@ from datetime import timedelta, datetime, timezone
 from functools import wraps
 import bcrypt
 import os
+import glob
 import random
 import string
 
@@ -255,17 +257,25 @@ def landing():
 @app.route('/download-apk')
 def download_apk():
     """
-    Serve APK file for download.
-    APK should be located at: backend/static/apk/app-release.apk
+    Serve the latest APK file for download.
+    APKs are dropped into backend/static/apk/ with an incrementing version
+    in the filename (e.g. TEFC-ECommerce_v8.5.apk) — rather than expecting
+    a fixed filename, this always serves whichever .apk file in that folder
+    was modified most recently, so shipping a new version is just "add the
+    new file" with no code change needed. Old versions can be left in place
+    or removed; either way the newest one wins.
     """
-    apk_path = os.path.join(os.path.dirname(__file__), 'static', 'apk', 'app-release.apk')
-    
-    if not os.path.exists(apk_path):
+    apk_dir   = os.path.join(os.path.dirname(__file__), 'static', 'apk')
+    apk_files = glob.glob(os.path.join(apk_dir, '*.apk'))
+
+    if not apk_files:
         flash('APK file not found. Please contact administrator.', 'error')
         return redirect(url_for('landing'))
-    
+
+    latest_apk = max(apk_files, key=os.path.getmtime)
+
     return send_file(
-        apk_path,
+        latest_apk,
         mimetype='application/vnd.android.package-archive',
         as_attachment=True,
         download_name='TEFC-ECommerce-App.apk'
@@ -911,33 +921,25 @@ def api_verify_otp():
 def api_products():
     try:
         category = request.args.get('category', '')
-        res      = supabase.table('product').select(
+        query    = supabase.table('product').select(
             '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight'
         ).eq('status', 'active')
         if category:
-            res = res.eq('category', category)
-        res = res.order('created_at', desc=True).execute()
+            query = query.eq('category', category)
+        # Wrapped in supabase_retry — this call goes out to Supabase over
+        # HTTPS/HTTP2 and was failing outright on a transient connection
+        # drop (e.g. "EOF occurred in violation of protocol", a Windows/
+        # flaky-network socket blip), which this route's except then masked
+        # as a generic 500. Every other route with a Supabase call already
+        # uses this helper; this one just hadn't been updated to match.
+        res = supabase_retry(lambda: query.order('created_at', desc=True).execute())
 
         # Get total sold per product from completed orders
-        sold_res  = supabase.table('order_item').select(
-            'product_id, qty'
-        ).execute()
-        order_ids_completed = supabase.table('order').select('order_id').eq('status', 'completed').execute()
-        completed_ids = {o['order_id'] for o in (order_ids_completed.data or [])}
-        sold_map = {}
-        for oi in (sold_res.data or []):
-            if oi.get('order_id') in completed_ids or True:  # count all for now
-                pid = oi['product_id']
-                sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
-
-        # Better approach — use a direct query
-        sold_res2 = supabase.rpc('get_total_sold').execute() if False else None
-        # Simple approach: fetch completed order items
-        completed_orders = supabase.table('order').select('order_id').eq('status', 'completed').execute()
+        completed_orders    = supabase_retry(lambda: supabase.table('order').select('order_id').eq('status', 'completed').execute())
         completed_order_ids = [o['order_id'] for o in (completed_orders.data or [])]
         sold_map = {}
         if completed_order_ids:
-            items_res = supabase.table('order_item').select('product_id, qty').in_('order_id', completed_order_ids).execute()
+            items_res = supabase_retry(lambda: supabase.table('order_item').select('product_id, qty').in_('order_id', completed_order_ids).execute())
             for oi in (items_res.data or []):
                 pid = oi['product_id']
                 sold_map[pid] = sold_map.get(pid, 0) + int(oi.get('qty') or 0)
@@ -947,14 +949,18 @@ def api_products():
         for p in res.data:
             entry = dict(p)
             entry['total_sold'] = sold_map.get(p['product_id'], 0)
-            # Keep total quantity as sum of all branch stocks
-            branch_stocks = p.get('branch_stock', [])
-            entry['quantity'] = sum(bs['quantity'] for bs in branch_stocks)
+            # Keep total quantity as sum of all branch stocks — guard against a
+            # null quantity on any branch_stock row (was crashing sum() with a
+            # TypeError, which this route's except then masked as a generic
+            # 500 "Failed to fetch products." with no indication of why).
+            branch_stocks = p.get('branch_stock') or []
+            entry['quantity'] = sum(int(bs.get('quantity') or 0) for bs in branch_stocks)
             result.append(entry)
 
         return jsonify(result), 200
     except Exception as e:
         print(f"API products error: {e}")
+        traceback.print_exc()  # full stack trace in the server console — pinpoints the failing line next time
         return jsonify({'error': 'Failed to fetch products.'}), 500
 
 @app.route('/api/products/<product_id>', methods=['GET'])

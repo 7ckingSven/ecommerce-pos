@@ -4,7 +4,8 @@ import {
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { COLORS, SPACING, RADIUS, SHADOW, API_BASE_URL } from '../utils/constants';
+import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import api from '../services/api';
 
 export default function EmailOTPScreen({ navigation, route }) {
   const { email } = route.params;
@@ -42,21 +43,21 @@ export default function EmailOTPScreen({ navigation, route }) {
     if (!canVerify) return;
     setLoading(true);
     try {
-      const res  = await fetch(`${API_BASE_URL}/auth/verify-email-otp`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email, otp }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        // Navigate to Register with verified email
-        navigation.navigate('Register', { verifiedEmail: email });
-      } else {
-        Alert.alert('Invalid OTP', data.error || 'Incorrect or expired OTP. Please try again.');
-        setOtp('');
-      }
+      // Uses the shared `api` (axios) instance instead of a raw fetch() —
+      // that instance carries a 30s timeout meant specifically for Render
+      // free-tier cold starts (see api.js). A raw fetch() has no such
+      // allowance and could throw "Network request failed" before a
+      // sleeping backend even finished waking up.
+      await api.post('/auth/verify-email-otp', { email, otp });
+      // Navigate to Register with verified email
+      navigation.navigate('Register', { verifiedEmail: email });
     } catch (e) {
-      Alert.alert('Error', 'Network error. Please try again.');
+      if (e.response) {
+        Alert.alert('Invalid OTP', e.response.data?.error || 'Incorrect or expired OTP. Please try again.');
+        setOtp('');
+      } else {
+        Alert.alert('Error', 'Network error. Please check your connection and try again.');
+      }
     } finally {
       setLoading(false);
     }
@@ -65,18 +66,12 @@ export default function EmailOTPScreen({ navigation, route }) {
   async function handleResend() {
     if (!canResend) return;
     try {
-      const res = await fetch(`${API_BASE_URL}/auth/send-email-otp`, {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ email }),
-      });
-      if (res.ok) {
-        setSeconds(300);
-        setResendCD(60);
-        setCanResend(false);
-        setOtp('');
-        Alert.alert('Sent!', 'A new OTP has been sent to your email.');
-      }
+      await api.post('/auth/send-email-otp', { email });
+      setSeconds(300);
+      setResendCD(60);
+      setCanResend(false);
+      setOtp('');
+      Alert.alert('Sent!', 'A new OTP has been sent to your email.');
     } catch (e) {}
   }
 

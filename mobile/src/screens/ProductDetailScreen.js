@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Image, TouchableOpacity, TextInput, StyleSheet,
   ScrollView, Alert, ActivityIndicator, FlatList, Dimensions,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import { useFocusEffect } from '@react-navigation/native';
 import { isLoggedIn } from '../services/authService';
 import { addToCart } from '../services/cartService';
+import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -39,6 +41,15 @@ export default function ProductDetailScreen({ route, navigation }) {
   const [selectedOptions, setSelectedOptions] = useState({});
   const [showFullDesc, setShowFullDesc] = useState(false);
   const [variantStock,    setVariantStock]    = useState(null); // null=unchecked, number=qty
+
+  // When Login Required cuts off Add to Cart / Buy Now, we remember which
+  // one was pending so it can auto-resume the moment this screen regains
+  // focus logged in — popToTop() in LoginScreen returns to this exact
+  // ProductDetailScreen instance, so quantity/selectedOptions are preserved,
+  // we just need to re-fire the action ourselves.
+  const pendingActionRef    = useRef(null); // 'addToCart' | 'buyNow' | null
+  const handleAddToCartRef  = useRef(null);
+  const handleBuyNowRef     = useRef(null);
   const { width } = Dimensions.get('window');
   const images = product.image_urls?.length
     ? product.image_urls
@@ -46,19 +57,18 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   const discountedPrice = getDiscountedPrice(product);
   const hasDiscount     = discountedPrice !== null;
-  // Debug — remove after fixing
-  console.log('Product discount data:', JSON.stringify(product.discount));
-  console.log('Discounted price:', discountedPrice, 'Original:', product.price);
   const effectivePrice  = hasDiscount ? discountedPrice : product.price;
   const disc            = product.discount;
-  const inStock          = product.quantity > 0;
+  // Branch-specific stock (branchQty, computed above) — not product.quantity,
+  // which is the aggregate across all branches.
+  const inStock          = branchQty > 0;
   const hasVariants      = (product.option_groups || []).length > 0;
   const allOptsSelected  = hasVariants && Object.keys(selectedOptions).length === (product.option_groups || []).length;
   const variantOutOfStock = allOptsSelected && variantStock === 0;
 
   function increment() {
-    if (quantity >= product.quantity) {
-      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${product.quantity} unit(s) available.` });
+    if (quantity >= branchQty) {
+      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${branchQty} unit(s) available.` });
       return;
     }
     const next = quantity + 1;
@@ -85,9 +95,9 @@ export default function ProductDetailScreen({ route, navigation }) {
   function commitQtyText() {
     const num = parseInt(qtyText, 10) || 0;
     let final = num;
-    if (num > product.quantity) {
-      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${product.quantity} unit(s) available.` });
-      final = product.quantity;
+    if (num > branchQty) {
+      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${branchQty} unit(s) available.` });
+      final = branchQty;
     } else if (num < 1) {
       final = 1;
     }
@@ -98,7 +108,8 @@ export default function ProductDetailScreen({ route, navigation }) {
   async function handleAddToCart() {
     const loggedIn = await isLoggedIn();
     if (!loggedIn) {
-      showAlert({ type: 'warning', title: 'Login Required', message: 'Please log in to add items to your cart.', buttons: [ { text: 'Cancel' }, { text: 'Log In', style: 'primary', onPress: () => navigation.navigate('Login') } ] });
+      pendingActionRef.current = 'addToCart';
+      showAlert({ type: 'warning', title: 'Login Required', message: 'Please log in to add items to your cart.', buttons: [ { text: 'Cancel', onPress: () => { pendingActionRef.current = null; } }, { text: 'Log In', style: 'primary', onPress: () => navigation.navigate('Login') } ] });
       return;
     }
     // Validate all option groups selected
@@ -123,7 +134,8 @@ export default function ProductDetailScreen({ route, navigation }) {
   async function handleBuyNow() {
     const loggedIn = await isLoggedIn();
     if (!loggedIn) {
-      showAlert({ type: 'warning', title: 'Login Required', message: 'Please log in to complete your purchase.', buttons: [ { text: 'Cancel' }, { text: 'Log In', style: 'primary', onPress: () => navigation.navigate('Login') } ] });
+      pendingActionRef.current = 'buyNow';
+      showAlert({ type: 'warning', title: 'Login Required', message: 'Please log in to complete your purchase.', buttons: [ { text: 'Cancel', onPress: () => { pendingActionRef.current = null; } }, { text: 'Log In', style: 'primary', onPress: () => navigation.navigate('Login') } ] });
       return;
     }
     // Validate all option groups selected
@@ -187,8 +199,37 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
   }
 
+  // Was previously defined but never invoked, so the "out of stock for this
+  // variant" check and the Add to Cart/Buy Now block never actually fired.
+  useEffect(() => {
+    checkVariantStock(selectedOptions);
+  }, [selectedOptions]);
+
+  // Keep refs pointed at the latest handleAddToCart/handleBuyNow (they're
+  // plain function declarations recreated every render, so a stale ref
+  // would otherwise replay an old quantity/selectedOptions snapshot).
+  useEffect(() => { handleAddToCartRef.current = handleAddToCart; });
+  useEffect(() => { handleBuyNowRef.current    = handleBuyNow; });
+
+  // Resume a pending Add to Cart / Buy Now the moment this screen regains
+  // focus logged in (e.g. the user tapped Log In on the alert above,
+  // logged in, and popToTop() brought them straight back here).
+  useFocusEffect(
+    useCallback(() => {
+      if (!pendingActionRef.current) return;
+      const action = pendingActionRef.current;
+      pendingActionRef.current = null;
+      (async () => {
+        const loggedIn = await isLoggedIn();
+        if (!loggedIn) return;
+        if (action === 'addToCart') handleAddToCartRef.current?.();
+        if (action === 'buyNow')    handleBuyNowRef.current?.();
+      })();
+    }, [])
+  );
+
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { paddingTop: insets.top }]}>
       <NetworkBanner />
 
       {/* Back Button */}
@@ -204,7 +245,7 @@ export default function ProductDetailScreen({ route, navigation }) {
             <Feather name="shopping-bag" size={60} color={COLORS.primary}/>
           </View>
         ) : (
-          <View style={{ width:'100%', height:280 }}>
+          <View style={{ width:'100%', height:280, backgroundColor: COLORS.white }}>
             <FlatList
               data={images}
               keyExtractor={(_, i) => String(i)}
@@ -216,10 +257,13 @@ export default function ProductDetailScreen({ route, navigation }) {
                 setActiveIdx(idx);
               }}
               renderItem={({ item }) => (
+                // "contain" instead of "cover" — shows the whole product
+                // image letterboxed rather than cropping off whichever
+                // edges don't match this screen's fixed 280px-tall frame.
                 <Image
                   source={{ uri: item }}
                   style={{ width, height:280 }}
-                  resizeMode="cover"
+                  resizeMode="contain"
                 />
               )}
             />
@@ -294,7 +338,7 @@ export default function ProductDetailScreen({ route, navigation }) {
               color={inStock ? COLORS.primary : COLORS.error}
             />
             <Text style={[styles.stockText, { color: inStock ? COLORS.primary : COLORS.error }]}>
-              {inStock ? `In Stock (${product.quantity} available)` : 'Out of Stock'}
+              {inStock ? `In Stock (${branchQty} available)` : 'Out of Stock'}
             </Text>
           </View>
 
@@ -341,11 +385,11 @@ export default function ProductDetailScreen({ route, navigation }) {
                   selectTextOnFocus
                 />
                 <TouchableOpacity
-                  style={[styles.qtyBtn, quantity >= product.quantity && styles.qtyBtnDisabled]}
+                  style={[styles.qtyBtn, quantity >= branchQty && styles.qtyBtnDisabled]}
                   onPress={increment}
-                  disabled={quantity >= product.quantity}
+                  disabled={quantity >= branchQty}
                 >
-                  <Feather name="plus" size={16} color={quantity >= product.quantity ? COLORS.grayLight : COLORS.dark}/>
+                  <Feather name="plus" size={16} color={quantity >= branchQty ? COLORS.grayLight : COLORS.dark}/>
                 </TouchableOpacity>
               </View>
             </View>

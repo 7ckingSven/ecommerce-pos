@@ -5,25 +5,43 @@ import {
   Platform, Image,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { login, isLoggedIn, getCustomer } from '../services/authService';
 import { API_BASE_URL } from '../utils/constants';
 import { getMessaging, getToken } from '@react-native-firebase/messaging';
 import { COLORS, SPACING, RADIUS, SHADOW, APP_NAME, APP_SUBTITLE } from '../utils/constants';
 
-export default function LoginScreen({ navigation }) {
+// Once a device has completed a successful login, we flag it so this screen
+// greets them with "Welcome Back" on future visits. First-time users (or
+// anyone who's never completed a login on this device) see plain "Login".
+const HAS_LOGGED_IN_KEY = 'has_logged_in_before';
+
+export default function LoginScreen({ navigation, route }) {
   const [loginInput, setLoginInput] = useState('');
   const [password,   setPassword]   = useState('');
   const [showPass,   setShowPass]   = useState(false);
   const [loading,    setLoading]    = useState(false);
+  const [returningUser, setReturningUser] = useState(false);
+
+  // Set by HomeScreen.js's requireLogin() when the user tapped Add to Cart /
+  // Buy Now on a product before they were logged in — lets us resume that
+  // exact product after auth instead of just returning to wherever they were.
+  const { redirectAfter, redirectParams } = route?.params || {};
+
+  useEffect(() => {
+    AsyncStorage.getItem(HAS_LOGGED_IN_KEY).then(val => {
+      if (val === 'true') setReturningUser(true);
+    });
+  }, []);
 
   const canSubmit = loginInput.trim() !== '' && password.trim() !== '';
 
-  // Go back to wherever the user came from (e.g. the product they were
-  // trying to Buy Now / Add to Cart) instead of always landing on Home.
-  // Login/Register are always pushed on top of an existing 'Main' instance
-  // (Splash lands on Main via `replace`, never on Login), so popToTop()
-  // reliably returns to that original Main — with its nested screen history
-  // (like ProductDetail) intact — even after a multi-step signup detour.
+  // Go back to wherever the user came from instead of always landing on
+  // Home. Login/Register are always pushed on top of an existing 'Main'
+  // instance (Splash lands on Main via `replace`, never on Login), so
+  // popToTop() reliably returns to that original Main — with its nested
+  // screen history (like ProductDetail) intact — even after a multi-step
+  // signup detour.
   function goToMainOrBack() {
     if (navigation.canGoBack()) {
       navigation.popToTop();
@@ -32,10 +50,33 @@ export default function LoginScreen({ navigation }) {
     }
   }
 
+  // If the user was sent here mid-action (tapped Add to Cart / Buy Now on a
+  // product from HomeScreen before they'd logged in), land them straight
+  // back on that product's ProductDetail screen instead of just dumping
+  // them on whatever screen happened to be underneath (usually Home).
+  // Falls back to plain goToMainOrBack() when there's nothing to resume.
+  function resumeAfterAuth() {
+    if ((redirectAfter === 'addToCart' || redirectAfter === 'buyNow') && redirectParams?.product) {
+      goToMainOrBack();
+      navigation.navigate('Main', {
+        screen: 'Home',
+        params: {
+          screen: 'ProductDetail',
+          params: {
+            product:  redirectParams.product,
+            branchId: redirectParams.branchId || null,
+          },
+        },
+      });
+      return;
+    }
+    goToMainOrBack();
+  }
+
   // Auto-navigate if already logged in
   useEffect(() => {
     isLoggedIn().then(logged => {
-      if (logged) goToMainOrBack();
+      if (logged) resumeAfterAuth();
     });
   }, []);
 
@@ -44,6 +85,10 @@ export default function LoginScreen({ navigation }) {
     setLoading(true);
     try {
       await login(loginInput.trim(), password);
+
+      // Remember that this device has completed a login, so future visits
+      // to this screen greet them with "Welcome Back" instead of "Login".
+      try { await AsyncStorage.setItem(HAS_LOGGED_IN_KEY, 'true'); } catch (_) {}
 
       // Save FCM token after login
       try {
@@ -65,7 +110,7 @@ export default function LoginScreen({ navigation }) {
         console.log('FCM token save error:', fcmErr);
       }
 
-      goToMainOrBack();
+      resumeAfterAuth();
     } catch (err) {
       const status = err.response?.status;
       const msg    = err.response?.data?.error || 'Something went wrong. Please try again.';
@@ -113,7 +158,7 @@ export default function LoginScreen({ navigation }) {
 
         {/* Card */}
         <View style={styles.card}>
-          <Text style={styles.cardTitle}>Welcome Back</Text>
+          <Text style={styles.cardTitle}>{returningUser ? 'Welcome Back' : 'Login'}</Text>
           <Text style={styles.cardSub}>Sign in to continue shopping.</Text>
 
           {/* Login Input */}

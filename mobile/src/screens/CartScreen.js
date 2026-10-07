@@ -9,6 +9,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
+import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
@@ -20,12 +21,18 @@ export default function CartScreen({ navigation }) {
 
   const [cart,       setCart]       = useState([]);
   const [loading,    setLoading]    = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [error,      setError]      = useState(false);
   const [loggedIn,   setLoggedIn]   = useState(false);
   const [selected,   setSelected]   = useState({});
   const [editItem,          setEditItem]          = useState(null);
   const [variantWarnings,   setVariantWarnings]   = useState({});
   const [editOptions,setEditOptions]= useState({}); // { cart_id: true/false }
+  // Transient text per cart_id while its qty field is focused/being typed —
+  // keeps the field editable without fighting the item.quantity-controlled
+  // value, and clears on focus instead of relying on selectTextOnFocus
+  // (unreliable on Android — digits can append instead of replacing).
+  const [qtyEditText, setQtyEditText] = useState({});
 
   const { refreshCartCount } = useCart();
 
@@ -41,6 +48,26 @@ export default function CartScreen({ navigation }) {
     }, [])
   );
 
+  // Tapping the "Cart" tab while already on it refreshes the cart in place —
+  // the mobile equivalent of the web dashboard's manual ↻ refresh-section
+  // button. Cart is nested in a Stack (CartStack) inside the Tab navigator,
+  // so the tabPress event lives on the parent (tab) navigator.
+  useEffect(() => {
+    const unsubscribe = navigation.getParent()?.addListener('tabPress', () => {
+      if (navigation.isFocused()) {
+        isLoggedIn().then(logged => { if (logged) loadCart(); });
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  // Pull-to-refresh — separate from the initial `loading` spinner so the
+  // RefreshControl actually shows while a manual pull is in flight.
+  async function onPullToRefresh() {
+    setRefreshing(true);
+    await loadCart();
+    setRefreshing(false);
+  }
 
   async function checkAllVariantStocks(items) {
     const warnings = {};
@@ -53,7 +80,9 @@ export default function CartScreen({ navigation }) {
           branch_id:  item.branch_id || null,
           options:    opts,
         });
-        warnings[item.cart_item_id] = res.data.quantity ?? 0;
+        // Keyed by cart_id — matches how cart items are keyed everywhere
+        // else in this screen (keyExtractor, selected, handleRemove, etc.)
+        warnings[item.cart_id] = res.data.quantity ?? 0;
       } catch (e) {}
     }
     setVariantWarnings(warnings);
@@ -77,6 +106,9 @@ export default function CartScreen({ navigation }) {
       setSelected(sel);
       // Sync global cart count badge
       refreshCartCount();
+      // Check variant-specific stock for items that have selected options
+      // (was previously defined but never called, so "Out of stock!" never showed)
+      checkAllVariantStocks(normalized);
     } catch (e) {
       console.error('Cart error:', e);
       setError(true);
@@ -127,14 +159,34 @@ export default function CartScreen({ navigation }) {
     }
   }
 
-  function handleQtyInputCart(cartId, val, maxStock) {
-    const num = parseInt(val.replace(/[^0-9]/g, '')) || 1;
-    if (num > maxStock) {
-      Alert.alert('Maximum Stock', `Only ${maxStock} unit(s) available.`);
-      handleUpdateQty(cartId, maxStock, maxStock);
-    } else {
-      handleUpdateQty(cartId, num, maxStock);
+  // Clear the field on focus so typing starts fresh instead of appending to
+  // the existing quantity (the Android selectTextOnFocus append bug —
+  // same fix as ProductDetailScreen's quantity input).
+  function handleQtyFocus(cartId) {
+    setQtyEditText(prev => ({ ...prev, [cartId]: '' }));
+  }
+
+  function handleQtyChangeText(cartId, val) {
+    setQtyEditText(prev => ({ ...prev, [cartId]: val.replace(/[^0-9]/g, '') }));
+  }
+
+  // Commit on blur/submit instead of on every keystroke — was previously
+  // hitting the update-cart API on every digit typed.
+  function commitQtyInput(cartId, maxStock) {
+    const raw = qtyEditText[cartId];
+    setQtyEditText(prev => {
+      const next = { ...prev };
+      delete next[cartId];
+      return next;
+    });
+    if (raw === undefined) return; // field was never touched
+    const limit = maxStock != null ? Number(maxStock) : null;
+    let num = parseInt(raw, 10) || 1;
+    if (limit !== null && limit > 0 && num > limit) {
+      Alert.alert('Maximum Stock', `Only ${limit} unit(s) available.`);
+      num = limit;
     }
+    handleUpdateQty(cartId, num, maxStock);
   }
 
   // ─── Update Cart Item Options ────────────────────────
@@ -176,8 +228,11 @@ export default function CartScreen({ navigation }) {
 
   // ─── Not Logged In ────────────────────────────────────
   if (!loggedIn) return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+    <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Cart</Text>
+      </View>
       <View style={styles.emptyWrap}>
         <Feather name="lock" size={48} color={COLORS.grayLight}/>
         <Text style={styles.emptyTitle}>Please log in</Text>
@@ -189,18 +244,29 @@ export default function CartScreen({ navigation }) {
     </View>
   );
 
-  if (loading) return (<SkeletonLoader type="cart" count={4} />);
+  if (loading) return (
+    <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Cart</Text>
+      </View>
+      <SkeletonLoader type="cart" count={4} />
+    </View>
+  );
 
   // Safety check for undefined cart items
   const safeCart = Array.isArray(cart) ? cart : [];
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Cart</Text>
+      </View>
       <NetworkBanner />
 
       {error ? (
-        <View style={[styles.emptyWrap, { paddingTop: insets.top }]}>
+        <View style={styles.emptyWrap}>
           <Feather name="wifi-off" size={56} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Connection Error</Text>
           <Text style={styles.emptyText}>Could not load your cart. Please check your internet connection.</Text>
@@ -212,7 +278,7 @@ export default function CartScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       ) : cart.length === 0 ? (
-        <View style={[styles.emptyWrap, { paddingTop: insets.top }]}>
+        <View style={styles.emptyWrap}>
           <Feather name="shopping-cart" size={56} color={COLORS.grayLight}/>
           <Text style={styles.emptyTitle}>Your cart is empty</Text>
           <Text style={styles.emptyText}>Add products to get started.</Text>
@@ -224,7 +290,7 @@ export default function CartScreen({ navigation }) {
         <>
           {/* Select All Row — padded below the status bar */}
           <TouchableOpacity
-            style={[styles.selectAllRow, { paddingTop: insets.top + 10 }]}
+            style={[styles.selectAllRow, { paddingTop: 10 }]}
             onPress={toggleAll}
             activeOpacity={0.7}
           >
@@ -248,8 +314,8 @@ export default function CartScreen({ navigation }) {
             keyExtractor={item => item.cart_id}
             contentContainerStyle={styles.list}
             showsVerticalScrollIndicator={false}
-            onRefresh={loadCart}
-            refreshing={loading}
+            onRefresh={onPullToRefresh}
+            refreshing={refreshing}
             renderItem={({ item }) => {
               const isSelected = !!selected[item.cart_id];
               // Safely get product — handle array or object from Supabase
@@ -305,7 +371,7 @@ export default function CartScreen({ navigation }) {
                             ? Object.entries(item.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')
                             : 'Select options'}
                         </Text>
-                        {variantWarnings[item.cart_item_id] === 0 && (
+                        {variantWarnings[item.cart_id] === 0 && (
                           <Text style={{ fontSize:10, color:'#ef4444', fontWeight:'600' }}>Out of stock!</Text>
                         )}
                         <Feather name="chevron-down" size={11} color={COLORS.primary}/>
@@ -332,11 +398,13 @@ export default function CartScreen({ navigation }) {
                       </TouchableOpacity>
                       <TextInput
                         style={styles.qtyInput}
-                        value={String(item.quantity)}
-                        onChangeText={v => handleQtyInputCart(item.cart_id, v, item.product?.quantity)}
+                        value={qtyEditText[item.cart_id] !== undefined ? qtyEditText[item.cart_id] : String(item.quantity)}
+                        onFocus={() => handleQtyFocus(item.cart_id)}
+                        onChangeText={v => handleQtyChangeText(item.cart_id, v)}
+                        onBlur={() => commitQtyInput(item.cart_id, item.product?.quantity)}
+                        onSubmitEditing={() => commitQtyInput(item.cart_id, item.product?.quantity)}
                         keyboardType="number-pad"
                         maxLength={4}
-                        selectTextOnFocus
                       />
                       <TouchableOpacity
                         style={[styles.qtyBtn, item.quantity >= item.product?.quantity && styles.qtyBtnDisabled]}
@@ -361,8 +429,11 @@ export default function CartScreen({ navigation }) {
             }}
           />
 
-          {/* Footer */}
-          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md) }]}>
+          {/* Footer — marginBottom lifts it clear of the now-floating
+              (position:'absolute') tab bar in AppNavigator, since this
+              footer is a fixed sibling (not scrolling content) and would
+              otherwise render underneath the bar. */}
+          <View style={[styles.footer, { paddingBottom: Math.max(insets.bottom, SPACING.md), marginBottom: 60 + insets.bottom }]}>
             {/* Selected count */}
             <View style={styles.footerInfo}>
               <Text style={styles.footerCount}>
@@ -468,8 +539,9 @@ const styles = StyleSheet.create({
   container:           { flex: 1, backgroundColor: COLORS.grayBg },
   centered:            { justifyContent: 'center', alignItems: 'center' },
 
-  // Header
-  header:              { backgroundColor: COLORS.dark, paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md },
+  // Header — COLORS.primary so it matches the bottom nav's active-tab
+  // green (and HomeScreen's header) instead of drifting to its own shade.
+  header:              { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.md, shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
   headerTitle:         { fontSize: 18, fontWeight: '700', color: COLORS.white },
   headerSub:           { fontSize: 12, color: COLORS.grayLight, marginTop: 2 },
 

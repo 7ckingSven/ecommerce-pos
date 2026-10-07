@@ -5,6 +5,7 @@ import {
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { register } from '../services/authService';
+import api from '../services/api';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -43,26 +44,29 @@ export default function RegisterScreen({ navigation, route }) {
       if (form.phone_number.length !== 11 || !form.phone_number.startsWith('09'))
         return Alert.alert('Invalid', 'Phone number must be 11 digits starting with 09.');
 
-      // Check for duplicates before proceeding to password step
+      // Check for duplicates before proceeding to password step.
+      // Uses the shared `api` (axios) instance instead of a raw fetch() to
+      // a hardcoded URL — that axios instance carries a 30s timeout meant
+      // specifically for Render free-tier cold starts (see api.js). The
+      // raw fetch() here had no such allowance, so a sleeping/waking Render
+      // dyno could throw a network error well before the backend actually
+      // responded, surfacing as "Could not verify details. Please try again."
+      // even though nothing was actually wrong with the details entered.
       setCheckingDuplicate(true);
       try {
-        const res  = await fetch(`https://ecommerce-pos-8rsf.onrender.com/api/auth/check-duplicate`, {
-          method:  'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body:    JSON.stringify({
-            email:        form.email,
-            username:     form.username,
-            phone_number: form.phone_number,
-          }),
+        await api.post('/auth/check-duplicate', {
+          email:        form.email,
+          username:     form.username,
+          phone_number: form.phone_number,
         });
-        const data = await res.json();
-        if (!res.ok) {
-          setCheckingDuplicate(false);
-          return Alert.alert('Already Taken', data.error || 'Please use different details.');
-        }
       } catch (e) {
         setCheckingDuplicate(false);
-        return Alert.alert('Error', 'Could not verify details. Please try again.');
+        if (e.response) {
+          // Server responded (4xx/5xx) — a real validation failure, e.g. duplicate details.
+          return Alert.alert('Already Taken', e.response.data?.error || 'Please use different details.');
+        }
+        // No response at all — genuine network/timeout issue.
+        return Alert.alert('Error', 'Could not verify details. Please check your connection and try again.');
       }
       setCheckingDuplicate(false);
     }

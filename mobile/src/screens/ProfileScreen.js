@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
+import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, TextInput,
   Modal, KeyboardAvoidingView, Platform, StatusBar,
+  RefreshControl,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -47,6 +49,8 @@ export default function ProfileScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const [customer,     setCustomer]     = useState(null);
   const [loading,      setLoading]      = useState(true);
+  const [refreshing,   setRefreshing]   = useState(false);
+  const [error,        setError]        = useState(false);
   const [loggedIn,     setLoggedIn]     = useState(false);
   const [saving,       setSaving]       = useState(false);
 
@@ -61,10 +65,42 @@ export default function ProfileScreen({ navigation }) {
   const [legalModal,     setLegalModal]     = useState(null);
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
-  useEffect(() => { loadProfile(); }, []);
+  // Load once whenever the Profile screen gains focus — no background
+  // polling (matches the web dashboards: data loads on view, refresh is
+  // on-demand). Was previously a plain useEffect([]), so edits made
+  // elsewhere (e.g. during registration) wouldn't show here until the app
+  // was restarted.
+  useFocusEffect(
+    useCallback(() => {
+      loadProfile();
+    }, [])
+  );
+
+  // Tapping the "Profile" tab while already on it refreshes the profile in
+  // place — the mobile equivalent of the web dashboard's manual ↻
+  // refresh-section button. Profile is a direct Tab.Screen (not nested in a
+  // Stack), so its own navigation prop already belongs to the tab
+  // navigator — no getParent() needed.
+  useEffect(() => {
+    const unsubscribe = navigation.addListener('tabPress', () => {
+      if (navigation.isFocused()) {
+        loadProfile();
+      }
+    });
+    return unsubscribe;
+  }, [navigation]);
+
+  // Pull-to-refresh — separate from the initial `loading` spinner so the
+  // RefreshControl actually shows while a manual pull is in flight.
+  async function onPullToRefresh() {
+    setRefreshing(true);
+    await loadProfile();
+    setRefreshing(false);
+  }
 
   async function loadProfile() {
     try {
+      setError(false);
       const logged = await isLoggedIn();
       setLoggedIn(logged);
       if (!logged) { setLoading(false); return; }
@@ -81,14 +117,21 @@ export default function ProfileScreen({ navigation }) {
           headers: { 'X-Customer-ID': stored.customer_id },
         });
         setCustomer(res.data);
-      } catch (_) {}
+      } catch (_) {
+        // Keep showing the cached AsyncStorage copy silently — only surface
+        // a connection error if there's nothing cached to fall back to.
+        if (!stored) setError(true);
+      }
 
     } catch (e) {
       console.error('Profile load error:', e?.message || e);
       try {
         const stored = await getCustomer();
         if (stored) setCustomer(stored);
-      } catch (_) {}
+        else setError(true);
+      } catch (_) {
+        setError(true);
+      }
     } finally {
       setLoading(false);
     }
@@ -285,7 +328,32 @@ export default function ProfileScreen({ navigation }) {
     });
   }
 
-  if (loading) return (<SkeletonLoader type="profile" />);
+  if (loading) return (
+    <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Profile</Text>
+      </View>
+      <SkeletonLoader type="profile" />
+    </View>
+  );
+
+  if (error) return (
+    <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Profile</Text>
+      </View>
+      <View style={styles.emptyWrap}>
+        <Feather name="wifi-off" size={48} color={COLORS.grayLight}/>
+        <Text style={styles.emptyTitle}>Connection Error</Text>
+        <Text style={styles.emptyText}>Could not load your profile. Please check your internet connection.</Text>
+        <TouchableOpacity style={styles.loginBtn} onPress={() => { setError(false); setLoading(true); loadProfile(); }}>
+          <Text style={styles.loginBtnText}>Try Again</Text>
+        </TouchableOpacity>
+      </View>
+    </View>
+  );
 
   // ─── Not Logged In ───────────────────────────────────
   const initials = customer
@@ -293,8 +361,11 @@ export default function ProfileScreen({ navigation }) {
     : '?';
 
   if (!loggedIn) return (
-    <View style={[styles.container, { paddingTop: insets.top }]}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+    <View style={styles.container}>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Profile</Text>
+      </View>
       <View style={styles.emptyWrap}>
         <Feather name="user" size={48} color={COLORS.textMuted}/>
         <Text style={styles.emptyTitle}>Not Logged In</Text>
@@ -308,12 +379,18 @@ export default function ProfileScreen({ navigation }) {
 
   if (loggedIn) return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.grayBg} barStyle="dark-content" translucent={true}/>
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        <Text style={styles.headerTitle}>My Profile</Text>
+      </View>
       <NetworkBanner />
 
       <ScrollView
-        contentContainerStyle={[styles.content, { paddingTop: insets.top + SPACING.md }]}
+        contentContainerStyle={[styles.content, { paddingTop: SPACING.md }]}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl refreshing={refreshing} onRefresh={onPullToRefresh} colors={[COLORS.primary]} tintColor={COLORS.primary}/>
+        }
       >
 
         {/* Avatar */}
@@ -448,7 +525,9 @@ export default function ProfileScreen({ navigation }) {
           </View>
         )}
 
-        <View style={{ height: SPACING.xl }}/>
+        {/* Extra bottom spacer so the last section can scroll clear of the
+            now-floating (position:'absolute') tab bar in AppNavigator. */}
+        <View style={{ height: SPACING.xl + 60 + insets.bottom }}/>
       </ScrollView>
 
       {/* ─── EDIT MODAL ─── */}
@@ -625,7 +704,9 @@ export default function ProfileScreen({ navigation }) {
 
 const styles = StyleSheet.create({
   container:          { flex:1, backgroundColor: COLORS.grayBg },
-  header:             { backgroundColor: COLORS.dark, paddingHorizontal: SPACING.md, paddingTop: SPACING.xl, paddingBottom: SPACING.md },
+  // Header — COLORS.primary so it matches the bottom nav's active-tab
+  // green (and HomeScreen's header) instead of drifting to its own shade.
+  header:             { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.md, shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
   headerTitle:        { fontSize:18, fontWeight:'700', color: COLORS.white },
   content:            { padding: SPACING.md, gap: SPACING.md },
 

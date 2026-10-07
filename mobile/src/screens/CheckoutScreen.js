@@ -279,7 +279,7 @@ export default function CheckoutScreen({ route, navigation }) {
     }
 
     showAlert({ type: 'confirm', title: 'Confirm Order',
-      message: `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nGrand Total: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}`,
+      message: `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nTotal: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}`,
       buttons: [
         { text: 'Cancel', onPress: () => { setOrderLoading(false); isSubmitting.current = false; } },
         { text: 'Confirm', style: 'primary', onPress: async () => {
@@ -433,7 +433,7 @@ export default function CheckoutScreen({ route, navigation }) {
           </View>
           <View style={styles.divider}/>
           <View style={styles.totalRow}>
-            <Text style={[styles.totalLabel, { fontWeight: '700', fontSize: 15 }]}>Grand Total</Text>
+            <Text style={[styles.totalLabel, { fontWeight: '700', fontSize: 15 }]}>Total</Text>
             <Text style={[styles.totalVal, { color: COLORS.primary, fontSize: 16 }]}>
               ₱{(total + shippingFee).toFixed(2)}
             </Text>
