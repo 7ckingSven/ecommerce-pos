@@ -33,6 +33,7 @@ let staffHistoryTypeFilterVal = '';
 let staffHistoryPage = 1;
 let allInvHistory    = [];
 let staffStockSearchVal = '';
+let staffStockLevelVal  = '';
 let historySearchVal = '';
 
 function paginate(arr, page) {
@@ -1514,7 +1515,7 @@ async function loadInventory() {
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
     document.getElementById('invRecentRestocks').textContent = invData.filter(i => new Date(i.date) >= oneWeekAgo).length;
 
-    renderInvProducts(invProducts);
+    applyStaffStockFilters();
 
     // History — read nested branch names from FK join
     renderInvHistory(invData);
@@ -1706,34 +1707,47 @@ function filterHistorySearch(q) {
 }
 window.filterHistorySearch = filterHistorySearch;
 
+function staffBQty(p) {
+  const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+  return bs ? Number(bs.quantity) : Number(p.quantity || 0);
+}
+
+// Applies the stock-level filter AND the search filter TOGETHER, so picking
+// a level and then searching (or vice versa) no longer wipes out the other.
+function applyStaffStockFilters() {
+  let filtered = invProducts;
+
+  if (staffStockLevelVal === 'critical_stock') {
+    filtered = filtered.filter(p => { const q = staffBQty(p); return q > 0 && q <= 5; });
+  } else if (staffStockLevelVal === 'low_stock') {
+    // Show both tiers — critical first, then low
+    const critical = filtered.filter(p => { const q = staffBQty(p); return q > 0 && q <= 5; });
+    const low      = filtered.filter(p => { const q = staffBQty(p); return q > 5 && q <= 10; });
+    filtered = [...critical, ...low];
+  } else if (staffStockLevelVal === 'out_of_stock') {
+    filtered = filtered.filter(p => staffBQty(p) === 0);
+  }
+
+  if (staffStockSearchVal) {
+    filtered = filtered.filter(p => p.product_name.toLowerCase().includes(staffStockSearchVal));
+  }
+
+  renderInvProducts(filtered);
+}
+
 function filterStaffStockSearch(q) {
   staffStockSearchVal = (q || '').toLowerCase().trim();
   staffInvPage = 1;
-  const filtered = staffStockSearchVal
-    ? invProducts.filter(p => p.product_name.toLowerCase().includes(staffStockSearchVal))
-    : invProducts;
-  renderInvProducts(filtered);
+  applyStaffStockFilters();
 }
 window.filterStaffStockSearch = filterStaffStockSearch;
 
 function filterStaffInventoryType(type) {
-  const bQty = p => {
-    const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
-    return bs ? Number(bs.quantity) : Number(p.quantity || 0);
-  };
-  if (type === 'critical_stock') {
-    renderInvProducts(invProducts.filter(p => { const q = bQty(p); return q > 0 && q <= 5; }));
-  } else if (type === 'low_stock') {
-    // Show both tiers — critical first, then low
-    const critical = invProducts.filter(p => { const q = bQty(p); return q > 0 && q <= 5; });
-    const low      = invProducts.filter(p => { const q = bQty(p); return q > 5 && q <= 10; });
-    renderInvProducts([...critical, ...low]);
-  } else if (type === 'out_of_stock') {
-    renderInvProducts(invProducts.filter(p => bQty(p) === 0));
-  } else {
-    renderInvProducts(invProducts);
-  }
+  staffStockLevelVal = type || '';
+  staffInvPage = 1;
+  applyStaffStockFilters();
 }
+window.filterStaffInventoryType = filterStaffInventoryType;
 
 function updateOrdersBadge(orders) {
   const badge   = document.getElementById('ordersBadge');
