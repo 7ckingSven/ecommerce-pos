@@ -745,8 +745,8 @@ async function loadOverview() {
           // otherwise the admin sees a healthy-looking number and wonders why it's listed.
           const variantOnly = hasVariantAlert(p, isCritical ? critQ : lowQ) && !(isCritical ? p.branch_stock?.some(bs => critQ(bs.quantity)) : p.branch_stock?.some(bs => lowQ(bs.quantity)));
           const levelBadge = isCritical
-            ? '<span style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:999px;font-size:11px;padding:2px 8px;font-weight:600;">🔴 Critical</span>'
-            : '<span style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:11px;padding:2px 8px;font-weight:600;">🟡 Low Stock</span>';
+            ? '<span title="Critical Level" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,0.2);"></span>'
+            : '<span title="Low Stock" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11,0.2);"></span>';
           return `<tr>
             <td>${p.product_name}</td>
             <td>${p.category}</td>
