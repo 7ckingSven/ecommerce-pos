@@ -706,6 +706,17 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   border: 1px solid var(--border);
 }
 .btn-cancel:hover { background: var(--hover); color: var(--text); }
+.btn-outline-green {
+  background: var(--card-bg);
+  color: var(--g-500);
+  border: 1.5px solid var(--g-600);
+}
+.btn-outline-green:hover {
+  background: rgba(34,197,94,0.12);
+  color: var(--g-400);
+  border-color: var(--g-500);
+  transform: translateY(-1px);
+}
 .btn-text {
   background: none;
   border: none;

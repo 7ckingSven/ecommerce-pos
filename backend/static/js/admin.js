@@ -416,6 +416,26 @@ function toggleTheme() {
   const next     = current === 'dark' ? 'light' : 'dark';
   html.setAttribute('data-theme', next);
   localStorage.setItem('theme', next);
+  updateChartThemeColors();
+}
+
+// Re-color any already-rendered Sales Report charts' axis ticks/grid
+// lines the moment the theme is toggled, instead of waiting for the next
+// data reload/filter to pick up the new --text-muted/--border values.
+// Defined here but called from toggleTheme() above — safe since this is
+// only ever invoked later, on click, by which point the whole script
+// (including the chart instance variables below) has already run.
+function updateChartThemeColors() {
+  if (typeof chartThemeColors !== 'function') return;
+  const { tick, grid } = chartThemeColors();
+  [branchChartInst, revenueChartInst].forEach(inst => {
+    if (!inst) return;
+    Object.values(inst.options.scales || {}).forEach(scale => {
+      if (scale.ticks) scale.ticks.color = tick;
+      if (scale.grid)  scale.grid.color  = grid;
+    });
+    inst.update();
+  });
 }
 
 // Apply saved theme on load
@@ -2864,6 +2884,19 @@ let revenueChartInst = null;
 let paymentChartInst = null;
 let branchChartInst  = null;
 
+// Chart.js's default tick/grid colors (dark gray text, light gray grid
+// lines) assume a light page background. Against this dashboard's
+// near-black dark theme they were nearly invisible — pull the live
+// --text-muted / --border CSS vars instead so axis labels and grid lines
+// always contrast with whichever theme is active.
+function chartThemeColors() {
+  const cs = getComputedStyle(document.documentElement);
+  return {
+    tick: cs.getPropertyValue('--text-muted').trim() || '#9ca3af',
+    grid: cs.getPropertyValue('--border').trim()      || 'rgba(0,0,0,0.08)',
+  };
+}
+
 
 // ─── Sales Filter Functions ───────────────────────────
 let allSalesOrders = []; // Store all orders for filtering
@@ -3036,7 +3069,10 @@ function renderSalesData(completed, allOrders) {
       },
       options: { responsive:true, maintainAspectRatio:true,
         plugins:{legend:{display:false}},
-        scales:{ y:{ beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString()} } } }
+        scales:{
+          x:{ ticks:{color:chartThemeColors().tick}, grid:{color:chartThemeColors().grid} },
+          y:{ beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString(), color:chartThemeColors().tick}, grid:{color:chartThemeColors().grid} }
+        } }
     });
   }
 
@@ -3062,7 +3098,10 @@ function renderSalesData(completed, allOrders) {
           borderWidth:2, tension:0.4, fill:true, pointRadius:4 }]
       },
       options: { responsive:true, plugins:{legend:{display:false}},
-        scales:{ y:{beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString()}} } }
+        scales:{
+          x:{ ticks:{color:chartThemeColors().tick}, grid:{color:chartThemeColors().grid} },
+          y:{ beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString(), color:chartThemeColors().tick}, grid:{color:chartThemeColors().grid} }
+        } }
     });
   }
 
