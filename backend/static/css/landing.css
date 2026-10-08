@@ -86,6 +86,42 @@
   text-align: center;
   margin: 0;
 }
+/* ─── Footer: QR Code + Download APK ─── */
+.footer-qr-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.75rem;
+  background: rgba(255,255,255,0.06);
+  border: 1px solid rgba(74,222,128,0.20);
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.9rem;
+  width: fit-content;
+}
+
+.footer-qr-img {
+  width: 92px;
+  height: 92px;
+  border-radius: 4px;
+  object-fit: contain;
+  background: #fff;
+  padding: 4px;
+}
+
+.footer-qr-label {
+  font-size: 11px;
+  color: rgba(255,255,255,0.55);
+  font-weight: 500;
+  margin: 0;
+}
+
+.footer-download-btn {
+  width: fit-content !important;
+  padding: 8px 16px !important;
+  font-size: 13px !important;
+}
+
 /* ─── Footer Legal Buttons ─── */
 .footer-legal-btn {
   background: none;

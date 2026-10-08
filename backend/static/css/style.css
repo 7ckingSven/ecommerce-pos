@@ -248,18 +248,23 @@ html, body {
   padding-top: 66px;
 }
 
-/* LEFT PANEL */
-.hero-left {
-  background: var(--dark);
+/* ============================================================
+   BRAND DARK BACKGROUND — shared
+   Dark green + grid pattern + glow. Applied to the whole .hero
+   (so hero-left AND hero-right share one continuous background
+   on login/landing) and reusable on .page-wrap for the Forgot
+   Password / Verify OTP / Reset Password pages via
+   class="page-wrap brand-dark-bg".
+   ============================================================ */
+.hero,
+.page-wrap.brand-dark-bg {
   position: relative;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  padding: 5rem;
   overflow: hidden;
+  background: var(--dark);
 }
 
-.hero-left::before {
+.hero::before,
+.page-wrap.brand-dark-bg::before {
   content: "";
   position: absolute;
   inset: 0;
@@ -270,7 +275,8 @@ html, body {
   pointer-events: none;
 }
 
-.hero-left::after {
+.hero::after,
+.page-wrap.brand-dark-bg::after {
   content: "";
   position: absolute;
   top: -120px; right: -120px;
@@ -278,6 +284,15 @@ html, body {
   border-radius: 50%;
   background: radial-gradient(circle, rgba(34,197,94,0.13) 0%, transparent 65%);
   pointer-events: none;
+}
+
+/* LEFT PANEL */
+.hero-left {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 5rem;
 }
 
 .hero-glow {
@@ -390,7 +405,7 @@ html, body {
 
 /* RIGHT PANEL */
 .hero-right {
-  background: var(--surface);
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -592,8 +607,8 @@ footer::before {
 
 .footer-grid {
   display: grid;
-  grid-template-columns: 1.6fr 1fr 1fr;
-  gap: 3rem;
+  grid-template-columns: 1.4fr 1fr 1fr 0.9fr;
+  gap: 2.5rem;
   margin-bottom: 2.5rem;
 }
 
@@ -690,6 +705,7 @@ footer::before {
 
 @media (max-width: 600px) {
   .footer-grid { grid-template-columns: 1fr; gap: 2rem; }
+  .footer-qr-wrap { margin-left: auto; margin-right: auto; }
   .nav-brand-text { display: none; }
   .hero-title { font-size: 2rem; }
 }

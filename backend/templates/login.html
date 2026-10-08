@@ -7,6 +7,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/landing.css') }}">
   <style>
     /* ── Slideshow ── */
     .slide-wrap {
@@ -325,6 +326,21 @@
         <div class="dev-item">Rhea Jane Mae Almelda</div>
         <div class="dev-item">Val Cyril Calixton</div>
         <div class="dev-item">Alfrancis Limo</div>
+      </div>
+      <div class="footer-col">
+        <p class="footer-col-title">Get the App</p>
+        <div class="footer-qr-wrap">
+          <img src="{{ url_for('static', filename='img/app-qr-code.png') }}" alt="Scan to Download APK" class="footer-qr-img"/>
+          <p class="footer-qr-label">Scan to Download</p>
+        </div>
+        <a href="{{ url_for('download_apk') }}" class="btn btn-solid-green footer-download-btn" download>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+            <polyline points="7 10 12 15 17 10"/>
+            <line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Download APK
+        </a>
       </div>
     </div>
     <div class="footer-bottom">
