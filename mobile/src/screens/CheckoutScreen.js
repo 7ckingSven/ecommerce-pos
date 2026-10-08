@@ -597,7 +597,12 @@ export default function CheckoutScreen({ route, navigation }) {
       </ScrollView>
 
       {/* ─── Footer ─── */}
-      <View style={styles.footer}>
+      {/* Extra bottom padding clears the floating translucent tab bar
+          (AppNavigator's tabBarStyle is position: 'absolute' with height
+          60 + insets.bottom, so it overlaps whatever sits at the true
+          bottom of any screen nested in a tab's stack — Checkout is
+          nested in CartStack). */}
+      <View style={[styles.footer, { paddingBottom: SPACING.md + 60 + insets.bottom }]}>
         <View style={styles.footerTotal}>
           <Text style={styles.footerTotalLabel}>Total</Text>
           <Text style={styles.footerTotalVal}>₱{total.toFixed(2)}</Text>
@@ -693,7 +698,7 @@ export default function CheckoutScreen({ route, navigation }) {
 
 const styles = StyleSheet.create({
   container:          { flex: 1, backgroundColor: COLORS.grayBg },
-  header:             { backgroundColor: COLORS.dark, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingBottom: SPACING.md },
+  header:             { backgroundColor: COLORS.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingBottom: SPACING.md },
   headerTitle:        { fontSize: 18, fontWeight: '700', color: COLORS.white },
   content:            { padding: SPACING.md, gap: SPACING.md },
 
