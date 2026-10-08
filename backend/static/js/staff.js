@@ -490,6 +490,19 @@ function offlineSyncTag(o) {
     : '';
 }
 
+// Supabase timestamp columns (created_at, updated_at, ...) come back with no
+// 'Z'/UTC suffix. Parsing that naive string with plain `new Date()` makes the
+// browser treat it as LOCAL time instead of UTC — on a PH machine (UTC+8)
+// that silently shifts the real moment by 8 hours, which then shows up as a
+// wrong clock time once reformatted (e.g. the Sales Summary time column).
+// Always build Dates for display through this helper instead of `new Date(raw)`.
+function toUtcDate(raw) {
+  if (!raw) return null;
+  const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+  const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+  return new Date(utcStr);
+}
+
 // ══════════════════════════════════════════════════════
 // GLOBAL STATE
 // ══════════════════════════════════════════════════════
@@ -2660,7 +2673,7 @@ function renderSummaryForRange(fromStr, toStr) {
           <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${peso(o.total)}</td>
-          <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) : '—'}</td>
+          <td>${o.created_at ? toUtcDate(o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) : '—'}</td>
           <td>${badge(o.status)}</td>
         </tr>`).join('')
     : `<tr><td colspan="7" class="table-empty">No transactions for ${rangeLabel}</td></tr>`;
