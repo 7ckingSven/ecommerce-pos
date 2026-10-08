@@ -4572,6 +4572,7 @@ function openCreatePOModal() {
   document.getElementById('poItemsWrap').innerHTML = '';
   document.getElementById('poTotal').textContent   = '₱0.00';
   addPOItemRow(); // start with one row
+  updatePOTotal(); // reset Create PO button to disabled until a row is filled in
   document.getElementById('createPOModalOverlay')?.classList.add('open');
   document.getElementById('createPOModal')?.classList.add('open');
 }
@@ -4652,12 +4653,20 @@ function updatePORowStock(sel) {
 function updatePOTotal() {
   const rows  = document.getElementById('poItemsWrap').children;
   let total   = 0;
+  let hasValidItem = false;
   for (const row of rows) {
-    const qty  = parseFloat(row.querySelector('.po-qty')?.value || 0);
-    const cost = parseFloat(row.querySelector('.po-cost')?.value || 0);
+    const product = row.querySelector('.po-product')?.value;
+    const qty     = parseFloat(row.querySelector('.po-qty')?.value || 0);
+    const cost    = parseFloat(row.querySelector('.po-cost')?.value || 0);
     total += qty * cost;
+    if (product && qty > 0 && cost > 0) hasValidItem = true;
   }
   document.getElementById('poTotal').textContent = peso(total);
+
+  // Create PO button stays disabled until at least one row has a
+  // selected product, a quantity, and a unit cost all filled in.
+  const createBtn = document.getElementById('createPOBtn');
+  if (createBtn) createBtn.disabled = !hasValidItem;
 }
 
 async function submitCreatePO() {

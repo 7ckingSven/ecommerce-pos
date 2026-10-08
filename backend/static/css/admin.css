@@ -700,6 +700,15 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 }
 .btn-solid-green { background: var(--g-600); color: #ffffff; transition: all 0.2s ease; }
 .btn-solid-green:hover { background: var(--g-700); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(22,163,74,0.4); }
+.btn:disabled,
+.btn:disabled:hover {
+  background: #9ca3af;
+  color: #e5e7eb;
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: none;
+}
 .btn-cancel {
   background: var(--surface-2);
   color: var(--text-muted);
@@ -953,12 +962,10 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .branch-stock-count {
   margin-left: auto;
   font-size: 13px;
-  font-weight: 700;
-  color: var(--g-500);
-  background: rgba(22,163,74,0.14);
-  border: 1px solid rgba(22,163,74,0.3);
+  color: var(--text-muted);
+  background: var(--surface-2);
   border-radius: 999px;
-  padding: 2px 10px;
+  padding: 2px 8px;
 }
 
 .branch-stock-qty {
@@ -966,10 +973,9 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   font-weight: 700;
 }
 
-.branch-stock-qty.in-stock       { color: #16a34a; }           /* In Stock (11+ units) — green */
-.branch-stock-qty.low-stock      { color: #f59e0b; }           /* Low Stock (6–10 units) — orange */
-.branch-stock-qty.critical-stock { color: #ef4444; }           /* Critical Level (1–5 units) — red */
-.branch-stock-qty.out-stock      { color: var(--text); }       /* Out of Stock (0 units) — black/theme text */
+.branch-stock-qty.in-stock  { color: #16a34a; }
+.branch-stock-qty.low-stock { color: #f59e0b; }
+.branch-stock-qty.out-stock { color: #ef4444; }
 
 /* ============================================================
    CUSTOM SCROLLBAR — Green Theme (Admin)
