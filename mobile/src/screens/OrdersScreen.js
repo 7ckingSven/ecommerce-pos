@@ -52,8 +52,20 @@ function statusColor(s) {
 const CANCEL_WINDOW_HOURS = 2;
 function getCancelWindow(order) {
   if (!order || order.status !== 'pending') return { canCancel: false, msRemaining: 0 };
-  const created  = new Date(order.created_at || order.date || Date.now());
-  const deadline = new Date(created.getTime() + CANCEL_WINDOW_HOURS * 60 * 60 * 1000);
+  // Supabase's created_at comes back with no 'Z'/UTC suffix (e.g.
+  // "2026-10-08 09:10:00.123456"). On a device set to a timezone ahead of
+  // UTC (PH is UTC+8), `new Date()` parses that naive string as LOCAL time,
+  // which silently shifts the apparent creation moment hours into the past
+  // relative to the real UTC creation time — making a brand-new order look
+  // like its 2-hour cancel window already expired. Force it to be read as
+  // UTC, same fix already applied to this timestamp format in app.py's
+  // duplicate-order check and in admin.js's order date rendering.
+  const raw = order.created_at || order.date;
+  if (!raw) return { canCancel: false, msRemaining: 0 };
+  const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+  const utcStr      = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+  const created     = new Date(utcStr);
+  const deadline    = new Date(created.getTime() + CANCEL_WINDOW_HOURS * 60 * 60 * 1000);
   const msRemaining = deadline.getTime() - Date.now();
   return { canCancel: msRemaining > 0, msRemaining };
 }
