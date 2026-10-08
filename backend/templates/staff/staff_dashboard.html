@@ -101,6 +101,14 @@
 
     <!-- ─── POS SECTION ───────────────────────────────── -->
     <section class="section active" id="section-pos">
+
+      <!-- Offline Mode Banner — hidden unless offline or a queued sale is pending sync -->
+      <div id="posOfflineBanner" class="pos-offline-banner" style="display:none;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><line x1="1" y1="1" x2="23" y2="23"/><path d="M16.72 11.06A10.94 10.94 0 0 1 19 12.55"/><path d="M5 12.55a10.94 10.94 0 0 1 5.17-2.39"/><path d="M10.71 5.05A16 16 0 0 1 22.58 9"/><path d="M1.42 9a15.91 15.91 0 0 1 4.7-2.88"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+        <span id="posOfflineBannerText" class="pos-offline-banner-text">You're offline — Cash sales will be saved and synced automatically once reconnected.</span>
+        <span id="posOfflinePendingCount" class="pos-offline-pending-count" style="display:none;"></span>
+      </div>
+
       <div class="pos-layout">
 
         <!-- LEFT — Product Search -->
@@ -634,6 +642,17 @@
   </div>
 
   <script src="{{ url_for('static', filename='js/staff.js') }}"></script>
+
+  <!-- Offline app-shell: caches this page + its CSS/JS so a reload while
+       fully offline still loads (for a staff member already logged in).
+       Does not cache or affect any API call, /login, or /ping. -->
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js').catch(() => {});
+      });
+    }
+  </script>
 
   <!-- Receipt Modal -->
   <div id="receiptModalOverlay" onclick="closeReceiptModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:1000;"></div>

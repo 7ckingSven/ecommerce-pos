@@ -484,6 +484,12 @@ function shortId(id) {
   return id ? id.slice(0, 8).toUpperCase() : '—';
 }
 
+function offlineSyncTag(o) {
+  return o.is_offline_sync
+    ? ' <span title="Made while offline, synced once reconnected" style="display:inline-block;margin-top:3px;background:rgba(245,158,11,0.15);color:#b45309;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:10px;font-weight:600;padding:1px 6px;">⚡ Offline Sync</span>'
+    : '';
+}
+
 // ══════════════════════════════════════════════════════
 // GLOBAL STATE
 // ══════════════════════════════════════════════════════
@@ -494,6 +500,199 @@ let posDiscounts    = [];
 let invProducts     = [];
 let staffOrders     = [];
 let allBranches     = [];
+
+// ══════════════════════════════════════════════════════
+// OFFLINE POS — walk-in sales keep working when the connection drops
+// ══════════════════════════════════════════════════════
+// navigator.onLine only reflects the network adapter, not whether the
+// Flask backend is actually reachable, so connectivity is confirmed with
+// a real request to the lightweight /ping route instead of trusting it.
+let posIsOnline       = true;
+let posSyncInProgress = false;
+const OFFLINE_DB_NAME  = 'tefc_pos_offline';
+const OFFLINE_DB_STORE = 'pendingOrders';
+
+function openOfflineDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(OFFLINE_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(OFFLINE_DB_STORE)) {
+        db.createObjectStore(OFFLINE_DB_STORE, { keyPath: 'client_offline_id' });
+      }
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror   = () => reject(req.error);
+  });
+}
+
+function addPendingOrder(order) {
+  return openOfflineDB().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(OFFLINE_DB_STORE, 'readwrite');
+    tx.objectStore(OFFLINE_DB_STORE).put(order);
+    tx.oncomplete = resolve;
+    tx.onerror    = () => reject(tx.error);
+  }));
+}
+
+function getPendingOrders() {
+  return openOfflineDB().then(db => new Promise((resolve, reject) => {
+    const tx  = db.transaction(OFFLINE_DB_STORE, 'readonly');
+    const req = tx.objectStore(OFFLINE_DB_STORE).getAll();
+    req.onsuccess = () => resolve(req.result || []);
+    req.onerror   = () => reject(req.error);
+  }));
+}
+
+function deletePendingOrder(clientOfflineId) {
+  return openOfflineDB().then(db => new Promise((resolve, reject) => {
+    const tx = db.transaction(OFFLINE_DB_STORE, 'readwrite');
+    tx.objectStore(OFFLINE_DB_STORE).delete(clientOfflineId);
+    tx.oncomplete = resolve;
+    tx.onerror    = () => reject(tx.error);
+  }));
+}
+
+function genOfflineId() {
+  return crypto.randomUUID
+    ? crypto.randomUUID()
+    : 'off_' + Date.now() + '_' + Math.random().toString(36).slice(2);
+}
+
+// Reduces the locally cached stock numbers (posProducts/invProducts only —
+// the real database stock is untouched until the order syncs) so a second
+// walk-in sale during the same outage doesn't oversell against stale,
+// pre-outage figures.
+function applyOfflineStockDeduction(cartItems, branchId) {
+  cartItems.forEach(item => {
+    [posProducts, invProducts].forEach(list => {
+      const p = list.find(x => x.product_id === item.product_id);
+      if (!p) return;
+      if (item.selected_options && Object.keys(item.selected_options).length && p.variant_stock?.length) {
+        const vs = p.variant_stock.find(v => v.branch_id === branchId && JSON.stringify(v.options) === JSON.stringify(item.selected_options));
+        if (vs) vs.quantity = Math.max(Number(vs.quantity) - item.quantity, 0);
+      }
+      const bs = p.branch_stock?.find(b => b.branch_id === branchId);
+      if (bs) bs.quantity = Math.max(Number(bs.quantity) - item.quantity, 0);
+      p.quantity = Math.max(Number(p.quantity || 0) - item.quantity, 0);
+    });
+  });
+}
+
+async function updateOfflinePendingBadge() {
+  let pending = [];
+  try { pending = await getPendingOrders(); } catch (e) {}
+
+  const banner = document.getElementById('posOfflineBanner');
+  if (banner) {
+    if (!posIsOnline || pending.length) {
+      banner.style.display = 'flex';
+      banner.classList.toggle('pos-offline-banner--syncing', posIsOnline && pending.length > 0);
+      const textEl = document.getElementById('posOfflineBannerText');
+      if (textEl) {
+        textEl.textContent = !posIsOnline
+          ? "You're offline — Cash sales will be saved and synced automatically once reconnected."
+          : `Back online — syncing ${pending.length} queued order${pending.length !== 1 ? 's' : ''}...`;
+      }
+    } else {
+      banner.style.display = 'none';
+    }
+  }
+  const countEl = document.getElementById('posOfflinePendingCount');
+  if (countEl) {
+    countEl.textContent   = pending.length ? String(pending.length) : '';
+    countEl.style.display = pending.length ? '' : 'none';
+  }
+
+  // GCash needs a live reference check — disable it while offline and
+  // force the current selection back to Cash if GCash was active.
+  const gcashBtn = document.querySelector('.pos-pay-btn[onclick*="gcash"]');
+  if (gcashBtn) {
+    gcashBtn.disabled      = !posIsOnline;
+    gcashBtn.style.opacity = posIsOnline ? '' : '0.5';
+    gcashBtn.style.cursor  = posIsOnline ? '' : 'not-allowed';
+    if (!posIsOnline && selectedPayment === 'gcash') {
+      selectedPayment = 'walk_in_cash';
+      document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
+      document.querySelector('.pos-pay-btn[onclick*="walk_in_cash"]')?.classList.add('active');
+      document.getElementById('posRefNo').style.display     = 'none';
+      document.getElementById('posCashInput').style.display = 'flex';
+      validateCheckoutButton();
+    }
+  }
+}
+
+async function checkConnectivity() {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 4000);
+    const res = await fetch('/ping', { cache: 'no-store', signal: ctrl.signal });
+    clearTimeout(timer);
+    return res.ok || res.status === 204;
+  } catch (e) {
+    return false;
+  }
+}
+
+async function refreshConnectivity() {
+  const wasOffline = !posIsOnline;
+  posIsOnline = await checkConnectivity();
+  await updateOfflinePendingBadge();
+  if (posIsOnline && wasOffline) syncPendingOrders();
+}
+
+// Replays queued offline sales to the server one at a time, oldest first,
+// so stock gets deducted in the same order the walk-in sales actually
+// happened. A sale the server rejects (e.g. real stock has since dropped
+// further) stays in the queue for manual review instead of being dropped.
+async function syncPendingOrders() {
+  if (posSyncInProgress) return;
+  posSyncInProgress = true;
+  try {
+    const pending = (await getPendingOrders()).sort((a, b) => a.queued_at - b.queued_at);
+    let syncedCount = 0, failedCount = 0;
+    for (const order of pending) {
+      const { client_offline_id, queued_at, ...payload } = order;
+      try {
+        const res = await fetch('/api/staff/orders', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) {
+          await deletePendingOrder(client_offline_id);
+          syncedCount++;
+        } else {
+          failedCount++;
+        }
+      } catch (e) {
+        // Connection dropped again mid-sync — stop here; the rest stay
+        // queued for the next reconnect instead of firing out of order.
+        break;
+      }
+    }
+    if (syncedCount) {
+      invalidateSection('pos');       loadPosProducts();
+      invalidateSection('orders');    loadOrders();
+      invalidateSection('inventory'); loadInventory();
+      invalidateSection('summary');   loadSummary();
+      showToast(`${syncedCount} offline sale${syncedCount !== 1 ? 's' : ''} synced successfully.`);
+    }
+    if (failedCount) {
+      showToast(`${failedCount} offline sale${failedCount !== 1 ? 's' : ''} need review — stock may have changed.`, 'error');
+    }
+  } finally {
+    posSyncInProgress = false;
+    await updateOfflinePendingBadge();
+  }
+}
+
+function startConnectivityWatch() {
+  refreshConnectivity();
+  setInterval(refreshConnectivity, 15000);
+  window.addEventListener('online',  refreshConnectivity);
+  window.addEventListener('offline', refreshConnectivity);
+}
 
 // ══════════════════════════════════════════════════════
 // BRANCHES
@@ -1143,6 +1342,14 @@ async function processOrder() {
   }
 
   const refNo = document.getElementById('posGcashRef').value.trim().replace(/\s/g, '');
+  // GCash needs a live reference check — not available offline. The pay
+  // button is already disabled in this case (updateOfflinePendingBadge),
+  // this is just a safety net against a stale click.
+  if (!posIsOnline && selectedPayment === 'gcash') {
+    setButtonLoading(processBtn, false);
+    showToast('GCash is unavailable offline — switch to Cash.', 'error');
+    return;
+  }
   if (selectedPayment === 'gcash') {
     if (!refNo) {
       showToast('Please enter GCash reference number.', 'error');
@@ -1166,50 +1373,78 @@ async function processOrder() {
     }
   }
 
-  try {
-    const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
-    const quantity = orderItems.reduce((s, i) => s + i.quantity, 0);
-    const discSel  = document.getElementById('posDiscount');
-    const discOpt  = discSel?.options[discSel.selectedIndex];
-    const discPct  = discOpt?.dataset?.pct ? parseFloat(discOpt.dataset.pct) : 0;
-    const discId   = discSel?.value || null;
-    const discName = discPct > 0 ? discOpt.text.split('(')[0].trim() : null;
-    const discAmt  = subtotal * (discPct / 100);
-    const total    = subtotal - discAmt;
+  const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const quantity = orderItems.reduce((s, i) => s + i.quantity, 0);
+  const discSel  = document.getElementById('posDiscount');
+  const discOpt  = discSel?.options[discSel.selectedIndex];
+  const discPct  = discOpt?.dataset?.pct ? parseFloat(discOpt.dataset.pct) : 0;
+  const discId   = discSel?.value || null;
+  const discName = discPct > 0 ? discOpt.text.split('(')[0].trim() : null;
+  const discAmt  = subtotal * (discPct / 100);
+  const total    = subtotal - discAmt;
 
+  const orderPayload = {
+    order_type:      'walk_in',
+    quantity,
+    total,
+    ref_no:          refNo || null,
+    payment_method:  selectedPayment,
+    branch_id:       branchId,
+    cart_items:      orderItems.map(i => ({
+      product_id:       i.product_id,
+      quantity:         i.quantity,
+      price:            i.price,
+      selected_options: i.selected_options || {},
+    })),
+    customer_name:   document.getElementById('posCustomer').value.trim(),
+    discount_id:     discId,
+    discount_name:   discName,
+    discount_pct:    discPct || null,
+    discount_amount: discAmt || null,
+  };
+
+  // Snapshot receipt data BEFORE clearing the order (shared by both the
+  // online and offline-queued paths below).
+  const receiptItems    = [...orderItems];
+  const receiptReceived = parseFloat(document.getElementById('posCashReceived').value) || 0;
+  const receiptPayment  = selectedPayment;
+  const receiptRefNo    = document.getElementById('posGcashRef').value;
+  const receiptCustomer = document.getElementById('posCustomer')?.value?.trim() || '';
+  const receiptDiscount = { id: discId, name: discName, pct: discPct, amount: discAmt };
+
+  // ── Offline: queue the sale locally instead of hitting the server ──
+  if (!posIsOnline) {
+    try {
+      await addPendingOrder({
+        ...orderPayload,
+        is_offline_sync:    true,
+        client_offline_id: genOfflineId(),
+        queued_at:          Date.now(),
+      });
+      applyOfflineStockDeduction(orderPayload.cart_items, branchId);
+      await updateOfflinePendingBadge();
+      setButtonLoading(processBtn, false);
+      clearOrder();
+      renderPosProducts(posProducts); // reflect optimistic stock deduction
+      renderInvProducts(invProducts);
+      showToast('Offline — sale saved, will sync once reconnected.');
+      showReceipt({ order_id: 'OFFLINE-' + Date.now(), total }, receiptItems, receiptReceived, receiptPayment, receiptRefNo, receiptCustomer, receiptDiscount);
+    } catch (e) {
+      setButtonLoading(processBtn, false);
+      showToast('Could not save offline sale on this device.', 'error');
+    }
+    return;
+  }
+
+  try {
     const res = await fetch('/api/staff/orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        order_type:      'walk_in',
-        quantity,
-        total,
-        ref_no:          refNo || null,
-        payment_method:  selectedPayment,
-        branch_id:       branchId,
-        cart_items:      orderItems.map(i => ({
-          product_id:       i.product_id,
-          quantity:         i.quantity,
-          price:            i.price,
-          selected_options: i.selected_options || {},
-        })),
-        customer_name:   document.getElementById('posCustomer').value.trim(),
-        discount_id:     discId,
-        discount_name:   discName,
-        discount_pct:    discPct || null,
-        discount_amount: discAmt || null,
-      }),
+      body: JSON.stringify(orderPayload),
     });
 
     const data = await res.json();
     if (res.ok) {
-      // Capture receipt data BEFORE clearing order
-      const receiptItems    = [...orderItems];
-      const receiptReceived = parseFloat(document.getElementById('posCashReceived').value) || 0;
-      const receiptPayment  = selectedPayment;
-      const receiptRefNo    = document.getElementById('posGcashRef').value;
-      const receiptCustomer = document.getElementById('posCustomer')?.value?.trim() || '';
-      const receiptDiscount = { id: discId, name: discName, pct: discPct, amount: discAmt };
       setButtonLoading(processBtn, false);
       clearOrder();
       invalidateSection('pos'); loadPosProducts();
@@ -1223,8 +1458,29 @@ async function processOrder() {
       showToast(data.error || 'Failed to process order.', 'error');
     }
   } catch (e) {
-    setButtonLoading(processBtn, false);
-    showToast('Error processing order.', 'error');
+    // The 15s connectivity poll hasn't caught up yet — the connection just
+    // dropped mid-click, so fall back to the offline queue instead of
+    // losing the sale.
+    try {
+      await addPendingOrder({
+        ...orderPayload,
+        is_offline_sync:    true,
+        client_offline_id: genOfflineId(),
+        queued_at:          Date.now(),
+      });
+      applyOfflineStockDeduction(orderPayload.cart_items, branchId);
+      posIsOnline = false;
+      await updateOfflinePendingBadge();
+      setButtonLoading(processBtn, false);
+      clearOrder();
+      renderPosProducts(posProducts);
+      renderInvProducts(invProducts);
+      showToast('Connection lost — sale saved offline, will sync once reconnected.');
+      showReceipt({ order_id: 'OFFLINE-' + Date.now(), total }, receiptItems, receiptReceived, receiptPayment, receiptRefNo, receiptCustomer, receiptDiscount);
+    } catch (e2) {
+      setButtonLoading(processBtn, false);
+      showToast('Error processing order.', 'error');
+    }
   }
 }
 
@@ -1267,6 +1523,10 @@ function showReceipt(data, items, received, payment, refNo, customerName = '', o
       <span>Koronadal City, South Cotabato</span><br>
       <span style="font-size:11px;color:var(--text-muted);">${now.toLocaleString('en-PH')}</span>
     </div>
+    ${String(data.order_id || '').startsWith('OFFLINE-') ? `
+    <div style="text-align:center;background:#fef3c7;color:#92400e;border:1px solid #fbbf24;border-radius:6px;padding:4px 8px;font-size:11px;font-weight:700;margin-bottom:6px;">
+      ⚠ OFFLINE SALE — PENDING SYNC
+    </div>` : ''}
     <hr class="receipt-divider"/>
     <div style="margin-bottom:0.5rem;font-size:11px;">
       <div class="receipt-row">
@@ -1838,7 +2098,7 @@ function renderStaffOrders(orders) {
         <tr>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td>${badge(o.order_type)}</td>
+          <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
           <td>${o.order_item?.length || 0} item(s)</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
@@ -2017,7 +2277,7 @@ function renderStaffOrders(orders) {
         <tr>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td>${badge(o.order_type)}</td>
+          <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
           <td>${o.order_item?.length || 0} item(s)</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
@@ -2397,7 +2657,7 @@ function renderSummaryForRange(fromStr, toStr) {
         <tr>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td>${badge(o.order_type)}</td>
+          <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${peso(o.total)}</td>
           <td>${o.created_at ? new Date(o.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) : '—'}</td>
@@ -2810,6 +3070,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   await loadBranches();
   _loadedSections.add('pos'); await loadPosProducts();
   await loadPosDiscounts();
+  startConnectivityWatch();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');

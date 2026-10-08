@@ -540,6 +540,12 @@ function shortId(id) {
   return id ? id.slice(0, 8).toUpperCase() : '—';
 }
 
+function offlineSyncTag(o) {
+  return o.is_offline_sync
+    ? ' <span title="Made while offline, synced once reconnected" style="display:inline-block;margin-top:3px;background:rgba(245,158,11,0.15);color:#b45309;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:10px;font-weight:600;padding:1px 6px;">⚡ Offline Sync</span>'
+    : '';
+}
+
 // ══════════════════════════════════════════════════════
 // GLOBAL STATE
 // ══════════════════════════════════════════════════════
@@ -724,7 +730,7 @@ async function loadOverview() {
           <tr>
             <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
             <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-            <td>${badge(o.order_type)}</td>
+            <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
             <td>${peso(o.total)}</td>
             <td>${badge(o.status)}</td>
           </tr>`).join('')
@@ -961,6 +967,9 @@ function renderProducts(products) {
                 <button class="btn-icon" onclick="event.stopPropagation();editProduct('${p.product_id}')" title="Edit">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
+                <button class="btn-icon" onclick="event.stopPropagation();viewAdminProductDetails('${p.product_id}')" title="View Details">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+                </button>
                 <button class="btn-icon"
                   ${(() => { const totalStock = (p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0); const noStock = totalStock === 0; return noStock ? 'disabled title="No stock available" style="opacity:0.35;cursor:not-allowed;"' : `style="color:${p.status === 'active' ? '#ef4444' : '#16a34a'}" title="${p.status === 'active' ? 'Deactivate' : 'Activate'}"`; })()}
                   onclick="event.stopPropagation();openProductToggleModal('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', '${p.status}', ${(p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0)})">
@@ -983,6 +992,121 @@ function changeProductsPage(page) {
   renderProducts(_prodFilteredCache);
 }
 window.changeProductsPage = changeProductsPage;
+
+// ─── Read-only Product Details Modal (Products module) ─────────────
+// Slideshow state for the admin "View Details" product modal — a module-
+// level pair since the modal's nav buttons are plain inline onclick handlers
+// (no component state to close over).
+let _pdImages      = [];
+let _pdImageIndex  = 0;
+
+function pdSlideshowNav(dir) {
+  const newIndex = _pdImageIndex + dir;
+  if (newIndex < 0 || newIndex >= _pdImages.length) return; // no wraparound — ends are dead ends
+  _pdImageIndex = newIndex;
+  const img     = document.getElementById('pdSlideshowImg');
+  const counter = document.getElementById('pdSlideshowCounter');
+  const prevBtn = document.getElementById('pdSlideshowPrevBtn');
+  const nextBtn = document.getElementById('pdSlideshowNextBtn');
+  if (img)     img.src             = _pdImages[_pdImageIndex];
+  if (counter) counter.textContent = `${_pdImageIndex + 1} / ${_pdImages.length}`;
+  if (prevBtn) prevBtn.style.display = _pdImageIndex === 0 ? 'none' : 'flex';
+  if (nextBtn) nextBtn.style.display = _pdImageIndex === _pdImages.length - 1 ? 'none' : 'flex';
+}
+window.pdSlideshowNav = pdSlideshowNav;
+
+function viewAdminProductDetails(productId) {
+  const p = allProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+
+  const disc           = Array.isArray(p.discount) ? p.discount[0] : p.discount;
+  const hasDiscount     = disc && Number(disc.percentage) > 0;
+  const discountedPrice = hasDiscount ? Number(p.price) * (1 - Number(disc.percentage) / 100) : null;
+
+  const totalStock = (p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0);
+
+  // ─── Image slideshow (next/prev when the product has multiple images) ───
+  _pdImages     = (p.image_urls && p.image_urls.length) ? p.image_urls : (p.image_url ? [p.image_url] : []);
+  _pdImageIndex = 0;
+  const hasMultipleImages = _pdImages.length > 1;
+
+  const imgHtml = _pdImages.length
+    ? `
+      <div style="position:relative;width:100%;height:210px;border-radius:12px;overflow:hidden;background:var(--surface-2);">
+        <img id="pdSlideshowImg" src="${_pdImages[0]}" style="width:100%;height:100%;object-fit:contain;display:block;" alt="${p.product_name}"/>
+        ${hasMultipleImages ? `
+          <button id="pdSlideshowPrevBtn" onclick="pdSlideshowNav(-1)" title="Previous image" style="display:none;position:absolute;top:50%;left:10px;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;border:none;background:rgba(0,0,0,0.55);color:#fff;cursor:pointer;align-items:center;justify-content:center;font-size:16px;line-height:1;">&#8249;</button>
+          <button id="pdSlideshowNextBtn" onclick="pdSlideshowNav(1)" title="Next image" style="display:flex;position:absolute;top:50%;right:10px;transform:translateY(-50%);width:30px;height:30px;border-radius:50%;border:none;background:rgba(0,0,0,0.55);color:#fff;cursor:pointer;align-items:center;justify-content:center;font-size:16px;line-height:1;">&#8250;</button>
+          <div id="pdSlideshowCounter" style="position:absolute;bottom:10px;right:12px;background:rgba(0,0,0,0.6);color:#fff;font-size:11px;font-weight:700;padding:2px 9px;border-radius:999px;">1 / ${_pdImages.length}</div>
+        ` : ''}
+      </div>`
+    : `<div class="product-img-placeholder" style="width:100%;height:210px;border-radius:12px;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:40px;height:40px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
+
+  const branchRows = (p.branch_stock || []).length
+    ? (p.branch_stock || []).map(bs => `
+        <div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px dashed var(--border);">
+          <span>${bs.branch?.branch_name || 'Branch'}</span>
+          <span style="font-weight:600;">${bs.quantity} units</span>
+        </div>`).join('')
+    : '<div style="font-size:12px;color:var(--text-muted);">No branch stock records</div>';
+
+  const groups = p.option_groups || [];
+  const variantsHtml = groups.length
+    ? `<div style="margin-top:12px;">
+         <label class="form-label" style="font-size:11px;">Available Variants</label>
+         <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
+           ${groups.map(g => `
+             <div style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;">
+               <strong>${g.label}:</strong> ${(g.choices || []).join(', ') || '—'}
+             </div>`).join('')}
+         </div>
+       </div>`
+    : '';
+
+  showModal(`
+    <div style="padding:1rem 1rem 0.75rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <strong style="font-size:15px;">Product Details</strong>
+      <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">&times;</button>
+    </div>
+    <div style="padding:1rem;">
+      ${imgHtml}
+      <div style="margin-top:14px;margin-bottom:16px;">
+        <div style="font-size:20px;font-weight:800;color:var(--text);line-height:1.25;">${p.product_name}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">${p.brand || '—'} • ${p.category || '—'}</div>
+        <div style="margin-top:8px;">${badge(p.status)}</div>
+      </div>
+      <div class="form-row-2" style="margin-bottom:10px;">
+        <div>
+          <label class="form-label" style="font-size:11px;">Price</label>
+          ${hasDiscount
+            ? `<div style="font-size:12px;color:var(--text-muted);text-decoration:line-through;">${peso(p.price)}</div>
+               <div style="font-weight:800;font-size:20px;color:var(--g-400);">${peso(discountedPrice)} <span style="font-size:12px;font-weight:700;">(${disc.percentage}% OFF)</span></div>`
+            : `<div style="font-weight:800;font-size:20px;color:var(--text);">${peso(p.price)}</div>`
+          }
+        </div>
+        <div>
+          <label class="form-label" style="font-size:11px;">Total Stock (all branches)</label>
+          <div style="font-weight:800;font-size:20px;color:var(--text);">${totalStock} <span style="font-size:12px;font-weight:600;color:var(--text-muted);">units</span></div>
+        </div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label class="form-label" style="font-size:11px;">Stock by Branch</label>
+        <div style="margin-top:4px;">${branchRows}</div>
+      </div>
+      ${p.description ? `
+        <div style="margin-bottom:10px;">
+          <label class="form-label" style="font-size:11px;">Description</label>
+          <div style="font-size:13px;color:var(--text-muted);margin-top:2px;">${p.description}</div>
+        </div>` : ''}
+      ${variantsHtml}
+      <div style="display:flex;gap:16px;margin-top:14px;font-size:11px;color:var(--text-muted);">
+        <span>Created: ${p.created_at ? new Date(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+        <span>Updated: ${p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+      </div>
+    </div>
+  `);
+}
+window.viewAdminProductDetails = viewAdminProductDetails;
 
 function filterProducts(q) {
   productsPage = 1;
@@ -2744,7 +2868,7 @@ function renderOrders(orders) {
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${(() => { const s = Array.isArray(o.staff) ? o.staff[0] : o.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</td>
-          <td>${badge(o.order_type)}</td>
+          <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${(() => {

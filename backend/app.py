@@ -571,6 +571,17 @@ def logout():
 def ping():
     return '', 204
 
+# ─── Staff POS offline app-shell service worker ───────
+# Served from the site root (not /static/js/sw.js) so its default scope
+# covers the whole origin — a service worker's scope is otherwise limited
+# to the directory it's served from.
+@app.route('/sw.js')
+def staff_service_worker():
+    response = send_file(os.path.join(app.static_folder, 'js', 'sw.js'))
+    response.headers['Service-Worker-Allowed'] = '/'
+    response.headers['Cache-Control']          = 'no-cache'
+    return response
+
 # ══════════════════════════════════════════════════════
 # MOBILE API ROUTES — React Native Customer App
 # ══════════════════════════════════════════════════════
@@ -2732,7 +2743,7 @@ def admin_get_orders():
             limit = 500
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).execute()
 
         # Get branch lookup
@@ -3046,7 +3057,7 @@ def staff_get_orders():
         branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
 
         query = supabase.table('order').select(
-            'order_id, total, status, order_type, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit)
 
         # Filter to this branch's orders only
@@ -3091,6 +3102,7 @@ def staff_place_order():
         quantity       = data.get('quantity', 0)
         total          = data.get('total', 0)
         branch_id      = data.get('branch_id')  # which branch processed this sale
+        is_offline_sync = bool(data.get('is_offline_sync', False))  # True when this sale was made during a connection outage and is only now reaching the server
 
         if not cart_items or not payment_method:
             return jsonify({'error': 'Cart items and payment method are required.'}), 400
@@ -3100,12 +3112,13 @@ def staff_place_order():
 
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
-            'staff_id':   session.get('staff_id'),
-            'branch_id':  branch_id,
-            'order_type': order_type,
-            'quantity':   quantity,
-            'total':      total,
-            'status':     'completed',
+            'staff_id':        session.get('staff_id'),
+            'branch_id':       branch_id,
+            'order_type':      order_type,
+            'quantity':        quantity,
+            'total':           total,
+            'status':          'completed',
+            'is_offline_sync': is_offline_sync,
         }).execute()
 
         order_id = order_res.data[0]['order_id']

@@ -324,7 +324,38 @@
 }
 .pos-pay-btn:hover { border-color: var(--g-600); color: var(--g-400); }
 .pos-pay-btn.active { background: rgba(22,163,74,0.12); border-color: var(--g-600); color: var(--g-400); }
+.pos-pay-btn:disabled, .pos-pay-btn:disabled:hover { border-color: var(--border); color: var(--text-muted); }
 .pos-refno, .pos-cash-input { display: flex; flex-direction: column; gap: 6px; }
+
+/* ─── Offline POS Banner ─── */
+.pos-offline-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(245,158,11,0.12);
+  border: 1px solid rgba(245,158,11,0.4);
+  color: #b45309;
+  border-radius: var(--radius-sm);
+  padding: 10px 16px;
+  margin-bottom: 1rem;
+  font-size: 13px;
+  font-weight: 500;
+}
+.pos-offline-banner--syncing {
+  background: rgba(22,163,74,0.10);
+  border-color: rgba(22,163,74,0.35);
+  color: var(--g-700, #15803d);
+}
+.pos-offline-banner-text { flex: 1; }
+.pos-offline-pending-count {
+  background: #b45309;
+  color: #fff;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 8px;
+  flex-shrink: 0;
+}
 
 /* ─── Checkout Button ─── */
 .pos-checkout-btn {
