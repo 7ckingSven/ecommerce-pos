@@ -3662,7 +3662,7 @@ let assignProductState      = []; // { product_id, product_name, checked }
 
 async function loadDiscounts() {
   // ── Skeleton ──
-  skTable('discountsBody',          ['sk-cell-full','sk-cell-md','sk-cell-full','sk-cell-sm'], 5);
+  skTable('discountsBody',          ['sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm'], 5);
   skTable('discountedProductsBody', ['sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 5);
   // ─────────────
   try {
@@ -3720,14 +3720,10 @@ function renderDiscounts(discounts) {
         const status = getDiscountStatus(d);
         return `
           <tr style="${status.ended ? 'opacity:0.6;' : ''}">
-            <td>
-              <strong>${d.discount_name}</strong>
-              <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                Created ${toUtcDate(d.created_at).toLocaleDateString('en-PH')}
-              </div>
-              ${d.starts_at ? `<div style="font-size:11px;color:var(--text-muted);">Starts: ${toUtcDate(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
-              ${d.ends_at   ? `<div style="font-size:11px;color:var(--text-muted);">Ends: ${toUtcDate(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
-            </td>
+            <td><strong>${d.discount_name}</strong></td>
+            <td style="font-size:13px;color:var(--text-muted);white-space:nowrap;">${d.created_at ? toUtcDate(d.created_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric'}) : '—'}</td>
+            <td style="font-size:13px;color:var(--text-muted);white-space:nowrap;">${d.starts_at ? toUtcDate(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+            <td style="font-size:13px;color:var(--text-muted);white-space:nowrap;">${d.ends_at ? toUtcDate(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
             <td>
               <span style="font-size:20px;font-weight:700;color:${status.ended ? '#ef4444' : 'var(--g-400)'};">${d.percentage}%</span>
               <div style="font-size:11px;color:var(--text-muted);">off original price</div>
@@ -3758,7 +3754,7 @@ function renderDiscounts(discounts) {
             </td>
           </tr>`;
       }).join('')
-    : '<tr><td colspan="4" class="table-empty">No discounts yet. Click "Add Discount" to create one.</td></tr>';
+    : '<tr><td colspan="7" class="table-empty">No discounts yet. Click "Add Discount" to create one.</td></tr>';
   renderPagerCustom('discountsPagination', discounts.length, discountsPage, DISC_PAGE_SIZE, 'changeDiscountsPage');
 }
 
