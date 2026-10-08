@@ -159,7 +159,7 @@ function renderPagerSized(containerId, total, currentPage, pageSize, fnName) {
 }
 
 function changeStaffOrdersPage(p) { staffOrdersPage = p; applyStaffOrderFilters(); }
-function changeStaffInvPage(p)     { staffInvPage = p;     renderInvProducts(invProducts); }
+function changeStaffInvPage(p)     { staffInvPage = p;     applyStaffStockFilters(); }
 function changeStaffHistoryPage(p) { staffHistoryPage = p; renderInvHistory(allInvHistory); }
 window.changeStaffHistoryPage = changeStaffHistoryPage;
 window.changeStaffOrdersPage = changeStaffOrdersPage;
