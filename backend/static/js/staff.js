@@ -218,8 +218,8 @@ function restoreStaffExpandedRows(expanded) {
           var chips = data.map(function(vs) {
             var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
             var qty   = vs.quantity || 0;
-            var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
-            var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+            var color = qty === 0 ? 'var(--text)' : qty <= 5 ? '#ef4444' : qty <= 10 ? '#f59e0b' : 'var(--g-400)';
+            var bg    = qty === 0 ? 'rgba(107,114,128,0.08)' : qty <= 5 ? 'rgba(239,68,68,0.05)' : qty <= 10 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
             return '<div style="padding:6px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
               + '<span style="color:var(--text-primary);font-weight:500;">' + opts + '</span>'
               + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
@@ -1838,8 +1838,8 @@ async function toggleStaffVariantRow(productId, btnEl) {
     var chips = data.map(function(vs) {
       var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
       var qty   = vs.quantity || 0;
-      var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
-      var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+      var color = qty === 0 ? 'var(--text)' : qty <= 5 ? '#ef4444' : qty <= 10 ? '#f59e0b' : 'var(--g-400)';
+      var bg    = qty === 0 ? 'rgba(107,114,128,0.08)' : qty <= 5 ? 'rgba(239,68,68,0.05)' : qty <= 10 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
       return '<div style="padding:6px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
         + '<span style="color:var(--text-primary);font-weight:500;">' + opts + '</span>'
         + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
@@ -1861,7 +1861,7 @@ function renderInvProducts(products) {
   document.getElementById('invProductsBody').innerHTML = paged.length
     ? paged.map(p => {
         const { qty, level, variantDriven } = staffStockInfo(p);
-        const levelColor = level === 'out' ? '#ef4444' : (level === 'critical' || level === 'low') ? '#eab308' : 'var(--g-400)';
+        const levelColor = level === 'out' ? 'var(--text)' : level === 'critical' ? '#ef4444' : level === 'low' ? '#f59e0b' : 'var(--g-400)';
         const variantNote = variantDriven ? ' <span style="font-size:10px;opacity:0.75;">(variant)</span>' : '';
         return `
         <tr>
@@ -1881,7 +1881,7 @@ function renderInvProducts(products) {
             </span>${variantNote}
           </td>
           <td>${level === 'out'
-            ? '<span class="badge badge--red">Out of Stock</span>'
+            ? '<span class="badge badge--gray">Out of Stock</span>'
             : level === 'critical'
               ? '<span class="badge badge--red">Critical Level</span>'
               : level === 'low'
@@ -1910,7 +1910,7 @@ function viewStaffProductDetails(productId) {
   if (!p) return;
 
   const { qty, level, variantDriven } = staffStockInfo(p);
-  const stockColor = level === 'out' ? '#ef4444' : (level === 'critical' || level === 'low') ? '#eab308' : 'var(--g-400)';
+  const stockColor = level === 'out' ? 'var(--text)' : level === 'critical' ? '#ef4444' : level === 'low' ? '#f59e0b' : 'var(--g-400)';
   const imgHtml = p.image_url
     ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;background:var(--surface-2);flex-shrink:0;" alt="${p.product_name}"/>`
     : `<div class="product-img-placeholder" style="width:80px;height:80px;border-radius:10px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:28px;height:28px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;

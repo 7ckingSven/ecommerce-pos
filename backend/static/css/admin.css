@@ -966,9 +966,10 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   font-weight: 700;
 }
 
-.branch-stock-qty.in-stock  { color: #16a34a; }
-.branch-stock-qty.low-stock { color: #f59e0b; }
-.branch-stock-qty.out-stock { color: #ef4444; }
+.branch-stock-qty.in-stock       { color: #16a34a; }           /* In Stock (11+ units) — green */
+.branch-stock-qty.low-stock      { color: #f59e0b; }           /* Low Stock (6–10 units) — orange */
+.branch-stock-qty.critical-stock { color: #ef4444; }           /* Critical Level (1–5 units) — red */
+.branch-stock-qty.out-stock      { color: var(--text); }       /* Out of Stock (0 units) — black/theme text */
 
 /* ============================================================
    CUSTOM SCROLLBAR — Green Theme (Admin)

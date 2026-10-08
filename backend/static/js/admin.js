@@ -248,8 +248,8 @@ function restoreExpandedRows(expanded) {
           cont.innerHTML = data.map(vs => {
             const opts  = Object.entries(vs.options || {}).map(e => e[0] + ': ' + e[1]).join(', ');
             const qty   = vs.quantity || 0;
-            const color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
-            const bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+            const color = qty === 0 ? 'var(--text)' : qty <= 5 ? '#ef4444' : qty <= 10 ? '#f59e0b' : 'var(--g-400)';
+            const bg    = qty === 0 ? 'rgba(107,114,128,0.08)' : qty <= 5 ? 'rgba(239,68,68,0.05)' : qty <= 10 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
             return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;padding:3px 8px;border-radius:4px;background:' + bg + ';border:1px solid ' + color + ';margin:2px;">'
               + '<span style="color:var(--text-muted);">' + opts + '</span>'
               + '<strong style="color:' + color + ';">' + qty + '</strong>'
@@ -935,8 +935,8 @@ async function toggleVariantRow(productId, btnEl) {
       var chips = items.map(function(vs) {
         var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
         var qty   = vs.quantity || 0;
-        var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
-        var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+        var color = qty === 0 ? 'var(--text)' : qty <= 5 ? '#ef4444' : qty <= 10 ? '#f59e0b' : 'var(--g-400)';
+        var bg    = qty === 0 ? 'rgba(107,114,128,0.08)' : qty <= 5 ? 'rgba(239,68,68,0.05)' : qty <= 10 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
         return '<div style="padding:6px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
           + '<span style="color:var(--text-primary);font-weight:500;">' + opts + '</span>'
           + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
@@ -1704,9 +1704,9 @@ function updateBranchStockSummary(products) {
         ? '<img src="' + (i.image_urls?.length ? i.image_urls[0] : i.image_url) + '" class="product-img-cell" style="width:32px;height:32px;" alt="' + i.product_name + '"/>'
         : '<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
       const { level: bqLevel, variantDriven: bqVariantDriven } = bsWorstLevel(i);
-      var qtyClass = bqLevel === 'out' ? 'out-stock' : (bqLevel === 'critical' || bqLevel === 'low') ? 'low-stock' : 'in-stock';
+      var qtyClass = bqLevel === 'out' ? 'out-stock' : bqLevel === 'critical' ? 'critical-stock' : bqLevel === 'low' ? 'low-stock' : 'in-stock';
       var badge    = bqLevel === 'out'
-        ? '<span class="badge badge--red">Out of Stock</span>'
+        ? '<span class="badge badge--gray">Out of Stock</span>'
         : bqLevel === 'critical'
           ? '<span class="badge badge--red">Critical Level</span>'
           : bqLevel === 'low'
@@ -1795,8 +1795,8 @@ async function toggleInvVariantRow(productId, branchId, btnEl) {
     var chips = data.map(function(vs) {
       var opts  = Object.entries(vs.options || {}).map(function(e) { return e[0] + ': ' + e[1]; }).join(', ');
       var qty   = vs.quantity || 0;
-      var color = qty === 0 ? '#ef4444' : qty <= 5 ? '#f59e0b' : 'var(--g-400)';
-      var bg    = qty === 0 ? 'rgba(239,68,68,0.05)' : qty <= 5 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+      var color = qty === 0 ? 'var(--text)' : qty <= 5 ? '#ef4444' : qty <= 10 ? '#f59e0b' : 'var(--g-400)';
+      var bg    = qty === 0 ? 'rgba(107,114,128,0.08)' : qty <= 5 ? 'rgba(239,68,68,0.05)' : qty <= 10 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
       return '<div style="padding:5px 10px;border-radius:8px;border:1.5px solid ' + color + ';background:' + bg + ';font-size:12px;display:inline-block;margin:2px;">'
         + '<span style="font-weight:500;">' + opts + '</span>'
         + '<span style="margin-left:8px;font-weight:700;color:' + color + ';">' + qty + ' units</span>'
