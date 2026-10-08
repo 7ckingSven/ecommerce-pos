@@ -453,8 +453,11 @@ export default function ProductDetailScreen({ route, navigation }) {
         </View>
       )}
 
-      {/* Action Buttons */}
-      <View style={styles.footer}>
+      {/* Action Buttons — extra bottom padding clears the floating
+          translucent tab bar (AppNavigator's tabBarStyle is position:
+          'absolute' with height 60 + insets.bottom, so it overlaps
+          whatever sits at the true bottom of the screen). */}
+      <View style={[styles.footer, { paddingBottom: SPACING.md + 60 + insets.bottom }]}>
         <View style={styles.buttonRow}>
           {/* Add to Cart Button */}
           <TouchableOpacity
