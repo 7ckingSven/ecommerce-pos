@@ -647,11 +647,17 @@ async function loadOverview() {
       : Number(p.quantity);
 
     // Per-branch stock checks — two-tier threshold
-    // Critical: any branch has 1–5 units
-    // Low Stock: any branch has 6–10 units (but NOT critical)
-    const hasAnyBranchCritical = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5);
-    const hasAnyBranchLow      = p => !hasAnyBranchCritical(p) && p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
-    const hasAnyBranchZero     = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0);
+    // Critical: any branch (or any variant within a branch) has 1–5 units
+    // Low Stock: any branch (or any variant) has 6–10 units (but NOT critical)
+    // Checking variant_stock alongside branch_stock means a single low/critical/
+    // out-of-stock variant now trips the alert even when the product's other
+    // variants (and therefore the branch's aggregate total) look healthy.
+    const critQ = q => Number(q) > 0 && Number(q) <= 5;
+    const lowQ  = q => Number(q) > 0 && Number(q) <= 10;
+    const hasAnyBranchCritical = p => p.branch_stock?.some(bs => critQ(bs.quantity)) || p.variant_stock?.some(vs => critQ(vs.quantity));
+    const hasAnyBranchLow      = p => !hasAnyBranchCritical(p) && (p.branch_stock?.some(bs => lowQ(bs.quantity)) || p.variant_stock?.some(vs => lowQ(vs.quantity)));
+    const hasAnyBranchZero     = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0) || p.variant_stock?.some(vs => Number(vs.quantity) === 0);
+    const hasVariantAlert      = (p, checkFn) => (p.variant_stock || []).some(vs => checkFn(vs.quantity));
 
     const criticalStock = activeProducts.filter(p => hasAnyBranchCritical(p));
     const lowStock      = activeProducts.filter(p => hasAnyBranchLow(p));
@@ -734,14 +740,17 @@ async function loadOverview() {
           const branchBreakdown = p.branch_stock?.length
             ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' / ')
             : `${getTotal(p)}`;
-          const isCritical = p._alertLevel === 'critical';
+          const isCritical  = p._alertLevel === 'critical';
+          // Flag it when the trigger is a variant whose branch aggregate still looks fine —
+          // otherwise the admin sees a healthy-looking number and wonders why it's listed.
+          const variantOnly = hasVariantAlert(p, isCritical ? critQ : lowQ) && !(isCritical ? p.branch_stock?.some(bs => critQ(bs.quantity)) : p.branch_stock?.some(bs => lowQ(bs.quantity)));
           const levelBadge = isCritical
             ? '<span style="background:rgba(239,68,68,0.15);color:#ef4444;border:1px solid rgba(239,68,68,0.4);border-radius:999px;font-size:11px;padding:2px 8px;font-weight:600;">🔴 Critical</span>'
             : '<span style="background:rgba(245,158,11,0.15);color:#f59e0b;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:11px;padding:2px 8px;font-weight:600;">🟡 Low Stock</span>';
           return `<tr>
             <td>${p.product_name}</td>
             <td>${p.category}</td>
-            <td><span style="color:${isCritical ? '#ef4444' : '#f59e0b'};font-weight:600;">${branchBreakdown}</span></td>
+            <td><span style="color:${isCritical ? '#ef4444' : '#f59e0b'};font-weight:600;">${branchBreakdown}</span>${variantOnly ? ' <span style="font-size:11px;opacity:0.75;">(variant-level)</span>' : ''}</td>
             <td>${levelBadge}</td>
           </tr>`;
         }).join('')
@@ -803,6 +812,21 @@ async function loadProducts() {
     ]);
     allProducts  = await prodRes.json();
     allDiscounts = await discRes.json();
+
+    // Total / Active / Inactive summary — always reflects the full catalog,
+    // not whatever the current search/category/brand/branch filter shows.
+    const summaryEl = document.getElementById('productsCountSummary');
+    if (summaryEl) {
+      const totalCount    = allProducts.length;
+      const activeCount   = allProducts.filter(p => p.status === 'active').length;
+      const inactiveCount = totalCount - activeCount;
+      const pill = (count, label, color, bg, border) =>
+        `<span style="background:${bg};color:${color};border:1px solid ${border};border-radius:999px;padding:3px 10px;font-size:12px;font-weight:700;">${count} ${label}</span>`;
+      summaryEl.innerHTML =
+        pill(totalCount,    'Products', 'var(--text)',   'var(--surface-2)',        'var(--border)') +
+        pill(activeCount,   'Active',   'var(--g-500)',  'rgba(22,163,74,0.14)',    'rgba(22,163,74,0.3)') +
+        pill(inactiveCount, 'Inactive', '#9ca3af',        'rgba(107,114,128,0.14)', 'rgba(107,114,128,0.3)');
+    }
 
     renderProducts(allProducts);
 
@@ -971,23 +995,40 @@ function filterProducts(q) {
 
 function filterByCategory(cat) {
   productsPage = 1;
-  const brand = document.getElementById('brandFilter')?.value || '';
+  const brand  = document.getElementById('brandFilter')?.value || '';
+  const status = document.getElementById('productStatusFilter')?.value || '';
   let filtered = cat
     ? allProducts.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase())
     : allProducts;
-  if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand.trim());
+  if (brand)  filtered = filtered.filter(p => p.brand?.trim() === brand.trim());
+  if (status) filtered = filtered.filter(p => p.status === status);
   renderProducts(filtered);
 }
 
 function filterByBrand(brand) {
   productsPage = 1;
-  const cat = document.getElementById('categoryFilter')?.value || '';
+  const cat    = document.getElementById('categoryFilter')?.value || '';
+  const status = document.getElementById('productStatusFilter')?.value || '';
   let filtered = brand
     ? allProducts.filter(p => p.brand?.trim() === brand.trim())
     : allProducts;
-  if (cat) filtered = filtered.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase());
+  if (cat)    filtered = filtered.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase());
+  if (status) filtered = filtered.filter(p => p.status === status);
   renderProducts(filtered);
 }
+
+function filterByStatus(status) {
+  productsPage = 1;
+  const cat   = document.getElementById('categoryFilter')?.value || '';
+  const brand = document.getElementById('brandFilter')?.value || '';
+  let filtered = status
+    ? allProducts.filter(p => p.status === status)
+    : allProducts;
+  if (cat)   filtered = filtered.filter(p => p.category?.trim().toUpperCase() === cat.trim().toUpperCase());
+  if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand.trim());
+  renderProducts(filtered);
+}
+window.filterByStatus = filterByStatus;
 
 // Product Modal
 function openProductModal(product = null) {
@@ -1459,7 +1500,9 @@ function updateBranchStockSummary(products) {
   const wrap = document.getElementById('branchStockSummary');
   if (!wrap) return;
 
-  // Group by branch — store product_id for variant lookup
+  // Group by branch — store product_id for variant lookup, plus that branch's
+  // variant_stock rows so the status/filter below can catch a single low/
+  // critical/out-of-stock variant even when the branch's aggregate qty is fine.
   const branchMap = {};
   products.forEach(p => {
     (p.branch_stock || []).forEach(bs => {
@@ -1467,15 +1510,35 @@ function updateBranchStockSummary(products) {
       const branchId = bs.branch_id;
       if (!branchMap[name]) branchMap[name] = { branch_id: branchId, items: [] };
       branchMap[name].items.push({
-        product_id:   p.product_id,
-        product_name: p.product_name,
-        quantity:     bs.quantity,
-        image_url:    p.image_url,
-        image_urls:   p.image_urls,
+        product_id:    p.product_id,
+        product_name:  p.product_name,
+        quantity:      bs.quantity,
+        variant_stock: (p.variant_stock || []).filter(vs => vs.branch_id === branchId),
+        image_url:     p.image_url,
+        image_urls:    p.image_urls,
         option_groups: p.option_groups || [],
       });
     });
   });
+
+  // Worst alert level across the branch's aggregate qty AND its variant_stock rows.
+  const bsLevelOf = q => {
+    q = Number(q);
+    if (q === 0) return 'out';
+    if (q > 0 && q <= 5) return 'critical';
+    if (q > 0 && q <= 10) return 'low';
+    return 'ok';
+  };
+  const bsRank = { out: 3, critical: 2, low: 1, ok: 0 };
+  const bsWorstLevel = i => {
+    let level = bsLevelOf(i.quantity);
+    let variantDriven = false;
+    (i.variant_stock || []).forEach(vs => {
+      const l = bsLevelOf(vs.quantity);
+      if (bsRank[l] > bsRank[level]) { level = l; variantDriven = true; }
+    });
+    return { level, variantDriven };
+  };
 
   if (!Object.keys(branchMap).length) {
     if (allBranchProducts.length > 0) {
@@ -1490,10 +1553,10 @@ function updateBranchStockSummary(products) {
   Object.keys(branchMap).forEach(function(branch) {
     var branchId  = branchMap[branch].branch_id;
     var allItems  = branchMap[branch].items.filter(i => {
-      const q = Number(i.quantity);
-      if (branchStockLevelVal === 'critical_stock' && !(q > 0 && q <= 5))  return false;
-      if (branchStockLevelVal === 'low_stock'      && !(q > 5 && q <= 10)) return false;
-      if (branchStockLevelVal === 'out_of_stock'   && q !== 0)             return false;
+      const { level } = bsWorstLevel(i);
+      if (branchStockLevelVal === 'critical_stock' && level !== 'critical') return false;
+      if (branchStockLevelVal === 'low_stock'      && level !== 'low')      return false;
+      if (branchStockLevelVal === 'out_of_stock'   && level !== 'out')      return false;
       if (branchStockSearchVal && !i.product_name.toLowerCase().includes(branchStockSearchVal)) return false;
       return true;
     });
@@ -1502,15 +1565,16 @@ function updateBranchStockSummary(products) {
       var imgHtml = i.image_url
         ? '<img src="' + (i.image_urls?.length ? i.image_urls[0] : i.image_url) + '" class="product-img-cell" style="width:32px;height:32px;" alt="' + i.product_name + '"/>'
         : '<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
-      const bq     = Number(i.quantity);
-      var qtyClass = bq === 0 ? 'out-stock' : bq <= 5 ? 'low-stock' : 'in-stock';
-      var badge    = bq === 0
+      const { level: bqLevel, variantDriven: bqVariantDriven } = bsWorstLevel(i);
+      var qtyClass = bqLevel === 'out' ? 'out-stock' : (bqLevel === 'critical' || bqLevel === 'low') ? 'low-stock' : 'in-stock';
+      var badge    = bqLevel === 'out'
         ? '<span class="badge badge--red">Out of Stock</span>'
-        : bq <= 5
+        : bqLevel === 'critical'
           ? '<span class="badge badge--red">Critical Level</span>'
-          : bq <= 10
+          : bqLevel === 'low'
             ? '<span class="badge badge--yellow">Low Stock</span>'
             : '<span class="badge badge--green">In Stock</span>';
+      var variantNote = bqVariantDriven ? ' <span style="font-size:10px;opacity:0.75;">(variant)</span>' : '';
       var hasVariants = i.option_groups && i.option_groups.length > 0;
       var expandBtn   = hasVariants
         ? '<span class="inv-expand-btn" style="margin-left:6px;font-size:10px;color:var(--text-muted);cursor:pointer;" onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this)">▶</span>'
@@ -1521,7 +1585,7 @@ function updateBranchStockSummary(products) {
         + '<td><div style="display:flex;align-items:center;gap:8px;">' + imgHtml
         + '<span style="font-size:12px;font-weight:600;">' + i.product_name + '</span>'
         + expandBtn + '</div></td>'
-        + '<td style="text-align:center;"><span class="branch-stock-qty ' + qtyClass + '">' + i.quantity + '</span></td>'
+        + '<td style="text-align:center;"><span class="branch-stock-qty ' + qtyClass + '">' + i.quantity + '</span>' + variantNote + '</td>'
         + '<td>' + badge + '</td>'
         + '</tr>'
         + '<tr id="invVarRow_' + i.product_id + '_' + branchId + '" style="display:none;background:var(--surface);">'
@@ -1532,7 +1596,7 @@ function updateBranchStockSummary(products) {
     html += '<div class="branch-stock-card">'
       + '<div class="branch-stock-header"><span> </span>'
       + '<span class="branch-stock-name">' + branch + '</span>'
-      + '<span class="branch-stock-count">' + allItems.length + ' items</span></div>'
+      + '<span class="branch-stock-count">' + allItems.length + ' products</span></div>'
       + '<table class="data-table" style="margin:0;">'
       + '<thead><tr><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th></tr></thead>'
       + '<tbody>' + rows + '</tbody>'
@@ -1545,10 +1609,10 @@ function updateBranchStockSummary(products) {
   var maxItems = 0;
   Object.keys(branchMap).forEach(function(b) {
     var filteredLen = branchMap[b].items.filter(i => {
-      const q = Number(i.quantity);
-      if (branchStockLevelVal === 'critical_stock' && !(q > 0 && q <= 5))  return false;
-      if (branchStockLevelVal === 'low_stock'      && !(q > 5 && q <= 10)) return false;
-      if (branchStockLevelVal === 'out_of_stock'   && q !== 0)             return false;
+      const { level } = bsWorstLevel(i);
+      if (branchStockLevelVal === 'critical_stock' && level !== 'critical') return false;
+      if (branchStockLevelVal === 'low_stock'      && level !== 'low')      return false;
+      if (branchStockLevelVal === 'out_of_stock'   && level !== 'out')      return false;
       if (branchStockSearchVal && !i.product_name.toLowerCase().includes(branchStockSearchVal)) return false;
       return true;
     }).length;
@@ -1634,11 +1698,13 @@ async function loadInventory() {
 
 
     // Check low stock per branch — two-tier: critical (≤5) and low (6–10)
+    // Also checks variant_stock so a single low/critical/out-of-stock variant
+    // trips the alert even when the branch's aggregate total looks fine.
     const getBranchTotal   = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
       : Number(p.quantity);
-    const hasCritBranch    = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5);
-    const hasLowBranch     = p => !hasCritBranch(p) && p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+    const hasCritBranch    = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5) || p.variant_stock?.some(vs => Number(vs.quantity) > 0 && Number(vs.quantity) <= 5);
+    const hasLowBranch     = p => !hasCritBranch(p) && (p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10) || p.variant_stock?.some(vs => Number(vs.quantity) > 0 && Number(vs.quantity) <= 10));
     const criticalInv      = products.filter(p => p.status === 'active' && hasCritBranch(p));
     const lowInv           = products.filter(p => p.status === 'active' && hasLowBranch(p));
     const banner           = document.getElementById('lowStockBanner');
@@ -1716,8 +1782,14 @@ async function filterInventoryType(val, el) {
       const getBranchTotalF  = p => p.branch_stock?.length
         ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
         : Number(p.quantity);
-      const hasCritBranchF   = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5);
-      const hasLowBranchF    = p => !hasCritBranchF(p) && p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10);
+      const hasCritBranchF   = p => p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 5) || p.variant_stock?.some(vs => Number(vs.quantity) > 0 && Number(vs.quantity) <= 5);
+      const hasLowBranchF    = p => !hasCritBranchF(p) && (p.branch_stock?.some(bs => Number(bs.quantity) > 0 && Number(bs.quantity) <= 10) || p.variant_stock?.some(vs => Number(vs.quantity) > 0 && Number(vs.quantity) <= 10));
+      const variantOnlyF     = (p, isCrit) => {
+        const check = q => isCrit ? (Number(q) > 0 && Number(q) <= 5) : (Number(q) > 0 && Number(q) <= 10);
+        const viaVariant = p.variant_stock?.some(vs => check(vs.quantity));
+        const viaBranch  = p.branch_stock?.some(bs => check(bs.quantity));
+        return viaVariant && !viaBranch;
+      };
 
       let filtered;
       let headerHtml;
@@ -1740,11 +1812,12 @@ async function filterInventoryType(val, el) {
             const branchBreakdown = p.branch_stock?.length
               ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(', ')
               : `${getBranchTotalF(p)} units`;
+            const variantNote = variantOnlyF(p, isCrit) ? ' <span style="font-size:11px;opacity:0.75;">(variant-level)</span>' : '';
             return `
             <tr style="background:${bg};">
               <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
               <td>—</td>
-              <td colspan="2"><span style="color:${color};font-weight:700;">${branchBreakdown} remaining</span></td>
+              <td colspan="2"><span style="color:${color};font-weight:700;">${branchBreakdown} remaining</span>${variantNote}</td>
               <td>${p.category}</td>
               <td colspan="4">—</td>
             </tr>`;
@@ -4179,13 +4252,34 @@ const PO_PAGE_SIZE   = 10;
 let srPage           = 1;
 const SR_PAGE_SIZE   = 6;
 let poItems          = []; // items in create PO modal
+let srStatusFilterVal = '';
+let poStatusFilterVal = '';
 
 
 // ─── PO & SR page change handlers ─────────────────────────────────────────
-function changePOPage(page) { poPage = page; renderPOs(allPOs); }
-function changeSRPage(page) { srPage = page; renderStockRequests(allStockRequests); }
+function changePOPage(page) { poPage = page; renderPOs(applyPOStatusFilter(allPOs)); }
+function changeSRPage(page) { srPage = page; renderStockRequests(applySRStatusFilter(allStockRequests)); }
 window.changePOPage = changePOPage;
 window.changeSRPage = changeSRPage;
+
+function applySRStatusFilter(requests) {
+  return srStatusFilterVal ? requests.filter(r => r.status === srStatusFilterVal) : requests;
+}
+function applyPOStatusFilter(pos) {
+  return poStatusFilterVal ? pos.filter(po => po.status === poStatusFilterVal) : pos;
+}
+function filterSRByStatus(status) {
+  srStatusFilterVal = status || '';
+  srPage = 1;
+  renderStockRequests(applySRStatusFilter(allStockRequests));
+}
+function filterPOByStatus(status) {
+  poStatusFilterVal = status || '';
+  poPage = 1;
+  renderPOs(applyPOStatusFilter(allPOs));
+}
+window.filterSRByStatus = filterSRByStatus;
+window.filterPOByStatus = filterPOByStatus;
 
 async function loadPurchaseOrders() {
   // ── Skeleton ──
@@ -4210,8 +4304,8 @@ async function loadPurchaseOrders() {
       poBadge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
-    renderStockRequests(allStockRequests);
-    renderPOs(allPOs);
+    renderStockRequests(applySRStatusFilter(allStockRequests));
+    renderPOs(applyPOStatusFilter(allPOs));
   } catch (e) { console.error('PO error:', e); }
 }
 

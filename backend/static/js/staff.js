@@ -1469,18 +1469,16 @@ async function loadInventory() {
     const invDataRaw = await invRes.json();
     const invData   = Array.isArray(invDataRaw) ? invDataRaw : [];
 
-    // Helper: get branch-specific quantity for a product
-    const branchQty = p => {
-      const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
-      return bs ? bs.quantity : 0;
-    };
-
-    // Stats — two-tier: critical (≤5) and low (6–10), using branch stock
-    const criticalCount = invProducts.filter(p => { const q = branchQty(p); return q > 0 && q <= 5; }).length;
-    const lowCount      = invProducts.filter(p => { const q = branchQty(p); return q > 5 && q <= 10; }).length;
+    // Stats — two-tier: critical (≤5) and low (6–10), using branch stock AND
+    // variant stock (see staffStockInfo below) so a single low/critical/
+    // out-of-stock variant trips the alert even when the branch's aggregate
+    // total still looks healthy.
+    const criticalCount = invProducts.filter(p => staffStockInfo(p).level === 'critical').length;
+    const lowCount      = invProducts.filter(p => staffStockInfo(p).level === 'low').length;
+    const outCount      = invProducts.filter(p => staffStockInfo(p).level === 'out').length;
     document.getElementById('invTotalProducts').textContent = invProducts.length;
     document.getElementById('invLowStock').textContent      = lowCount;
-    document.getElementById('invOutOfStock').textContent    = invProducts.filter(p => branchQty(p) <= 0).length;
+    document.getElementById('invOutOfStock').textContent    = outCount;
     const critEl = document.getElementById('invCriticalStock');
     if (critEl) critEl.textContent = criticalCount;
 
@@ -1511,7 +1509,7 @@ async function loadInventory() {
     // Update inventory nav badge (critical + low + out of stock)
     const invBadge = document.getElementById('invLowStockBadge');
     if (invBadge) {
-      const badgeCount = criticalCount + lowCount + invProducts.filter(p => branchQty(p) <= 0).length;
+      const badgeCount = criticalCount + lowCount + outCount;
       invBadge.textContent   = badgeCount > 99 ? '99+' : badgeCount;
       invBadge.style.display = badgeCount > 0 ? 'inline-block' : 'none';
     }
@@ -1589,8 +1587,9 @@ function renderInvProducts(products) {
   const paged = paginate(products, staffInvPage);
   document.getElementById('invProductsBody').innerHTML = paged.length
     ? paged.map(p => {
-        const bs  = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
-        const qty = bs ? bs.quantity : 0;
+        const { qty, level, variantDriven } = staffStockInfo(p);
+        const levelColor = level === 'out' ? '#ef4444' : (level === 'critical' || level === 'low') ? '#eab308' : 'var(--g-400)';
+        const variantNote = variantDriven ? ' <span style="font-size:10px;opacity:0.75;">(variant)</span>' : '';
         return `
         <tr>
           <td>
@@ -1604,15 +1603,17 @@ function renderInvProducts(products) {
           <td>${p.category}</td>
           <td>${peso(p.price)}</td>
           <td>
-            <span style="color:${qty <= 0 ? '#ef4444' : qty <= 10 ? '#eab308' : 'var(--g-400)'};font-weight:600;">
+            <span style="color:${levelColor};font-weight:600;">
               ${qty}
-            </span>
+            </span>${variantNote}
           </td>
-          <td>${qty <= 0
+          <td>${level === 'out'
             ? '<span class="badge badge--red">Out of Stock</span>'
-            : qty <= 10
-              ? '<span class="badge badge--yellow">Low Stock</span>'
-              : '<span class="badge badge--green">In Stock</span>'
+            : level === 'critical'
+              ? '<span class="badge badge--red">Critical Level</span>'
+              : level === 'low'
+                ? '<span class="badge badge--yellow">Low Stock</span>'
+                : '<span class="badge badge--green">In Stock</span>'
           }</td>
           <td>
             <button class="btn-icon" onclick="event.stopPropagation();viewStaffProductDetails('${p.product_id}')" title="View Product Details">
@@ -1635,9 +1636,8 @@ function viewStaffProductDetails(productId) {
   const p = invProducts.find(pr => pr.product_id === productId);
   if (!p) return;
 
-  const bs  = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
-  const qty = bs ? bs.quantity : 0;
-  const stockColor = qty <= 0 ? '#ef4444' : qty <= 10 ? '#eab308' : 'var(--g-400)';
+  const { qty, level, variantDriven } = staffStockInfo(p);
+  const stockColor = level === 'out' ? '#ef4444' : (level === 'critical' || level === 'low') ? '#eab308' : 'var(--g-400)';
   const imgHtml = p.image_url
     ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" style="width:80px;height:80px;border-radius:10px;object-fit:cover;background:var(--surface-2);flex-shrink:0;" alt="${p.product_name}"/>`
     : `<div class="product-img-placeholder" style="width:80px;height:80px;border-radius:10px;flex-shrink:0;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:28px;height:28px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`;
@@ -1676,7 +1676,7 @@ function viewStaffProductDetails(productId) {
         </div>
         <div>
           <label class="form-label" style="font-size:11px;">Stock (this branch)</label>
-          <div style="font-weight:700;font-size:14px;color:${stockColor};">${qty} units</div>
+          <div style="font-weight:700;font-size:14px;color:${stockColor};">${qty} units${variantDriven ? ' <span style="font-size:11px;font-weight:500;opacity:0.75;">(a variant is low)</span>' : ''}</div>
         </div>
       </div>
       ${p.description ? `
@@ -1717,20 +1717,49 @@ function staffBQty(p) {
   return bs ? Number(bs.quantity) : Number(p.quantity || 0);
 }
 
+// Variant-aware stock check for this staff member's branch. Returns the raw
+// branch quantity (for display) plus the WORST alert level found across
+// either the branch's aggregate total or any individual variant_stock row
+// for that branch — so a single low/critical/out-of-stock variant surfaces
+// the alert even when the aggregate total still looks fine. `variantDriven`
+// flags that case so the UI can note it instead of showing a confusing
+// "low stock" badge next to a healthy-looking number.
+function staffStockInfo(p) {
+  const qty = staffBQty(p);
+  const vsRows = (p.variant_stock || []).filter(v => !staffBranchId || v.branch_id === staffBranchId);
+  const levelOf = q => {
+    q = Number(q);
+    if (q === 0) return 'out';
+    if (q > 0 && q <= 5) return 'critical';
+    if (q > 0 && q <= 10) return 'low';
+    return 'ok';
+  };
+  const rank = { out: 3, critical: 2, low: 1, ok: 0 };
+
+  let level = levelOf(qty);
+  let variantDriven = false;
+  vsRows.forEach(v => {
+    const l = levelOf(v.quantity);
+    if (rank[l] > rank[level]) { level = l; variantDriven = true; }
+  });
+
+  return { qty, level, variantDriven };
+}
+
 // Applies the stock-level filter AND the search filter TOGETHER, so picking
 // a level and then searching (or vice versa) no longer wipes out the other.
 function applyStaffStockFilters() {
   let filtered = invProducts;
 
   if (staffStockLevelVal === 'critical_stock') {
-    filtered = filtered.filter(p => { const q = staffBQty(p); return q > 0 && q <= 5; });
+    filtered = filtered.filter(p => staffStockInfo(p).level === 'critical');
   } else if (staffStockLevelVal === 'low_stock') {
     // Show both tiers — critical first, then low
-    const critical = filtered.filter(p => { const q = staffBQty(p); return q > 0 && q <= 5; });
-    const low      = filtered.filter(p => { const q = staffBQty(p); return q > 5 && q <= 10; });
+    const critical = filtered.filter(p => staffStockInfo(p).level === 'critical');
+    const low      = filtered.filter(p => staffStockInfo(p).level === 'low');
     filtered = [...critical, ...low];
   } else if (staffStockLevelVal === 'out_of_stock') {
-    filtered = filtered.filter(p => staffBQty(p) === 0);
+    filtered = filtered.filter(p => staffStockInfo(p).level === 'out');
   }
 
   if (staffStockSearchVal) {

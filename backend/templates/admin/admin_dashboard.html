@@ -338,6 +338,11 @@
           <select class="filter-select" onchange="filterByBrand(this.value)" id="brandFilter">
             <option value="">All Brands</option>
           </select>
+          <select class="filter-select" onchange="filterByStatus(this.value)" id="productStatusFilter">
+            <option value="">All Status</option>
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+          </select>
           <select class="filter-select" onchange="filterByBranch(this.value)" id="productBranchFilter">
             <option value="">All Branches</option>
           </select>
@@ -348,6 +353,10 @@
         </div>
       </div>
       <div class="card">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px;">
+          <h3 class="card-title">All Products</h3>
+          <div id="productsCountSummary" style="margin-left:auto;display:flex;gap:8px;flex-wrap:wrap;"></div>
+        </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
@@ -547,9 +556,15 @@
 
       <!-- Stock Requests from Staff -->
       <div class="card" style="margin-bottom:1.5rem;">
-        <div class="card-header">
+        <div class="card-header" style="flex-wrap:wrap;gap:8px;">
           <h3 class="card-title">Staff Stock Requests</h3>
           <span style="font-size:12px;color:var(--text-muted);">Review and approve/reject requests from staff</span>
+          <select class="filter-select" id="srStatusFilter" onchange="filterSRByStatus(this.value)" style="margin-left:auto;font-size:12px;">
+            <option value="">All Status</option>
+            <option value="pending">Pending</option>
+            <option value="rejected">Rejected</option>
+            <option value="approved">Approved</option>
+          </select>
         </div>
         <div class="table-wrap">
           <table class="data-table">
@@ -565,6 +580,13 @@
       <!-- Purchase Orders -->
       <div class="section-toolbar" style="margin-bottom:1rem;">
         <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);">Purchase Orders</h3>
+        <select class="filter-select" id="poStatusFilter" onchange="filterPOByStatus(this.value)" style="margin-left:auto;font-size:12px;">
+          <option value="">All Status</option>
+          <option value="draft">Draft</option>
+          <option value="ordered">Ordered</option>
+          <option value="received">Received</option>
+          <option value="cancelled">Cancelled</option>
+        </select>
         <button class="btn btn-solid-green" onclick="openCreatePOModal()">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Create PO

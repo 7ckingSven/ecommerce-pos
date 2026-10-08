@@ -922,7 +922,7 @@ def api_products():
     try:
         category = request.args.get('category', '')
         query    = supabase.table('product').select(
-            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight'
+            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), option_groups, net_weight'
         ).eq('status', 'active')
         if category:
             query = query.eq('category', category)
@@ -2374,7 +2374,7 @@ def admin_unassign_discount():
 def admin_get_products():
     try:
         res = supabase.table('product').select(
-            '*, discount(discount_id, discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups'
+            '*, discount(discount_id, discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), option_groups'
         ).order('created_at', desc=True).execute()
 
         # Get sold counts from completed orders
