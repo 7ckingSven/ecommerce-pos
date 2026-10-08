@@ -818,7 +818,7 @@ async function loadPosDiscounts() {
     const now  = new Date();
     posDiscounts = Array.isArray(data)
       ? data.filter(d => {
-          if (d.ends_at && new Date(d.ends_at) < now) return false;
+          if (d.ends_at && toUtcDate(d.ends_at) < now) return false;
           return true;
         })
       : [];
@@ -1696,7 +1696,7 @@ function renderInvHistory(data) {
             <td>${i.quantity_after}</td>
             <td>${i.from_branch?.branch_name || '—'}</td>
             <td>${i.to_branch?.branch_name   || '—'}</td>
-            <td>${new Date(i.date).toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' })}</td>
+            <td>${toUtcDate(i.date).toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' })}</td>
             <td style="max-width:200px;font-size:12px;">
               ${(() => {
                 const note = (i.note || '').toLowerCase();
@@ -1789,7 +1789,7 @@ async function loadInventory() {
 
     const oneWeekAgo = new Date();
     oneWeekAgo.setDate(oneWeekAgo.getDate() - 7);
-    document.getElementById('invRecentRestocks').textContent = invData.filter(i => new Date(i.date) >= oneWeekAgo).length;
+    document.getElementById('invRecentRestocks').textContent = invData.filter(i => toUtcDate(i.date) >= oneWeekAgo).length;
 
     applyStaffStockFilters();
 
@@ -2653,7 +2653,7 @@ function renderSummaryForRange(fromStr, toStr) {
   const filtered = allSummaryOrders.filter(o => {
     const raw = o.created_at || o.date || null;
     if (!raw) return false;
-    const localDate = new Date(raw).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+    const localDate = toUtcDate(raw).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
     return localDate >= fromStr && localDate <= toStr;
   });
 

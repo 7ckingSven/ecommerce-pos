@@ -540,6 +540,20 @@ function shortId(id) {
   return id ? id.slice(0, 8).toUpperCase() : '—';
 }
 
+// Supabase timestamp columns (created_at, updated_at, ...) come back with no
+// 'Z'/UTC suffix. Parsing that naive string with plain `new Date()` makes the
+// browser treat it as LOCAL time instead of UTC — on a PH machine (UTC+8)
+// that silently shifts the real moment by 8 hours, which then shows up as a
+// wrong clock time once reformatted (e.g. with an explicit Asia/Manila
+// timeZone option). Always build Dates for display through this helper
+// instead of `new Date(raw)`.
+function toUtcDate(raw) {
+  if (!raw) return null;
+  const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
+  const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
+  return new Date(utcStr);
+}
+
 function offlineSyncTag(o) {
   return o.is_offline_sync
     ? ' <span title="Made while offline, synced once reconnected" style="display:inline-block;margin-top:3px;background:rgba(245,158,11,0.15);color:#b45309;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:10px;font-weight:600;padding:1px 6px;">⚡ Offline Sync</span>'
@@ -698,8 +712,8 @@ async function loadOverview() {
     // Active discounts
     const now             = new Date();
     const activeDiscounts = discounts.filter(d => {
-      const end   = d.ends_at   ? new Date(d.ends_at)   : null;
-      const start = d.starts_at ? new Date(d.starts_at) : null;
+      const end   = d.ends_at   ? toUtcDate(d.ends_at)   : null;
+      const start = d.starts_at ? toUtcDate(d.starts_at) : null;
       if (end && now > end) return false;
       if (start && now < start) return false;
       return true;
@@ -960,8 +974,8 @@ function renderProducts(products) {
             <td>${p.category}</td>
             <td>${peso(p.price)}</td>
             <td>${badge(p.status)}</td>
-            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.created_at ? new Date(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + new Date(p.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
-            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + new Date(p.updated_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.created_at ? toUtcDate(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + toUtcDate(p.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
+            <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.updated_at ? toUtcDate(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + toUtcDate(p.updated_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
             <td>
               <div style="display:flex;gap:6px;">
                 <button class="btn-icon" onclick="event.stopPropagation();editProduct('${p.product_id}')" title="Edit">
@@ -1100,8 +1114,8 @@ function viewAdminProductDetails(productId) {
         </div>` : ''}
       ${variantsHtml}
       <div style="display:flex;gap:16px;margin-top:14px;font-size:11px;color:var(--text-muted);">
-        <span>Created: ${p.created_at ? new Date(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
-        <span>Updated: ${p.updated_at ? new Date(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+        <span>Created: ${p.created_at ? toUtcDate(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
+        <span>Updated: ${p.updated_at ? toUtcDate(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
       </div>
     </div>
   `);
@@ -3143,7 +3157,7 @@ function applySalesQuickFilter(val) {
 
   document.getElementById('salesFilterLabel').textContent = `Showing: ${label}`;
   const filtered = allSalesOrders.filter(o => {
-    const d = new Date(o.date || o.created_at || 0);
+    const d = toUtcDate(o.date || o.created_at) || new Date(0);
     return d >= from && d <= to;
   });
   filterSalesOrders(filtered);
@@ -3159,7 +3173,7 @@ function applySalesMonthFilter(month) {
 
   const now      = new Date();
   const filtered = allSalesOrders.filter(o => {
-    const d = new Date(o.date || o.created_at || 0);
+    const d = toUtcDate(o.date || o.created_at) || new Date(0);
     return d.getMonth() + 1 === parseInt(month);
   });
   const monthName = new Date(now.getFullYear(), parseInt(month) - 1, 1)
@@ -3181,7 +3195,7 @@ function applySalesDateRange() {
   const toDate   = to   ? new Date(to + 'T23:59:59') : new Date();
 
   const filtered = allSalesOrders.filter(o => {
-    const d = new Date(o.date || o.created_at || 0);
+    const d = toUtcDate(o.date || o.created_at) || new Date(0);
     return d >= fromDate && d <= toDate;
   });
   document.getElementById('salesFilterLabel').textContent =
@@ -3668,8 +3682,8 @@ async function loadDiscounts() {
 // ─── Discount Status Helper ───────────────────────────
 function getDiscountStatus(d) {
   const now   = new Date();
-  const start = d.starts_at ? new Date(d.starts_at) : null;
-  const end   = d.ends_at   ? new Date(d.ends_at)   : null;
+  const start = d.starts_at ? toUtcDate(d.starts_at) : null;
+  const end   = d.ends_at   ? toUtcDate(d.ends_at)   : null;
 
   if (end && now > end) return { label: '⛔ Ended',   color: '#ef4444', class: 'badge--red',    ended: true  };
   if (start && now < start) {
@@ -3709,10 +3723,10 @@ function renderDiscounts(discounts) {
             <td>
               <strong>${d.discount_name}</strong>
               <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
-                Created ${new Date(d.created_at).toLocaleDateString('en-PH')}
+                Created ${toUtcDate(d.created_at).toLocaleDateString('en-PH')}
               </div>
-              ${d.starts_at ? `<div style="font-size:11px;color:var(--text-muted);">Starts: ${new Date(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
-              ${d.ends_at   ? `<div style="font-size:11px;color:var(--text-muted);">Ends: ${new Date(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
+              ${d.starts_at ? `<div style="font-size:11px;color:var(--text-muted);">Starts: ${toUtcDate(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
+              ${d.ends_at   ? `<div style="font-size:11px;color:var(--text-muted);">Ends: ${toUtcDate(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'})}</div>` : ''}
             </td>
             <td>
               <span style="font-size:20px;font-weight:700;color:${status.ended ? '#ef4444' : 'var(--g-400)'};">${d.percentage}%</span>
@@ -4051,7 +4065,7 @@ function renderUsers(users) {
           <td>${s?.email || c?.email || '—'}</td>
           <td>${badge(u.role)}</td>
           <td>${badge(u.status)}</td>
-          <td>${new Date(u.created_at).toLocaleDateString('en-PH')}</td>
+          <td>${toUtcDate(u.created_at).toLocaleDateString('en-PH')}</td>
           <td>
             <div style="display:flex;gap:6px;">
               ${u.role !== 'customer' ? `
@@ -4497,7 +4511,7 @@ function renderPOs(pos) {
           <td>${itemCount} item${itemCount !== 1 ? 's' : ''}</td>
           <td>${peso(total)}</td>
           <td>${badge(po.status)}</td>
-          <td>${new Date(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
+          <td>${toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
           <td>
             <button class="btn-icon" onclick="openPODetail('${po.po_id}')" title="View">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
@@ -4811,7 +4825,7 @@ function openPODetail(poId) {
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:13px;">
       <div><strong>Supplier:</strong> ${po.supplier}</div>
       <div><strong>Status:</strong> ${badge(po.status)}</div>
-      <div><strong>Created:</strong> ${new Date(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</div>
+      <div><strong>Created:</strong> ${toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</div>
       ${po.note ? `<div><strong>Note:</strong> ${po.note}</div>` : ''}
     </div>
     <table class="data-table" style="margin-bottom:1rem;">
