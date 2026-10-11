@@ -1049,7 +1049,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Description</label>
-          <textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..."></textarea>
+          <textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..." oninput="_prodUpdateSaveBtn()"></textarea>
         </div>
         <div class="form-group">
           <label class="form-label">Product Images <span style="font-weight:400;color:var(--text-muted);">(optional — first image is main thumbnail)</span></label>
@@ -1069,7 +1069,7 @@
           <label class="form-label">Net Weight / Volume <span class="req">*</span> <span style="font-weight:400;color:var(--text-muted);">(for shipping calculation)</span></label>
           <div style="display:flex;gap:8px;">
             <input type="number" id="pNetWeight" class="form-input" min="0" step="0.01" placeholder="e.g. 0.5, 250, 1.2" style="flex:1;" oninput="_prodCheckField('pNetWeight')"/>
-            <select id="pNetWeightUnit" class="form-input form-select" style="width:90px;">
+            <select id="pNetWeightUnit" class="form-input form-select" style="width:90px;" onchange="_prodUpdateSaveBtn()">
               <option value="kg">kg</option>
               <option value="gram">gram</option>
               <option value="L">L</option>
@@ -1113,24 +1113,24 @@
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Discount Name <span class="req">*</span></label>
-            <input type="text" id="dName" class="form-input" required placeholder="e.g. Senior Citizen, Sale"/>
+            <input type="text" id="dName" class="form-input" required placeholder="e.g. Senior Citizen, Sale" oninput="_discUpdateSaveBtn()"/>
           </div>
           <div class="form-group">
             <label class="form-label">Percentage (%) <span class="req">*</span></label>
-            <input type="number" id="dPercentage" class="form-input" step="0.01" min="0.01" max="100" required placeholder="e.g. 10"/>
+            <input type="number" id="dPercentage" class="form-input" step="0.01" min="0.01" max="100" required placeholder="e.g. 10" oninput="_discUpdateSaveBtn()"/>
           </div>
           <div class="form-group">
             <label class="form-label">Starts From <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
-            <input type="datetime-local" id="dStartsAt" class="form-input"/>
+            <input type="datetime-local" id="dStartsAt" class="form-input" onchange="_discUpdateSaveBtn()"/>
           </div>
           <div class="form-group">
             <label class="form-label">Ends On <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
-            <input type="datetime-local" id="dEndsAt" class="form-input"/>
+            <input type="datetime-local" id="dEndsAt" class="form-input" onchange="_discUpdateSaveBtn()"/>
           </div>
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeDiscountModal()">Cancel</button>
-          <button type="submit" class="btn btn-solid-green">Save Discount</button>
+          <button type="submit" id="discountSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Save Discount</button>
         </div>
       </form>
     </div>
@@ -1161,7 +1161,7 @@
       </div>
       <div class="modal-footer" style="margin-top:1rem;">
         <button type="button" class="btn btn-cancel" onclick="closeAssignModal()">Cancel</button>
-        <button type="button" class="btn btn-solid-green" onclick="submitAssign()">Apply</button>
+        <button type="button" id="assignApplyBtn" class="btn btn-solid-green" onclick="submitAssign()" disabled style="opacity:0.45;cursor:not-allowed;">Apply</button>
       </div>
     </div>
   </div>
@@ -1333,7 +1333,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">MI</label>
-            <input type="text" id="uMi" class="form-input" maxlength="5"/>
+            <input type="text" id="uMi" class="form-input" maxlength="5" oninput="_userUpdateSaveBtn()"/>
           </div>
           <div class="form-group">
             <label class="form-label">Last Name <span class="req">*</span></label>
@@ -1382,7 +1382,7 @@
           </div>
           <div class="form-group">
             <label class="form-label">Role <span class="req">*</span></label>
-            <select id="uRole" class="form-input form-select" required onchange="toggleBranchVisibility(this.value)">
+            <select id="uRole" class="form-input form-select" required onchange="toggleBranchVisibility(this.value);_userUpdateSaveBtn()">
               <option value="staff">Staff</option>
               <option value="admin">Admin</option>
             </select>
@@ -1390,7 +1390,7 @@
         </div>
         <div class="form-group">
           <label class="form-label">Branch</label>
-          <select id="uBranch" class="form-input form-select">
+          <select id="uBranch" class="form-input form-select" onchange="_userUpdateSaveBtn()">
             <option value="">Select branch</option>
           </select>
         </div>
@@ -1405,7 +1405,7 @@
         </div>
         <div class="modal-footer">
           <button type="button" class="btn btn-cancel" onclick="closeUserModal()">Cancel</button>
-          <button type="submit" id="userSubmitBtn" class="btn btn-solid-green">Save</button>
+          <button type="submit" id="userSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Save</button>
         </div>
       </form>
     </div>

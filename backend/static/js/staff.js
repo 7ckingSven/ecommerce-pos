@@ -376,6 +376,15 @@ function setButtonLoading(btn, loading) {
   }
 }
 
+// Lightweight loading/disable state for small icon-only buttons where
+// swapping in spinner+text would break the layout.
+function setIconBtnLoading(btn, loading) {
+  if (!btn) return;
+  btn.disabled      = loading;
+  btn.style.opacity = loading ? '0.5' : '1';
+  btn.style.pointerEvents = loading ? 'none' : '';
+}
+
 
 // ─── Theme Toggle ─────────────────────────────────────
 function toggleTheme() {
@@ -1100,7 +1109,7 @@ function selectPosProduct(productId) {
       </div>
     `).join('')}
     <div id="posVarStock" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;min-height:18px;"></div>
-    <button onclick="confirmPosVariant()" class="btn btn-solid-green" style="width:100%;">Add to Order</button>
+    <button id="posVarAddBtn" onclick="confirmPosVariant(this)" class="btn btn-solid-green" style="width:100%;" disabled>Add to Order</button>
     </div>
   `;
   showGenericModal(modalHtml);
@@ -1122,6 +1131,16 @@ function selectPosVariantOpt(label, value, btn) {
     btn.style.fontWeight  = '700';
   }
   checkPosVariantStock();
+  _posVarUpdateBtn();
+}
+
+// Add to Order button stays disabled until every variant group has a
+// selection (mirrors the disabled-until-valid pattern used elsewhere).
+function _posVarUpdateBtn() {
+  const btn = document.getElementById('posVarAddBtn');
+  if (!btn || !posCurrentProduct) return;
+  const groups = posCurrentProduct.option_groups || [];
+  btn.disabled = Object.keys(posSelectedVariants).length < groups.length;
 }
 
 async function checkPosVariantStock() {
@@ -1152,7 +1171,7 @@ async function checkPosVariantStock() {
   }
 }
 
-async function confirmPosVariant() {
+async function confirmPosVariant(btn) {
   if (!posCurrentProduct) return;
   const groups = posCurrentProduct.option_groups || [];
 
@@ -1163,6 +1182,7 @@ async function confirmPosVariant() {
     }
   }
 
+  setButtonLoading(btn, true);
   // Check available variant stock
   let availableStock = 0;
   try {
@@ -1179,6 +1199,7 @@ async function confirmPosVariant() {
     availableStock = data.quantity || 0;
     if (availableStock <= 0) {
       showToast('This variant is out of stock!', 'error');
+      setButtonLoading(btn, false);
       return;
     }
   } catch (e) {}
@@ -1198,7 +1219,7 @@ async function confirmPosVariant() {
     }
   );
   posSelectedVariants = {};
-  closeGenericModal();
+  closeGenericModal(); // modal closes on success — no need to reset btn loading
 }
 
 window.selectPosProduct      = selectPosProduct;
@@ -1365,10 +1386,12 @@ async function processOrder() {
   }
   if (selectedPayment === 'gcash') {
     if (!refNo) {
+      setButtonLoading(processBtn, false);
       showToast('Please enter GCash reference number.', 'error');
       return;
     }
     if (!/^\d{13}$/.test(refNo)) {
+      setButtonLoading(processBtn, false);
       showToast('GCash reference number must be exactly 13 digits.', 'error');
       return;
     }
@@ -1381,6 +1404,7 @@ async function processOrder() {
     const _tot  = _sub - (_sub * _dPct / 100);
     const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
     if (received < _tot) {
+      setButtonLoading(processBtn, false);
       showToast('Cash received is less than total amount.', 'error');
       return;
     }

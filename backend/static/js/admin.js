@@ -408,6 +408,15 @@ function setButtonLoading(btn, loading) {
   }
 }
 
+// Lightweight loading/disable state for small icon-only buttons (delete/toggle
+// icons in table rows) where swapping in spinner+text would break the layout.
+function setIconBtnLoading(btn, loading) {
+  if (!btn) return;
+  btn.disabled      = loading;
+  btn.style.opacity = loading ? '0.5' : '1';
+  btn.style.pointerEvents = loading ? 'none' : '';
+}
+
 
 // ─── Theme Toggle ─────────────────────────────────────
 function toggleTheme() {
@@ -1230,6 +1239,21 @@ function openProductModal(product = null) {
   if (netWeightEl)   netWeightEl.value   = product?.net_weight      || '';
   if (netWeightUnit) netWeightUnit.value = product?.net_weight_unit || 'kg';
 
+  // Snapshot of the product's original values when editing — Save stays
+  // disabled until something actually differs (same dirty-check idea as
+  // Profile/User/Discount Save), instead of just "all fields filled".
+  _prodOrigValues = product ? {
+    name:            product.product_name || '',
+    brand:           product.brand        || '',
+    category:        product.category     || '',
+    price:           String(product.price ?? ''),
+    description:     product.description  || '',
+    net_weight:      String(product.net_weight ?? ''),
+    net_weight_unit: product.net_weight_unit || 'kg',
+    option_groups:   JSON.stringify(product.option_groups || []),
+    existing_images: document.getElementById('pExistingImages')?.value || '[]',
+  } : null;
+
   _prodUpdateSaveBtn();
   document.getElementById('productModalOverlay').classList.add('open');
   document.getElementById('productModal').classList.add('open');
@@ -1263,6 +1287,14 @@ function _prodClearErrors() {
   ['pName','pBrand','pCategory','pPrice','pNetWeight'].forEach(id => _prodSetFieldError(id, ''));
 }
 
+// Snapshot of the product's original values when editing (set in
+// openProductModal) — used by _prodUpdateSaveBtn's dirty-check below.
+let _prodOrigValues = null;
+
+// Add: Save stays disabled until all required fields are filled.
+// Edit: Save additionally stays disabled until something actually
+// differs from the product's original values — covers the text fields,
+// option groups, existing images, and any newly-added image files.
 function _prodUpdateSaveBtn() {
   const btn = document.getElementById('productSubmitBtn');
   if (!btn) return;
@@ -1270,9 +1302,27 @@ function _prodUpdateSaveBtn() {
     const v = (document.getElementById(id)?.value || '').trim();
     return v !== '';
   });
-  btn.disabled = !allFilled;
-  btn.style.opacity = allFilled ? '1' : '0.45';
-  btn.style.cursor  = allFilled ? 'pointer' : 'not-allowed';
+
+  let enabled = allFilled;
+  if (allFilled && _prodOrigValues) {
+    const cur = {
+      name:            (document.getElementById('pName')?.value        || '').trim(),
+      brand:           (document.getElementById('pBrand')?.value       || '').trim(),
+      category:        (document.getElementById('pCategory')?.value    || '').trim(),
+      price:           String(document.getElementById('pPrice')?.value || ''),
+      description:     (document.getElementById('pDescription')?.value || '').trim(),
+      net_weight:      String(document.getElementById('pNetWeight')?.value || ''),
+      net_weight_unit: document.getElementById('pNetWeightUnit')?.value || 'kg',
+      option_groups:   document.getElementById('pOptionGroups')?.value   || '[]',
+      existing_images: document.getElementById('pExistingImages')?.value || '[]',
+    };
+    const hasNewImages = (typeof selectedImageFiles !== 'undefined' && selectedImageFiles.length > 0);
+    enabled = hasNewImages || Object.keys(cur).some(k => cur[k] !== _prodOrigValues[k]);
+  }
+
+  btn.disabled      = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.45';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
 }
 
 function _prodCheckField(id) {
@@ -1308,6 +1358,7 @@ function closeProductModal() {
   document.getElementById('productModal').classList.remove('open');
   document.getElementById('productForm').reset();
   _prodClearErrors();
+  _prodOrigValues = null;
   const saveBtn = document.getElementById('productSubmitBtn');
   if (saveBtn) { saveBtn.disabled = true; saveBtn.style.opacity = '0.45'; saveBtn.style.cursor = 'not-allowed'; }
   const previewWrap = document.getElementById('imagePreviewsWrap');
@@ -1387,6 +1438,7 @@ function renderOptionGroups() {
   `).join('');
   const el = document.getElementById('pOptionGroups');
   if (el) el.value = JSON.stringify(optionGroups);
+  _prodUpdateSaveBtn();
 }
 
 function addOptionGroup() {
@@ -1403,6 +1455,7 @@ function updateGroupLabel(gi, val) {
   optionGroups[gi].label = val;
   const el = document.getElementById('pOptionGroups');
   if (el) el.value = JSON.stringify(optionGroups);
+  _prodUpdateSaveBtn();
 }
 
 function addChoice(gi) {
@@ -1465,6 +1518,8 @@ function closeProductToggleModal() {
 async function confirmProductToggle() {
   if (!_toggleProductId) return;
   const isActive = _toggleProductStatus === 'active';
+  const btn = document.getElementById('productToggleConfirmBtn');
+  setButtonLoading(btn, true);
   try {
     let res;
     if (isActive) {
@@ -1486,6 +1541,7 @@ async function confirmProductToggle() {
       showToast(isActive ? 'Failed to deactivate product.' : 'Failed to activate product.', 'error');
     }
   } catch (e) { showToast('Error.', 'error'); }
+  finally { setButtonLoading(btn, false); }
 }
 window.openProductToggleModal  = openProductToggleModal;
 window.closeProductToggleModal = closeProductToggleModal;
@@ -1565,6 +1621,7 @@ function previewImages(input) {
   if (selectedImageFiles.length > maxNew) selectedImageFiles = selectedImageFiles.slice(0, maxNew);
 
   renderNewImagePreviews();
+  _prodUpdateSaveBtn();
 
   // Reset file input so same file can be re-added after removal
   input.value = '';
@@ -1599,6 +1656,7 @@ function renderNewImagePreviews() {
 function removeNewImage(idx) {
   selectedImageFiles.splice(idx, 1);
   renderNewImagePreviews();
+  _prodUpdateSaveBtn();
 }
 
 function renderExistingImages(urls) {
@@ -1623,6 +1681,7 @@ function removeExistingImage(idx) {
   current.splice(idx, 1);
   input.value = JSON.stringify(current);
   renderExistingImages(current);
+  _prodUpdateSaveBtn();
 }
 
 
@@ -2569,6 +2628,8 @@ async function submitTransfer(e) {
     note:           document.getElementById('transferNote').value || 'Stock transfer',
     type:           'transfer',
   };
+  const btn = e.submitter || document.getElementById('transferSubmitBtn');
+  setButtonLoading(btn, true);
   try {
     const res = await fetch('/api/admin/inventory', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2583,6 +2644,7 @@ async function submitTransfer(e) {
       showToast(err.error || 'Failed to transfer stock.', 'error');
     }
   } catch (e) { showToast('Error transferring stock.', 'error'); }
+  finally { setButtonLoading(btn, false); }
 }
 
 // ─── ADJUST STOCK Modal ───────────────────────────────
@@ -2657,6 +2719,8 @@ async function submitAdjust(e) {
     variant_options: Object.keys(adjustVariantOpts).length ? adjustVariantOpts : null,
   };
 
+  const btn = e.submitter || document.getElementById('adjustSubmitBtn');
+  setButtonLoading(btn, true);
   try {
     const res = await fetch('/api/admin/inventory', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2671,6 +2735,7 @@ async function submitAdjust(e) {
       showToast(err.error || 'Failed to adjust stock.', 'error');
     }
   } catch (e) { showToast('Error adjusting stock.', 'error'); }
+  finally { setButtonLoading(btn, false); }
 }
 
 // Legacy aliases
@@ -3747,7 +3812,7 @@ function renderDiscounts(discounts) {
                 <button class="btn-icon" onclick="editDiscount('${d.discount_id}')" title="Edit">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>
-                <button class="btn-icon btn-icon--red" onclick="deleteDiscount('${d.discount_id}', '${d.discount_name.replace(/'/g, "\\'")}')" title="Delete">
+                <button class="btn-icon btn-icon--red" onclick="deleteDiscount('${d.discount_id}', '${d.discount_name.replace(/'/g, "\\'")}', this)" title="Delete">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4h6v2"/></svg>
                 </button>
               </div>
@@ -3803,7 +3868,7 @@ function loadDiscountedProducts() {
             </td>
             <td>
               <button class="btn btn-cancel" style="font-size:12px;padding:5px 10px;color:#ef4444;border-color:#ef4444;display:inline-flex;align-items:center;gap:4px;"
-                onclick="removeProductDiscount('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}')">
+                onclick="removeProductDiscount('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', this)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
                 Remove
               </button>
@@ -3813,8 +3878,13 @@ function loadDiscountedProducts() {
     : '<tr><td colspan="5" class="table-empty">No products with discounts yet. Use "Assign" button on any discount.</td></tr>';
 }
 
-async function removeProductDiscount(productId, name) {
-  if (!confirm(`Remove discount from "${name}"?`)) return;
+async function removeProductDiscount(productId, name, btn) {
+  const confirmed = await showConfirmDialog(
+    'Remove Discount',
+    `Remove discount from <strong>${name}</strong>?`
+  );
+  if (!confirmed) return;
+  setButtonLoading(btn, true);
   try {
     const res = await fetch('/api/admin/discounts/unassign', {
       method: 'POST',
@@ -3822,11 +3892,16 @@ async function removeProductDiscount(productId, name) {
       body: JSON.stringify({ product_ids: [productId] }),
     });
     if (res.ok) { showToast('Discount removed from product.'); invalidateSection('discounts'); loadDiscounts(); }
-    else showToast('Failed to remove discount.', 'error');
-  } catch (e) { showToast('Error.', 'error'); }
+    else { showToast('Failed to remove discount.', 'error'); setButtonLoading(btn, false); }
+  } catch (e) { showToast('Error.', 'error'); setButtonLoading(btn, false); }
 }
 
 // Discount Modal
+// Snapshot of the discount's original values when editing — same
+// dirty-check idea as Profile Save / User Save: an untouched Edit form
+// should not be save-able just because its fields are non-empty.
+let _discOrigValues = null;
+
 function openDiscountModal(discount = null) {
   document.getElementById('discountModalTitle').textContent = discount ? 'Edit Discount' : 'Add Discount';
   document.getElementById('discountId').value    = discount?.discount_id || '';
@@ -3840,8 +3915,16 @@ function openDiscountModal(discount = null) {
   if (startsEl) startsEl.value = toLocal(discount?.starts_at);
   if (endsEl)   endsEl.value   = toLocal(discount?.ends_at);
 
+  _discOrigValues = discount ? {
+    name: discount.discount_name || '',
+    pct:  String(discount.percentage ?? ''),
+    starts: toLocal(discount.starts_at),
+    ends:   toLocal(discount.ends_at),
+  } : null;
+
   document.getElementById('discountModalOverlay').classList.add('open');
   document.getElementById('discountModal').classList.add('open');
+  _discUpdateSaveBtn();
 }
 
 function closeDiscountModal() {
@@ -3852,6 +3935,34 @@ function closeDiscountModal() {
   const endsEl   = document.getElementById('dEndsAt');
   if (startsEl) startsEl.value = '';
   if (endsEl)   endsEl.value   = '';
+  _discOrigValues = null;
+  _discUpdateSaveBtn();
+}
+
+// Add: Save stays disabled until name + a valid 0.01–100 percentage are
+// filled in. Edit: Save additionally stays disabled until something
+// actually differs from the discount's original values.
+function _discUpdateSaveBtn() {
+  const btn = document.getElementById('discountSubmitBtn');
+  if (!btn) return;
+  const name = (document.getElementById('dName')?.value || '').trim();
+  const pct  = parseFloat(document.getElementById('dPercentage')?.value);
+  const valid = !!name && !isNaN(pct) && pct > 0 && pct <= 100;
+
+  let enabled = valid;
+  if (valid && _discOrigValues) {
+    const cur = {
+      name,
+      pct:    String(document.getElementById('dPercentage')?.value || ''),
+      starts: document.getElementById('dStartsAt')?.value || '',
+      ends:   document.getElementById('dEndsAt')?.value   || '',
+    };
+    enabled = Object.keys(cur).some(k => cur[k] !== _discOrigValues[k]);
+  }
+
+  btn.disabled      = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.45';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
 }
 
 function editDiscount(id) {
@@ -3859,13 +3970,18 @@ function editDiscount(id) {
   if (discount) openDiscountModal(discount);
 }
 
-async function deleteDiscount(id, name) {
-  if (!confirm(`Delete discount "${name}"? It will be removed from all assigned products.`)) return;
+async function deleteDiscount(id, name, btn) {
+  const confirmed = await showConfirmDialog(
+    'Delete Discount',
+    `Delete discount <strong>${name}</strong>? It will be removed from all assigned products.`
+  );
+  if (!confirmed) return;
+  setIconBtnLoading(btn, true);
   try {
     const res = await fetch(`/api/admin/discounts/${id}`, { method: 'DELETE' });
     if (res.ok) { showToast('Discount deleted.'); invalidateSection('discounts'); loadDiscounts(); }
-    else showToast('Failed to delete discount.', 'error');
-  } catch (e) { showToast('Error.', 'error'); }
+    else { showToast('Failed to delete discount.', 'error'); setIconBtnLoading(btn, false); }
+  } catch (e) { showToast('Error.', 'error'); setIconBtnLoading(btn, false); }
 }
 
 async function submitDiscount(e) {
@@ -3942,6 +4058,7 @@ function openAssignModal(discountId, discountName) {
   if (searchEl) searchEl.value = '';
 
   renderAssignProducts(assignProductState);
+  _assignUpdateBtn();
 
   document.getElementById('assignModalOverlay').classList.add('open');
   document.getElementById('assignModal').classList.add('open');
@@ -3952,6 +4069,7 @@ function closeAssignModal() {
   document.getElementById('assignModal').classList.remove('open');
   currentAssignDiscountId = null;
   assignProductState      = [];
+  _assignUpdateBtn();
 }
 
 function renderAssignProducts(products) {
@@ -3994,6 +4112,18 @@ function filterAssignProducts(q) {
 function toggleAssignProduct(productId, checked) {
   const item = assignProductState.find(p => p.product_id === productId);
   if (item) item.checked = checked;
+  _assignUpdateBtn();
+}
+
+// Apply button stays disabled until at least one product's checked state
+// actually differs from what it was when the modal opened.
+function _assignUpdateBtn() {
+  const btn = document.getElementById('assignApplyBtn');
+  if (!btn) return;
+  const hasChanges = assignProductState.some(p => p.checked !== p.wasAssigned);
+  btn.disabled      = !hasChanges;
+  btn.style.opacity = hasChanges ? '1' : '0.45';
+  btn.style.cursor  = hasChanges ? 'pointer' : 'not-allowed';
 }
 
 async function submitAssign() {
@@ -4004,6 +4134,8 @@ async function submitAssign() {
   // (never touch products that had a different discount or no discount)
   const toUnassign = assignProductState.filter(p => p.wasAssigned && !p.checked).map(p => p.product_id);
 
+  const btn = document.querySelector('#assignModal .btn-solid-green');
+  setButtonLoading(btn, true);
   try {
     const requests = [];
     if (toAssign.length) {
@@ -4025,6 +4157,7 @@ async function submitAssign() {
     closeAssignModal();
     invalidateSection('discounts'); loadDiscounts();
   } catch (e) { showToast('Error updating assignments.', 'error'); }
+  finally { setButtonLoading(btn, false); }
 }
 
 // ─── USERS ────────────────────────────────────────────
@@ -4068,7 +4201,7 @@ function renderUsers(users) {
                 <button class="btn-icon" onclick="editUser('${u.user_id}')" title="Edit">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
                 </button>` : ''}
-              <button class="btn-icon btn-icon--red" onclick="toggleUserStatus('${u.user_id}', '${u.status}')"
+              <button class="btn-icon btn-icon--red" onclick="toggleUserStatus('${u.user_id}', '${u.status}', this)"
                 title="${u.status === 'active' ? 'Deactivate' : 'Activate'}">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><circle cx="12" cy="12" r="10"/>
                   ${u.status === 'active'
@@ -4154,6 +4287,11 @@ function toggleBranchVisibility(role) {
   if (branchGroup) branchGroup.style.display = role === 'admin' ? 'none' : '';
 }
 
+// Snapshot of the user's original values when editing — lets the Save
+// button stay disabled until something actually changes (same idea as
+// Profile Save's dirty-check), instead of just "all fields filled".
+let _userOrigValues = null;
+
 function openUserModal(user = null) {
   // staff and customer come back as arrays from Supabase — normalize to object
   const s = user ? (Array.isArray(user.staff)    ? user.staff[0]    : user.staff)    : null;
@@ -4177,14 +4315,28 @@ function openUserModal(user = null) {
 
   // Populate branch dropdown then pre-select saved branch (B7c fix)
   populateBranchSelects('uBranch');
+  const branchId = s?.branch_id || '';
   setTimeout(() => {
-    if (s?.branch_id) {
-      document.getElementById('uBranch').value = s.branch_id;
+    if (branchId) {
+      document.getElementById('uBranch').value = branchId;
     }
+    // Branch select is (re)populated asynchronously, so take the dirty-check
+    // snapshot and the initial button state only once it's actually set.
+    if (user) {
+      _userOrigValues = {
+        fname: s?.fname || '', mi: s?.mi?.trim() || '', lname: s?.lname || '',
+        email: s?.email || c?.email || '', phone: s?.phone_number || '',
+        username: user?.username || '', role, branch_id: branchId,
+      };
+    } else {
+      _userOrigValues = null;
+    }
+    _userUpdateSaveBtn();
   }, 0);
 
   document.getElementById('userModalOverlay').classList.add('open');
   document.getElementById('userModal').classList.add('open');
+  _userClearErrors();
 }
 
 function closeUserModal() {
@@ -4192,6 +4344,8 @@ function closeUserModal() {
   document.getElementById('userModal').classList.remove('open');
   document.getElementById('userForm').reset();
   _userClearErrors();
+  _userOrigValues = null;
+  _userUpdateSaveBtn();
   // Reset password eye icon to crossed on close
   const eyeBtn = document.querySelector('#uPasswordGroup .btn-icon');
   if (eyeBtn) eyeBtn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
@@ -4251,6 +4405,39 @@ function _userCheckField(id) {
       break;
     }
   }
+  _userUpdateSaveBtn();
+}
+
+// Add: Save stays disabled until all required fields are filled.
+// Edit: Save stays disabled until something actually differs from the
+// user's original values (same dirty-check idea as Profile Save) —
+// a pre-filled, still-untouched Edit form should NOT be save-able.
+function _userUpdateSaveBtn() {
+  const btn    = document.getElementById('userSubmitBtn');
+  if (!btn) return;
+  const isNew  = !document.getElementById('userId').value;
+  const fields = ['uFname','uLname','uUsername','uEmail','uPhone', ...(isNew ? ['uPassword'] : [])];
+  const allFilled = fields.every(id => (document.getElementById(id)?.value || '').trim() !== '');
+
+  let enabled = allFilled;
+  if (!isNew && allFilled && _userOrigValues) {
+    const cur = {
+      fname:     (document.getElementById('uFname')?.value    || '').trim(),
+      mi:        (document.getElementById('uMi')?.value       || '').trim(),
+      lname:     (document.getElementById('uLname')?.value    || '').trim(),
+      email:     (document.getElementById('uEmail')?.value    || '').trim(),
+      phone:     (document.getElementById('uPhone')?.value    || '').trim(),
+      username:  (document.getElementById('uUsername')?.value || '').trim(),
+      role:      document.getElementById('uRole')?.value      || '',
+      branch_id: document.getElementById('uBranch')?.value    || '',
+    };
+    const pwChanged = !!(document.getElementById('uPassword')?.value || '').trim();
+    enabled = pwChanged || Object.keys(cur).some(k => cur[k] !== _userOrigValues[k]);
+  }
+
+  btn.disabled      = !enabled;
+  btn.style.opacity = enabled ? '1' : '0.45';
+  btn.style.cursor  = enabled ? 'pointer' : 'not-allowed';
 }
 
 function _userValidate() {
@@ -4268,7 +4455,7 @@ async function editUser(id) {
   if (user) openUserModal(user);
 }
 
-async function toggleUserStatus(id, currentStatus) {
+async function toggleUserStatus(id, currentStatus, btn) {
   const newStatus = currentStatus === 'active' ? 'inactive' : 'active';
   const user = allUsers.find(u => u.user_id === id);
   const username = user?.username || 'this user';
@@ -4278,6 +4465,7 @@ async function toggleUserStatus(id, currentStatus) {
     `${action} <strong>${username}</strong>?`
   );
   if (!confirmed) return;
+  setIconBtnLoading(btn, true);
   try {
     const res = await fetch(`/api/admin/users/${id}`, {
       method: 'PUT',
@@ -4285,8 +4473,8 @@ async function toggleUserStatus(id, currentStatus) {
       body: JSON.stringify({ status: newStatus }),
     });
     if (res.ok) { showToast('User status updated!'); invalidateSection('users'); loadUsers(); }
-    else showToast('Failed to update user.', 'error');
-  } catch (e) { showToast('Error.', 'error'); }
+    else { showToast('Failed to update user.', 'error'); setIconBtnLoading(btn, false); }
+  } catch (e) { showToast('Error.', 'error'); setIconBtnLoading(btn, false); }
 }
 
 async function submitUser(e) {
@@ -4359,10 +4547,10 @@ function showConfirmDialog(title, message) {
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
     overlay.innerHTML = `
       <div style="background:var(--card-bg);border-radius:16px;padding:1.5rem;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
-        <h3 style="margin:0 0 0.5rem;font-size:16px;">${title}</h3>
+        <h3 style="margin:0 0 0.5rem;font-size:16px;color:var(--text);">${title}</h3>
         <p style="margin:0 0 1.2rem;font-size:13px;color:var(--text-muted);line-height:1.6;">${message}</p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
-          <button id="confirmNo"  style="padding:8px 18px;border-radius:8px;border:1.5px solid var(--border);background:none;cursor:pointer;font-size:13px;">No</button>
+          <button id="confirmNo"  style="padding:8px 18px;border-radius:8px;border:1.5px solid var(--border);background:none;color:var(--text);cursor:pointer;font-size:13px;">No</button>
           <button id="confirmYes" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--g-700),var(--g-500));color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Yes, Confirm</button>
         </div>
       </div>
@@ -4546,6 +4734,12 @@ function closeReviewRequestModal() {
 async function submitReview(status) {
   const requestId = document.getElementById('reviewRequestId').value;
   const adminNote = document.getElementById('reviewAdminNote').value;
+  const approveBtn = document.querySelector('#reviewRequestModal .btn-solid-green');
+  const rejectBtn  = document.querySelector('#reviewRequestModal .btn[style*="#ef4444"]');
+  const clickedBtn = status === 'approved' ? approveBtn : rejectBtn;
+  const otherBtn    = status === 'approved' ? rejectBtn : approveBtn;
+  setButtonLoading(clickedBtn, true);
+  if (otherBtn) otherBtn.disabled = true;
   try {
     const res = await fetch(`/api/admin/stock-requests/${requestId}`, {
       method: 'PUT',
@@ -4561,6 +4755,10 @@ async function submitReview(status) {
       showToast(err.error || 'Failed.', 'error');
     }
   } catch (e) { showToast('Error.', 'error'); }
+  finally {
+    setButtonLoading(clickedBtn, false);
+    if (otherBtn) otherBtn.disabled = false;
+  }
 }
 
 // ─── Create Purchase Order ────────────────────────────
@@ -4671,7 +4869,6 @@ function updatePOTotal() {
 
 async function submitCreatePO() {
   const createBtn = document.querySelector('#createPOModal .btn-solid-green');
-  if (createBtn) { setButtonLoading(createBtn, true); }
   const supplier = document.getElementById('poSupplier').value.trim();
   const note     = document.getElementById('poNote').value.trim();
   if (!supplier) { showToast('Supplier name is required.', 'error'); return; }
@@ -4694,6 +4891,9 @@ async function submitCreatePO() {
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
 
+  // Validation passed — now (and only now) enter the loading state, so a
+  // failed validation never leaves the button stuck showing "Processing...".
+  setButtonLoading(createBtn, true);
   try {
     const res = await fetch('/api/admin/purchase-orders', {
       method: 'POST',
@@ -4718,6 +4918,7 @@ async function submitCreatePO() {
       showToast(err.error || 'Failed to create PO.', 'error');
     }
   } catch (e) { showToast('Error.', 'error'); }
+  finally { setButtonLoading(createBtn, false); }
 }
 
 
@@ -4858,8 +5059,8 @@ function openPODetail(poId) {
   footer.innerHTML = `<button type="button" class="btn btn-cancel" onclick="closePODetailModal()">Close</button>`;
   if (po.status === 'draft') {
     footer.innerHTML += `
-      <button class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
-      <button class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
+      <button id="cancelPOBtn" class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
+      <button id="markOrderedBtn" class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
   } else if (po.status === 'ordered') {
     // Build per-item receive + distribute UI
     const itemRows = items.map((item, idx) => {
@@ -4994,7 +5195,7 @@ async function submitPOReceive(poId) {
   });
 
   var btn = document.getElementById('markReceivedBtn');
-  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+  setButtonLoading(btn, true);
 
   try {
     const res = await fetch('/api/admin/purchase-orders/' + poId, {
@@ -5010,17 +5211,22 @@ async function submitPOReceive(poId) {
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to receive PO.', 'error');
-      if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
+      setButtonLoading(btn, false);
     }
   } catch (e) {
     showToast('Error submitting.', 'error');
-    if (btn) { btn.disabled = false; btn.textContent = 'Mark as Received ✓'; }
+    setButtonLoading(btn, false);
   }
 }
 
 async function updatePOStatus(poId, status, branchId = null, branches = null) {
   const po = allPOs.find(p => p.po_id === poId);
-  const activeBtn = document.getElementById(status === 'received' ? 'markReceivedBtn' : 'markOrderedBtn');
+  const activeBtnId = status === 'received' ? 'markReceivedBtn' : status === 'ordered' ? 'markOrderedBtn' : 'cancelPOBtn';
+  const otherBtnId  = status === 'ordered' ? 'cancelPOBtn' : status === 'cancelled' ? 'markOrderedBtn' : null;
+  const activeBtn = document.getElementById(activeBtnId);
+  const otherBtn  = otherBtnId ? document.getElementById(otherBtnId) : null;
+  setButtonLoading(activeBtn, true);
+  if (otherBtn) otherBtn.disabled = true;
   try {
     const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
       method: 'PUT',
@@ -5028,7 +5234,6 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
       body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId, branches: branches }),
     });
     if (res.ok) {
-      if (activeBtn) { activeBtn.disabled = false; activeBtn.textContent = status === 'received' ? 'Mark as Received ✓' : 'Mark as Ordered'; }
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
@@ -5043,7 +5248,11 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
       const err = await res.json();
       showToast(err.error || 'Failed to update PO.', 'error');
     }
-  } catch (e) { if (createBtn) { setButtonLoading(createBtn, false); } showToast('Error.', 'error'); }
+  } catch (e) { showToast('Error.', 'error'); }
+  finally {
+    setButtonLoading(activeBtn, false);
+    if (otherBtn) otherBtn.disabled = false;
+  }
 }
 
 
