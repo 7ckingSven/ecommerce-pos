@@ -1978,6 +1978,21 @@ def admin_update_purchase_order(po_id):
                 po_items_res = supabase.table('po_item').select('po_item_id, product_id, variant_options').in_('po_item_id', po_item_ids).execute() if po_item_ids else type('obj', (object,), {'data': []})()
                 variant_map  = {r['po_item_id']: r.get('variant_options') for r in (po_items_res.data or [])}
 
+                # Validate BEFORE writing anything: each item's branch
+                # distribution must add up exactly to its received_quantity.
+                # A partial split (e.g. received 20, only 10 distributed)
+                # would silently lose track of the other 10 units, so the
+                # whole request is rejected rather than applying it partially.
+                for item_entry in items_payload:
+                    received_qty = int(item_entry.get('received_quantity', 0))
+                    if received_qty <= 0:
+                        continue
+                    dist_total = sum(int(b.get('quantity', 0)) for b in item_entry.get('branches', []))
+                    if dist_total != received_qty:
+                        return jsonify({
+                            'error': f'Branch distribution ({dist_total}) must equal actually received ({received_qty}) for one or more items.'
+                        }), 400
+
                 for item_entry in items_payload:
                     product_id      = item_entry.get('product_id')
                     po_item_id      = item_entry.get('po_item_id')
