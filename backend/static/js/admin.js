@@ -5183,12 +5183,14 @@ function validatePODistribution() {
 
     var errEl   = document.getElementById('distError_' + idx);
     var countEl = document.getElementById('distCount_' + idx);
-    var over    = distTotal > recvQty;
     var none    = recvQty <= 0;
+    var over    = !none && distTotal > recvQty;
+    var under   = !none && distTotal < recvQty;
+    var matches = !none && distTotal === recvQty;
 
     if (countEl) {
       countEl.textContent = 'Distributed: ' + distTotal + ' / ' + recvQty + ' received';
-      countEl.style.color = over ? '#ef4444' : distTotal === recvQty ? 'var(--g-400)' : 'var(--text-muted)';
+      countEl.style.color = matches ? 'var(--g-400)' : (over || under) ? '#ef4444' : 'var(--text-muted)';
     }
     if (errEl) {
       if (over) {
@@ -5197,12 +5199,20 @@ function validatePODistribution() {
       } else if (none) {
         errEl.textContent = '⚠ Enter the actually received quantity above (must be > 0)';
         errEl.style.display = '';
+      } else if (under) {
+        var remaining = recvQty - distTotal;
+        errEl.textContent = '⚠ Total distributed (' + distTotal + ') must equal actually received (' + recvQty + ') — allocate the remaining ' + remaining + ' unit' + (remaining === 1 ? '' : 's');
+        errEl.style.display = '';
       } else {
         errEl.style.display = 'none';
       }
     }
 
-    if (over || none || distTotal === 0) allValid = false;
+    // Branch distribution must add up EXACTLY to the actually-received
+    // quantity — partial allocation (e.g. received 20, distributed only 10)
+    // would silently lose track of the other 10 units, so it's rejected
+    // the same as over-allocating.
+    if (!matches) allValid = false;
   });
 
   var btn = document.getElementById('markReceivedBtn');
