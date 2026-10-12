@@ -1940,77 +1940,127 @@ def admin_update_purchase_order(po_id):
     try:
         data   = request.get_json()
         status = data.get('status')
-        updates = {'status': status, 'updated_at': 'now()'}
+
+        # A "received" request is a RECEIVING ACTION, not necessarily the
+        # PO's final state — the supplier may have shorted the order (e.g.
+        # ordered 30, only 20 showed up), so this may only partially fill
+        # it. purchase_order.status is computed from the items' cumulative
+        # received_quantity after applying this batch (see below), instead
+        # of being set to 'received' up front like the other statuses.
+        if status != 'received':
+            updates = {'status': status, 'updated_at': 'now()'}
+            if data.get('supplier'): updates['supplier'] = data['supplier']
+            if data.get('note'):     updates['note']     = data['note']
+            supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
+            return jsonify({'message': f'PO status updated to {status}.'}), 200
+
+        # ─── Receiving action ──────────────────────────────
+        import time
+        items_payload = data.get('items', [])  # [{po_item_id, product_id, received_quantity, branches:[{branch_id,quantity}]}]
+        # received_quantity here is the amount arriving THIS batch, not the
+        # cumulative total — a PO can be received across several batches
+        # until every item's running total reaches what was ordered.
+
+        # Fallback: legacy single-branch or flat branches payload — fully
+        # receives every item in one shot (no partial tracking), same as
+        # the original behavior.
+        if not items_payload:
+            po_branch_id = data.get('branch_id')
+            branches     = data.get('branches', [])
+            items_res = supabase.table('po_item').select(
+                '*, product(quantity), variant_options'
+            ).eq('po_id', po_id).execute()
+
+            if branches:
+                branch_list = [(b['branch_id'], int(b['quantity'])) for b in branches if b.get('branch_id') and int(b.get('quantity', 0)) > 0]
+            elif po_branch_id:
+                branch_list = [(po_branch_id, None)]
+            else:
+                branch_list = []
+
+            for item in items_res.data:
+                variant_options = item.get('variant_options')
+                item_qty        = item['quantity']
+                for (b_id, b_qty) in branch_list:
+                    qty_added = b_qty if b_qty is not None else item_qty
+                    _po_add_branch_stock(supabase, session, item['product_id'], b_id, qty_added, variant_options, data.get('po_number', po_id))
+                supabase.table('po_item').update({'received_quantity': item_qty}).eq('po_item_id', item['po_item_id']).execute()
+
+            updates = {'status': 'received', 'updated_at': 'now()'}
+            if data.get('supplier'): updates['supplier'] = data['supplier']
+            if data.get('note'):     updates['note']     = data['note']
+            supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
+            return jsonify({'message': 'PO status updated to received.'}), 200
+
+        # New per-item payload from the receive modal.
+        # Fetch EVERY item on this PO (not just the ones in this batch) —
+        # we need each one's ordered qty + already-received qty to know
+        # whether this batch completes the whole PO or leaves it partial.
+        all_items_res = supabase.table('po_item').select(
+            'po_item_id, product_id, quantity, received_quantity, variant_options'
+        ).eq('po_id', po_id).execute()
+        all_items   = all_items_res.data or []
+        items_by_id = {i['po_item_id']: i for i in all_items}
+
+        # Validate BEFORE writing anything:
+        #  - the amount arriving this batch can't exceed what's still
+        #    outstanding for that item (ordered minus already received)
+        #  - branch distribution must add up EXACTLY to the amount arriving
+        #    this batch — a partial split (e.g. 20 arriving, only 10
+        #    distributed) would silently lose track of the other 10
+        for item_entry in items_payload:
+            po_item = items_by_id.get(item_entry.get('po_item_id'))
+            if not po_item:
+                continue
+            this_batch = int(item_entry.get('received_quantity', 0))
+            if this_batch <= 0:
+                continue  # not receiving this item in this batch — fine
+            outstanding = po_item['quantity'] - po_item.get('received_quantity', 0)
+            if this_batch > outstanding:
+                return jsonify({
+                    'error': f"Quantity arriving ({this_batch}) exceeds what's still outstanding ({outstanding}) for one or more items."
+                }), 400
+            dist_total = sum(int(b.get('quantity', 0)) for b in item_entry.get('branches', []))
+            if dist_total != this_batch:
+                return jsonify({
+                    'error': f'Branch distribution ({dist_total}) must equal the quantity arriving this batch ({this_batch}) for one or more items.'
+                }), 400
+
+        for item_entry in items_payload:
+            po_item = items_by_id.get(item_entry.get('po_item_id'))
+            if not po_item:
+                continue
+            this_batch      = int(item_entry.get('received_quantity', 0))
+            if this_batch <= 0:
+                continue
+            product_id      = item_entry.get('product_id') or po_item['product_id']
+            branch_dist     = item_entry.get('branches', [])  # [{branch_id, quantity}]
+            variant_options = po_item.get('variant_options')
+
+            for b in branch_dist:
+                b_id  = b.get('branch_id')
+                b_qty = int(b.get('quantity', 0))
+                if not b_id or b_qty <= 0:
+                    continue
+                _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
+
+            new_received = po_item.get('received_quantity', 0) + this_batch
+            supabase.table('po_item').update({'received_quantity': new_received}).eq('po_item_id', po_item['po_item_id']).execute()
+            po_item['received_quantity'] = new_received  # keep local copy in sync for the completeness check below
+
+        # The whole PO only becomes 'received' once every line item's
+        # running total has reached its ordered quantity — otherwise it
+        # stays 'partially_received' so it can be opened again later for
+        # whatever the supplier still owes.
+        all_complete = all(i['received_quantity'] >= i['quantity'] for i in all_items)
+        final_status = 'received' if all_complete else 'partially_received'
+
+        updates = {'status': final_status, 'updated_at': 'now()'}
         if data.get('supplier'): updates['supplier'] = data['supplier']
         if data.get('note'):     updates['note']     = data['note']
         supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
 
-        # If received → add stock per item with per-branch distribution
-        if status == 'received':
-            import time
-            items_payload = data.get('items', [])  # [{po_item_id, product_id, received_quantity, branches:[{branch_id,quantity}]}]
-
-            # Fallback: legacy single-branch or flat branches payload
-            if not items_payload:
-                po_branch_id = data.get('branch_id')
-                branches     = data.get('branches', [])
-                items_res = supabase.table('po_item').select(
-                    '*, product(quantity), variant_options'
-                ).eq('po_id', po_id).execute()
-
-                if branches:
-                    branch_list = [(b['branch_id'], int(b['quantity'])) for b in branches if b.get('branch_id') and int(b.get('quantity', 0)) > 0]
-                elif po_branch_id:
-                    branch_list = [(po_branch_id, None)]
-                else:
-                    branch_list = []
-
-                for item in items_res.data:
-                    variant_options = item.get('variant_options')
-                    item_qty        = item['quantity']
-                    for (b_id, b_qty) in branch_list:
-                        qty_added = b_qty if b_qty is not None else item_qty
-                        _po_add_branch_stock(supabase, session, item['product_id'], b_id, qty_added, variant_options, data.get('po_number', po_id))
-            else:
-                # New per-item payload from the receive modal
-                # Fetch variant_options for each po_item_id
-                po_item_ids  = [i['po_item_id'] for i in items_payload if i.get('po_item_id')]
-                po_items_res = supabase.table('po_item').select('po_item_id, product_id, variant_options').in_('po_item_id', po_item_ids).execute() if po_item_ids else type('obj', (object,), {'data': []})()
-                variant_map  = {r['po_item_id']: r.get('variant_options') for r in (po_items_res.data or [])}
-
-                # Validate BEFORE writing anything: each item's branch
-                # distribution must add up exactly to its received_quantity.
-                # A partial split (e.g. received 20, only 10 distributed)
-                # would silently lose track of the other 10 units, so the
-                # whole request is rejected rather than applying it partially.
-                for item_entry in items_payload:
-                    received_qty = int(item_entry.get('received_quantity', 0))
-                    if received_qty <= 0:
-                        continue
-                    dist_total = sum(int(b.get('quantity', 0)) for b in item_entry.get('branches', []))
-                    if dist_total != received_qty:
-                        return jsonify({
-                            'error': f'Branch distribution ({dist_total}) must equal actually received ({received_qty}) for one or more items.'
-                        }), 400
-
-                for item_entry in items_payload:
-                    product_id      = item_entry.get('product_id')
-                    po_item_id      = item_entry.get('po_item_id')
-                    received_qty    = int(item_entry.get('received_quantity', 0))
-                    branch_dist     = item_entry.get('branches', [])  # [{branch_id, quantity}]
-                    variant_options = variant_map.get(po_item_id)
-
-                    if not product_id or received_qty <= 0:
-                        continue
-
-                    for b in branch_dist:
-                        b_id    = b.get('branch_id')
-                        b_qty   = int(b.get('quantity', 0))
-                        if not b_id or b_qty <= 0:
-                            continue
-                        _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
-
-        return jsonify({'message': f'PO status updated to {status}.'}), 200
+        return jsonify({'message': f'PO status updated to {final_status}.'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

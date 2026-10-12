@@ -536,6 +536,7 @@ function badge(text, type) {
     paid: 'green', failed: 'red',
     admin: 'blue', staff: 'green', customer: 'gray',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
+    draft: 'gray', ordered: 'blue', partially_received: 'yellow', received: 'green',
   };
   const label = text === 'out_for_delivery' ? 'Out for Delivery' : text.replace(/_/g, ' ');
   return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
@@ -5072,20 +5073,27 @@ function openPODetail(poId) {
       ${po.note ? `<div><strong>Note:</strong> ${po.note}</div>` : ''}
     </div>
     <table class="data-table" style="margin-bottom:1rem;">
-      <thead><tr><th>Product</th><th>Qty</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
+      <thead><tr><th>Product</th><th>Qty</th><th>Received</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
       <tbody>
-        ${items.map(i => `
+        ${items.map(i => {
+          const orderedQty  = Number(i.quantity);
+          const receivedQty = Number(i.received_quantity || 0);
+          const complete    = receivedQty >= orderedQty;
+          const recvColor   = complete ? 'var(--g-400)' : receivedQty > 0 ? '#eab308' : 'var(--text-muted)';
+          return `
           <tr>
             <td>
               ${i.product?.product_name || '—'}
               ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>` : ''}
             </td>
-            <td>${i.quantity}</td>
+            <td>${orderedQty}</td>
+            <td style="color:${recvColor};font-weight:600;">${receivedQty} / ${orderedQty}</td>
             <td>${peso(i.unit_cost)}</td>
-            <td>${peso(Number(i.unit_cost) * Number(i.quantity))}</td>
-          </tr>`).join('')}
+            <td>${peso(Number(i.unit_cost) * orderedQty)}</td>
+          </tr>`;
+        }).join('')}
         <tr style="font-weight:700;">
-          <td colspan="3" style="text-align:right;">Total</td>
+          <td colspan="4" style="text-align:right;">Total</td>
           <td>${peso(total)}</td>
         </tr>
       </tbody>
@@ -5098,14 +5106,30 @@ function openPODetail(poId) {
     footer.innerHTML += `
       <button id="cancelPOBtn" class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
       <button id="markOrderedBtn" class="btn btn-solid-green" onclick="updatePOStatus('${poId}', 'ordered')">Mark as Ordered</button>`;
-  } else if (po.status === 'ordered') {
-    // Build per-item receive + distribute UI
+  } else if (po.status === 'ordered' || po.status === 'partially_received') {
+    // Build per-item receive + distribute UI. Each row is driven by what's
+    // still OUTSTANDING (ordered minus whatever earlier batches already
+    // received), not the original ordered qty — so a short delivery can be
+    // completed later without re-receiving units that already arrived.
     const itemRows = items.map((item, idx) => {
-      const orderedQty = Number(item.quantity);
+      const orderedQty      = Number(item.quantity);
+      const alreadyReceived = Number(item.received_quantity || 0);
+      const outstanding     = Math.max(orderedQty - alreadyReceived, 0);
       const productLabel = (item.product?.product_name || '—')
         + (item.variant_options && Object.keys(item.variant_options).length
             ? ' <span style="font-size:10px;color:var(--text-muted);">(' + Object.entries(item.variant_options).map(([k,v])=>k+': '+v).join(', ') + ')</span>'
             : '');
+
+      if (outstanding <= 0) {
+        // Already fully received in an earlier batch — nothing left to do
+        // here. No data-item-idx, so validatePODistribution() skips it.
+        return `
+          <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.7;">
+            <span style="font-size:13px;font-weight:600;">${productLabel}</span>
+            <span style="font-size:11px;color:var(--g-400);margin-left:8px;">✓ Fully received (${orderedQty}/${orderedQty})</span>
+          </div>`;
+      }
+
       const branchInputs = allBranches.map(b =>
         `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
           <label style="font-size:12px;font-weight:500;min-width:120px;">${b.branch_name}</label>
@@ -5117,16 +5141,17 @@ function openPODetail(poId) {
         </div>`
       ).join('');
       return `
-        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;" data-item-idx="${idx}" data-ordered="${orderedQty}">
+        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
             <span style="font-size:13px;font-weight:600;">${productLabel}</span>
             <span style="font-size:11px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
+            ${alreadyReceived > 0 ? `<span style="font-size:11px;color:var(--text-muted);">Already received: ${alreadyReceived}</span>` : ''}
             <div style="display:flex;align-items:center;gap:6px;">
-              <label style="font-size:11px;color:var(--text-muted);">Actually received:</label>
-              <input type="number" id="recv_${idx}" min="0" max="${orderedQty}" value="${orderedQty}"
+              <label style="font-size:11px;color:var(--text-muted);">Receiving now:</label>
+              <input type="number" id="recv_${idx}" min="0" max="${outstanding}" value="${outstanding}"
                 style="width:64px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:12px;font-weight:600;"
                 oninput="validatePODistribution()"/>
-              <span style="font-size:11px;color:var(--text-muted);">/ ${orderedQty} max</span>
+              <span style="font-size:11px;color:var(--text-muted);">/ ${outstanding} outstanding</span>
             </div>
           </div>
           <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
@@ -5141,7 +5166,7 @@ function openPODetail(poId) {
         <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
         ${itemRows}
       </div>
-      <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Mark as Received ✓</button>`;
+      <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Save Receipt ✓</button>`;
 
     // Run initial validation to set counter labels
     setTimeout(validatePODistribution, 0);
@@ -5157,22 +5182,34 @@ function closePODetailModal() {
 }
 
 // ─── PO Receive & Distribute Validation ──────────────────
+// A batch can legitimately receive SOME items and not others (e.g. the
+// supplier delivered 2 of 3 products today) — so "receiving now: 0" for a
+// line item is a valid "skip it this round" state, not an error. What IS
+// still required: whatever amount IS entered for a line must have its
+// branch distribution add up exactly, and at least one line in the batch
+// must be > 0 (otherwise there's nothing to submit).
 function validatePODistribution() {
   var footer   = document.getElementById('poDetailFooter');
+  var btn      = document.getElementById('markReceivedBtn');
   if (!footer) return;
   var itemDivs = footer.querySelectorAll('[data-item-idx]');
-  if (!itemDivs.length) return;
+  if (!itemDivs.length) {
+    // Every item on this PO was already fully received in an earlier batch.
+    if (btn) btn.disabled = true;
+    return;
+  }
 
-  var allValid = true;
+  var allValid     = true;
+  var anyReceiving = false;
 
   itemDivs.forEach(function(div) {
-    var idx        = div.getAttribute('data-item-idx');
-    var orderedQty = parseInt(div.getAttribute('data-ordered')) || 0;
-    var recvInput  = document.getElementById('recv_' + idx);
-    var recvQty    = Math.min(parseInt(recvInput?.value || '0'), orderedQty);
-    if (recvInput && parseInt(recvInput.value) > orderedQty) {
-      recvInput.value = orderedQty; // clamp silently
-      recvQty = orderedQty;
+    var idx    = div.getAttribute('data-item-idx');
+    var maxQty = parseInt(div.getAttribute('data-max')) || 0;
+    var recvInput = document.getElementById('recv_' + idx);
+    var recvQty   = Math.min(parseInt(recvInput?.value || '0'), maxQty);
+    if (recvInput && parseInt(recvInput.value) > maxQty) {
+      recvInput.value = maxQty; // clamp silently
+      recvQty = maxQty;
     }
 
     var distTotal  = 0;
@@ -5183,40 +5220,40 @@ function validatePODistribution() {
 
     var errEl   = document.getElementById('distError_' + idx);
     var countEl = document.getElementById('distCount_' + idx);
-    var none    = recvQty <= 0;
-    var over    = !none && distTotal > recvQty;
-    var under   = !none && distTotal < recvQty;
-    var matches = !none && distTotal === recvQty;
+    var skipped = recvQty <= 0;
+    var over    = !skipped && distTotal > recvQty;
+    var under   = !skipped && distTotal < recvQty;
+    var matches = !skipped && distTotal === recvQty;
+
+    if (!skipped) anyReceiving = true;
 
     if (countEl) {
-      countEl.textContent = 'Distributed: ' + distTotal + ' / ' + recvQty + ' received';
+      countEl.textContent = skipped
+        ? 'Not receiving this item in this batch'
+        : 'Distributed: ' + distTotal + ' / ' + recvQty + ' receiving now';
       countEl.style.color = matches ? 'var(--g-400)' : (over || under) ? '#ef4444' : 'var(--text-muted)';
     }
     if (errEl) {
       if (over) {
-        errEl.textContent = '⚠ Total distributed (' + distTotal + ') exceeds received (' + recvQty + ')';
-        errEl.style.display = '';
-      } else if (none) {
-        errEl.textContent = '⚠ Enter the actually received quantity above (must be > 0)';
+        errEl.textContent = '⚠ Total distributed (' + distTotal + ') exceeds the quantity being received (' + recvQty + ')';
         errEl.style.display = '';
       } else if (under) {
         var remaining = recvQty - distTotal;
-        errEl.textContent = '⚠ Total distributed (' + distTotal + ') must equal actually received (' + recvQty + ') — allocate the remaining ' + remaining + ' unit' + (remaining === 1 ? '' : 's');
+        errEl.textContent = '⚠ Total distributed (' + distTotal + ') must equal the quantity being received (' + recvQty + ') — allocate the remaining ' + remaining + ' unit' + (remaining === 1 ? '' : 's');
         errEl.style.display = '';
       } else {
         errEl.style.display = 'none';
       }
     }
 
-    // Branch distribution must add up EXACTLY to the actually-received
-    // quantity — partial allocation (e.g. received 20, distributed only 10)
-    // would silently lose track of the other 10 units, so it's rejected
-    // the same as over-allocating.
-    if (!matches) allValid = false;
+    // Branch distribution must add up EXACTLY to the quantity being
+    // received THIS batch (when that quantity is > 0) — partial allocation
+    // (e.g. receiving 20, distributed only 10) would silently lose track
+    // of the other 10 units, so it's rejected the same as over-allocating.
+    if (!skipped && !matches) allValid = false;
   });
 
-  var btn = document.getElementById('markReceivedBtn');
-  if (btn) btn.disabled = !allValid;
+  if (btn) btn.disabled = !allValid || !anyReceiving;
 }
 
 async function submitPOReceive(poId) {
@@ -5245,19 +5282,22 @@ async function submitPOReceive(poId) {
   setButtonLoading(btn, true);
 
   try {
-    const res = await fetch('/api/admin/purchase-orders/' + poId, {
+    const res  = await fetch('/api/admin/purchase-orders/' + poId, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'received', po_number: po.po_number, items: itemsPayload }),
     });
+    const body = await res.json().catch(() => ({}));
     if (res.ok) {
-      showToast('PO marked as received!');
+      // Backend decides the real outcome — 'received' only if every item's
+      // running total now meets its ordered qty, otherwise
+      // 'partially_received' with the shortfall still outstanding.
+      showToast(body.message || 'Receipt saved!');
       closePODetailModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
       invalidateSection('inventory'); loadInventory();
     } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to receive PO.', 'error');
+      showToast(body.error || 'Failed to receive PO.', 'error');
       setButtonLoading(btn, false);
     }
   } catch (e) {

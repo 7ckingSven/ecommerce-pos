@@ -255,7 +255,7 @@ Admin creates POs for restocking from suppliers.
 | `po_id` | UUID | **PK**, DEFAULT uuid_generate_v4() | Unique PO identifier |
 | `po_number` | VARCHAR | NOT NULL, UNIQUE | PO number (e.g. PO-202608-001) |
 | `supplier` | VARCHAR | | Supplier name |
-| `status` | VARCHAR | DEFAULT 'draft' | `draft`, `ordered`, `received`, `cancelled` |
+| `status` | VARCHAR | DEFAULT 'draft' | `draft`, `ordered`, `partially_received`, `received`, `cancelled` |
 | `total` | DECIMAL(10,2) | DEFAULT 0 | Total PO value |
 | `note` | TEXT | | PO notes |
 | `created_by` | UUID | **FK** → staff.staff_id | Admin who created PO |
@@ -273,6 +273,7 @@ Individual items within each purchase order.
 | `product_id` | UUID | **FK** → product.product_id | Product |
 | `quantity` | INT | NOT NULL | Units ordered from supplier |
 | `unit_cost` | DECIMAL(10,2) | NOT NULL | Cost per unit |
+| `received_quantity` | INT | NOT NULL, DEFAULT 0 | Cumulative units actually received so far (may be < quantity if the supplier shorted the order — PO stays `partially_received` until this reaches `quantity`) |
 
 ---
 
