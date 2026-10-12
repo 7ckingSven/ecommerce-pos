@@ -4743,7 +4743,7 @@ function renderStockRequests(requests) {
             return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
           })()}</td>
           <td>
-            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${r.product?.product_name}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
+            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${(r.product?.product_name || '').replace(/'/g, "\\'")}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </td>
