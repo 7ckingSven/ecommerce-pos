@@ -14,9 +14,16 @@ import os
 import glob
 import random
 import string
+import jwt
 
 # Load .env file
 load_dotenv()
+
+# Supabase Legacy JWT Secret — used to mint Supabase-compatible tokens for
+# customer logins, so Realtime/RLS can recognize auth.uid() == customer_id
+# without a separate Supabase Auth account. Server-side only, never sent
+# to any client.
+SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET')
 
 # Initialize Flask
 app = Flask(__name__)
@@ -86,6 +93,20 @@ def check_password(plain, hashed):
 
 def verify_password(plain, hashed):
     return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
+
+def make_supabase_token(customer_id, expires_in=3600):
+    """Mints a Supabase-compatible JWT so Realtime/RLS can recognize this
+    customer as auth.uid() == customer_id, without a separate Supabase Auth
+    account. Signed with the project's Legacy JWT Secret."""
+    now = int(_time.time())
+    payload = {
+        'sub':  str(customer_id),
+        'role': 'authenticated',
+        'aud':  'authenticated',
+        'iat':  now,
+        'exp':  now + expires_in,
+    }
+    return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm='HS256')
 
 def login_required(role=None):
     def decorator(f):
@@ -630,6 +651,7 @@ def api_login():
         return jsonify({
             'message':  'Login successful',
             'user_id':  user['user_id'],
+            'supabase_token': make_supabase_token(customer['customer_id']),
             'customer': {
                 'customer_id':  customer['customer_id'],
                 'fname':        customer['fname'],

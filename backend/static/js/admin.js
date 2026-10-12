@@ -3330,6 +3330,19 @@ function renderSalesData(completed, allOrders) {
   document.getElementById('branchFC_walkin').textContent  = fc.walkin;
   document.getElementById('branchFC_online').textContent  = fc.online;
 
+  // Show only the selected branch's card when a specific branch is chosen
+  // in the filter — previously both cards always showed regardless of the
+  // dropdown, which is why "Triple E" or "Fiel Collince" filtered reports
+  // still carried both branches' breakdown boxes.
+  const showTE = currentSalesBranchFilter === 'all' || currentSalesBranchFilter === teId;
+  const showFC = currentSalesBranchFilter === 'all' || currentSalesBranchFilter === fcId;
+  const teCard = document.getElementById('branchTECard');
+  const fcCard = document.getElementById('branchFCCard');
+  const cardsGrid = document.getElementById('branchCardsGrid');
+  if (teCard) teCard.style.display = showTE ? '' : 'none';
+  if (fcCard) fcCard.style.display = showFC ? '' : 'none';
+  if (cardsGrid) cardsGrid.style.gridTemplateColumns = (showTE && showFC) ? '1fr 1fr' : '1fr';
+
   // Branch chart
   const branchCtx = document.getElementById('branchChart')?.getContext('2d');
   if (branchCtx) {
@@ -3476,6 +3489,32 @@ function printSalesReport() {
   // Payment breakdown
   const payRows   = document.getElementById('paymentBreakdownBody')?.innerHTML || '';
 
+  // Only include the selected branch's box — previously this always printed
+  // both Triple E and Fiel Collince regardless of the branch filter.
+  const teId   = allBranches.find(b => b.branch_name?.toLowerCase().includes('triple'))?.branch_id;
+  const fcId   = allBranches.find(b => b.branch_name?.toLowerCase().includes('fiel') || b.branch_name?.toLowerCase().includes('collince'))?.branch_id;
+  const showTE = currentSalesBranchFilter === 'all' || currentSalesBranchFilter === teId;
+  const showFC = currentSalesBranchFilter === 'all' || currentSalesBranchFilter === fcId;
+  const branchBoxesHtml = [
+    showTE ? `
+      <div class="branch-box">
+        <div class="branch-name">Triple E</div>
+        <div class="branch-row"><span>Total Revenue</span><span><b>${teRev}</b></span></div>
+        <div class="branch-row"><span>Total Orders</span><span>${teOrders}</span></div>
+        <div class="branch-row"><span>Walk-in Orders</span><span>${teWalkin}</span></div>
+        <div class="branch-row"><span>Online Orders</span><span>${teOnline}</span></div>
+      </div>` : '',
+    showFC ? `
+      <div class="branch-box">
+        <div class="branch-name">Fiel Collince</div>
+        <div class="branch-row"><span>Total Revenue</span><span><b>${fcRev}</b></span></div>
+        <div class="branch-row"><span>Total Orders</span><span>${fcOrders}</span></div>
+        <div class="branch-row"><span>Walk-in Orders</span><span>${fcWalkin}</span></div>
+        <div class="branch-row"><span>Online Orders</span><span>${fcOnline}</span></div>
+      </div>` : '',
+  ].join('');
+  const branchGridCols = (showTE && showFC) ? 'repeat(2, 1fr)' : '1fr';
+
   const printWin = window.open('', '_blank', 'width=900,height=700');
   printWin.document.write(`
 <!DOCTYPE html>
@@ -3535,21 +3574,8 @@ function printSalesReport() {
   <!-- Branch Breakdown -->
   <div class="section">
     <div class="section-title">Branch Sales Breakdown</div>
-    <div class="branch-grid">
-      <div class="branch-box">
-        <div class="branch-name">Triple E</div>
-        <div class="branch-row"><span>Total Revenue</span><span><b>${teRev}</b></span></div>
-        <div class="branch-row"><span>Total Orders</span><span>${teOrders}</span></div>
-        <div class="branch-row"><span>Walk-in Orders</span><span>${teWalkin}</span></div>
-        <div class="branch-row"><span>Online Orders</span><span>${teOnline}</span></div>
-      </div>
-      <div class="branch-box">
-        <div class="branch-name">Fiel Collince</div>
-        <div class="branch-row"><span>Total Revenue</span><span><b>${fcRev}</b></span></div>
-        <div class="branch-row"><span>Total Orders</span><span>${fcOrders}</span></div>
-        <div class="branch-row"><span>Walk-in Orders</span><span>${fcWalkin}</span></div>
-        <div class="branch-row"><span>Online Orders</span><span>${fcOnline}</span></div>
-      </div>
+    <div class="branch-grid" style="grid-template-columns:${branchGridCols};">
+      ${branchBoxesHtml}
     </div>
   </div>
 
@@ -3609,6 +3635,13 @@ function exportSalesExcel() {
   const branchLabel = branchSel?.selectedOptions[0]?.text || 'All Branches';
   const now         = new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric' });
 
+  // Only include the selected branch's row — previously this always exported
+  // both Triple E and Fiel Collince regardless of the branch filter.
+  const teId   = allBranches.find(b => b.branch_name?.toLowerCase().includes('triple'))?.branch_id;
+  const fcId   = allBranches.find(b => b.branch_name?.toLowerCase().includes('fiel') || b.branch_name?.toLowerCase().includes('collince'))?.branch_id;
+  const showTE = currentSalesBranchFilter === 'all' || currentSalesBranchFilter === teId;
+  const showFC = currentSalesBranchFilter === 'all' || currentSalesBranchFilter === fcId;
+
   // ── Sheet 1: Sales Summary ──────────────────────────
   const summaryData = [
     ['TEFC E-Commerce — Sales Report'],
@@ -3626,21 +3659,25 @@ function exportSalesExcel() {
     [],
     ['BRANCH BREAKDOWN'],
     ['Branch', 'Revenue', 'Total Orders', 'Walk-in', 'Online'],
-    [
+  ];
+  if (showTE) {
+    summaryData.push([
       'Triple E',
       document.getElementById('branchTE_revenue')?.textContent || '',
       document.getElementById('branchTE_orders')?.textContent  || '',
       document.getElementById('branchTE_walkin')?.textContent  || '',
       document.getElementById('branchTE_online')?.textContent  || '',
-    ],
-    [
+    ]);
+  }
+  if (showFC) {
+    summaryData.push([
       'Fiel Collince',
       document.getElementById('branchFC_revenue')?.textContent || '',
       document.getElementById('branchFC_orders')?.textContent  || '',
       document.getElementById('branchFC_walkin')?.textContent  || '',
       document.getElementById('branchFC_online')?.textContent  || '',
-    ],
-  ];
+    ]);
+  }
 
   // ── Sheet 2: Top Products ───────────────────────────
   const topRows   = [];

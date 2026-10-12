@@ -11,6 +11,7 @@ import { getOrders } from '../services/orderService';
 import api from '../services/api';
 import { getCustomerId } from '../services/authService';
 import { isLoggedIn } from '../services/authService';
+import { supabase } from '../services/supabase';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
@@ -119,15 +120,44 @@ export default function OrdersScreen({ navigation }) {
   const [cancelling,       setCancelling]       = useState(false);
   const [, forceTick]     = useState(0); // re-render periodically to tick down the cancel window
 
-  // Load once whenever the Orders screen gains focus — no background polling
-  // (matches the web dashboards: data loads on view, refresh is on-demand).
+  // Load once whenever the Orders screen gains focus, then open a Realtime
+  // subscription scoped to this customer's own orders — a status change made
+  // from Admin/Staff (e.g. pending -> processing) now reflects here within a
+  // second or two instead of waiting for the next manual refresh. The
+  // subscription only ever triggers a refetch via the existing Flask
+  // getOrders() call (never trusts the realtime payload directly), so Flask
+  // stays the single source of truth for computed fields. Closed again on
+  // blur/unmount so navigating away doesn't leak an open socket.
   useFocusEffect(
     useCallback(() => {
-      isLoggedIn().then(logged => {
+      let channel = null;
+      let active  = true;
+
+      (async () => {
+        const logged = await isLoggedIn();
+        if (!active) return;
         setLoggedIn(logged);
-        if (logged) loadOrders();
-        else setLoading(false);
-      });
+        if (!logged) { setLoading(false); return; }
+
+        await loadOrders();
+        if (!active) return;
+
+        const customerId = await getCustomerId();
+        if (!active || !customerId) return;
+
+        channel = supabase
+          .channel('order-' + customerId)
+          .on('postgres_changes',
+            { event: 'UPDATE', schema: 'public', table: 'order', filter: `customer_id=eq.${customerId}` },
+            () => { if (active) loadOrders(); }
+          )
+          .subscribe();
+      })();
+
+      return () => {
+        active = false;
+        if (channel) supabase.removeChannel(channel);
+      };
     }, [])
   );
 

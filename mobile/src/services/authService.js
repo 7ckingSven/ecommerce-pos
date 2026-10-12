@@ -7,9 +7,12 @@ export async function login(loginInput, password) {
     login_input: loginInput,
     password,
   });
-  const { user_id, customer } = response.data;
+  const { user_id, customer, supabase_token } = response.data;
   await AsyncStorage.setItem('user_id',  user_id);
   await AsyncStorage.setItem('customer', JSON.stringify(customer));
+  if (supabase_token) {
+    await AsyncStorage.setItem('supabase_token', supabase_token);
+  }
   return response.data;
 }
 
@@ -21,7 +24,7 @@ export async function register(data) {
 
 // ─── Logout ───────────────────────────────────────────
 export async function logout() {
-  await AsyncStorage.multiRemove(['user_id', 'customer']);
+  await AsyncStorage.multiRemove(['user_id', 'customer', 'supabase_token']);
 }
 
 // ─── Get Current Customer ─────────────────────────────
@@ -40,4 +43,9 @@ export async function getCustomerId() {
 export async function isLoggedIn() {
   const user_id = await AsyncStorage.getItem('user_id');
   return !!user_id;
+}
+
+// ─── Get Supabase Token (for Realtime order status updates) ──
+export async function getSupabaseToken() {
+  return await AsyncStorage.getItem('supabase_token');
 }

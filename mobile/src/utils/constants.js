@@ -9,6 +9,11 @@ export const API_BASE_URL = ENV === 'emulator'
   ? 'http://10.0.2.2:5000/api'                     // Android emulator → local Flask
   : 'https://api.tefcecommerce.shop/api';           // Real phone → Render (custom domain)
 
+// ─── Supabase (Realtime order-status updates only — all other data still
+// goes through the Flask API above) ─────────────────────
+export const SUPABASE_URL      = 'https://<your-project-ref>.supabase.co';
+export const SUPABASE_ANON_KEY = '<your anon/public key — Settings → API>';
+
 // ─── App Info ─────────────────────────────────────────
 export const APP_NAME     = 'TEFC ECommerce';
 export const APP_SUBTITLE = 'Triple E & Fiel Collince General Merchandise';
