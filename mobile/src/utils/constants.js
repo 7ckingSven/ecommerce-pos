@@ -11,8 +11,8 @@ export const API_BASE_URL = ENV === 'emulator'
 
 // ─── Supabase (Realtime order-status updates only — all other data still
 // goes through the Flask API above) ─────────────────────
-export const SUPABASE_URL      = 'https://<your-project-ref>.supabase.co';
-export const SUPABASE_ANON_KEY = '<your anon/public key — Settings → API>';
+export const SUPABASE_URL      = 'https://klqtptysndojyeyyizvc.supabase.co';
+export const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImtscXRwdHlzbmRvanlleXlpenZjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI1NTI2MTMsImV4cCI6MjA4ODEyODYxM30.pU8fRIrK8WCwUWkunM1RkEZY5kE--amvNlAUbqagb_4';
 
 // ─── App Info ─────────────────────────────────────────
 export const APP_NAME     = 'TEFC ECommerce';
