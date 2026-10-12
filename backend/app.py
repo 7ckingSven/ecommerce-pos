@@ -668,6 +668,7 @@ def api_login():
 
     except Exception as e:
         print(f"API login error: {e}")
+        traceback.print_exc()
         return jsonify({'error': 'Something went wrong.'}), 500
 
 
