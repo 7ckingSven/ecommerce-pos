@@ -1,5 +1,6 @@
 import json
 import random
+import secrets
 import traceback
 from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
 from flask_cors import CORS
@@ -211,6 +212,28 @@ def make_supabase_token(customer_id, expires_in=3600):
     }
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm='HS256')
 
+def _session_token_valid():
+    """One-session-per-user check.
+
+    Returns True only if this browser session's token still matches the
+    token on file for this user in the database — i.e. no newer login
+    (from another device/browser) has taken over this account since this
+    session started. Fails OPEN on a transient DB error so a brief
+    Supabase hiccup never force-logs-out everyone.
+    """
+    user_id = session.get('user_id')
+    token   = session.get('session_token')
+    if not user_id or not token:
+        return False
+    try:
+        res = supabase.table('user').select('active_session_token').eq('user_id', user_id).execute()
+        if not res.data:
+            return False
+        return res.data[0].get('active_session_token') == token
+    except Exception as e:
+        print(f"Session check error: {e}")
+        return True
+
 def login_required(role=None):
     def decorator(f):
         @wraps(f)
@@ -221,6 +244,8 @@ def login_required(role=None):
             if role and session.get('role') != role:
                 flash('You do not have permission to access this page.', 'error')
                 return redirect(url_for('login'))
+            if not _session_token_valid():
+                return redirect(url_for('logout', reason='session_superseded'))
             return f(*args, **kwargs)
         return decorated
     return decorator
@@ -231,6 +256,8 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         if session.get('role') != 'admin':
             return jsonify({'error': 'Unauthorized'}), 401
+        if not _session_token_valid():
+            return jsonify({'error': 'Session expired - signed in elsewhere', 'reason': 'session_superseded'}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -240,6 +267,8 @@ def staff_required(f):
     def decorated(*args, **kwargs):
         if session.get('role') not in ('admin', 'staff'):
             return jsonify({'error': 'Unauthorized'}), 401
+        if not _session_token_valid():
+            return jsonify({'error': 'Session expired - signed in elsewhere', 'reason': 'session_superseded'}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -452,11 +481,23 @@ def login_post():
             
             if staff_res.data:
                 staff = staff_res.data[0]
-                session['user_id']  = user['user_id']
-                session['staff_id'] = staff['staff_id']
-                session['role']     = user['role']
-                session['name']     = f"{staff['fname']} {staff['lname']}"
-                
+
+                # One-session-per-user: issue a fresh token for THIS login
+                # and record it as the only valid one for this account. Any
+                # other browser/device already logged into this account
+                # will fail _session_token_valid() on its next request and
+                # get bounced to /logout?reason=session_superseded.
+                new_session_token = secrets.token_hex(32)
+                supabase.table('user').update(
+                    {'active_session_token': new_session_token}
+                ).eq('user_id', user['user_id']).execute()
+
+                session['user_id']       = user['user_id']
+                session['staff_id']      = staff['staff_id']
+                session['role']          = user['role']
+                session['name']          = f"{staff['fname']} {staff['lname']}"
+                session['session_token'] = new_session_token
+
                 if user['role'] == 'admin':
                     flash('Welcome, Admin!', 'success')
                     return redirect(url_for('admin_dashboard'))
@@ -687,8 +728,38 @@ def staff_dashboard():
 
 @app.route('/logout')
 def logout():
+    reason  = request.args.get('reason')
+    user_id = session.get('user_id')
+    token   = session.get('session_token')
+
+    # Clear the account's active-session token on a normal/idle logout —
+    # but NOT when this session is the one being superseded, since the DB
+    # token already belongs to the newer login and must not be wiped.
+    if reason != 'session_superseded' and user_id and token:
+        try:
+            current = supabase.table('user').select('active_session_token').eq('user_id', user_id).execute()
+            if current.data and current.data[0].get('active_session_token') == token:
+                supabase.table('user').update({'active_session_token': None}).eq('user_id', user_id).execute()
+        except Exception as e:
+            print(f"Logout token-clear error: {e}")
+
     session.clear()
+
+    if reason == 'idle':
+        flash('You were logged out due to inactivity.', 'error')
+    elif reason == 'session_superseded':
+        flash('You were logged out because your account was signed in on another device or browser.', 'error')
+
     return redirect(url_for('login'))
+
+# ─── SESSION CHECK (polled by security.js) ────────────
+@app.route('/api/session/check')
+def api_session_check():
+    if 'user_id' not in session:
+        return jsonify({'valid': False}), 401
+    if not _session_token_valid():
+        return jsonify({'valid': False, 'reason': 'session_superseded'}), 401
+    return jsonify({'valid': True}), 200
 
 # ─── PING (network banner health check) ───────────────
 @app.route('/ping')
