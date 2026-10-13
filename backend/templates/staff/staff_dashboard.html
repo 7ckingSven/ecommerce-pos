@@ -217,9 +217,17 @@
 
             </div>
 
-            <!-- GCash Reference -->
+            <!-- GCash Payment — opens the gcashModal below (QR → confirm → receipt, all in one modal) -->
             <div class="pos-refno" id="posRefNo" style="display:none;">
-              <input type="text" id="posGcashRef" class="form-input" placeholder="Enter 13-digit reference number" maxlength="13" inputmode="numeric" oninput="this.value=this.value.replace(/[^0-9]/g,'');validateCheckoutButton()" style="font-size:13px;"/>
+              <!-- Hidden state kept for processOrder() / validateCheckoutButton() -->
+              <input type="hidden" id="posGcashRef" value=""/>
+              <input type="hidden" id="posPaymentIntentId" value=""/>
+
+              <button type="button" id="posGcashGenerateBtn" class="btn btn-solid-green" style="width:100%;" onclick="startGcashPayment()">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                Pay with GCash
+              </button>
+              <p id="posGcashInlineStatus" style="margin:6px 0 0;font-size:11px;color:var(--g-400);text-align:center;font-weight:600;"></p>
             </div>
 
             <!-- Cash Input -->
@@ -666,6 +674,14 @@
       <button onclick="window.print()" class="btn btn-outline" style="flex:1;">🖨️ Print</button>
       <button onclick="closeReceiptModal()" class="btn btn-solid-green" style="flex:1;">Done</button>
     </div>
+  </div>
+
+  <!-- GCash Payment Modal (PayMongo QR → confirm → receipt, all in one place) —
+       deliberately has no overlay onclick and no × button: while a payment is
+       in progress, only its own Cancel / Confirm Order buttons can close it. -->
+  <div id="gcashModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.6);z-index:2000;"></div>
+  <div id="gcashModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:2001;width:92%;max-width:380px;max-height:85vh;overflow-y:auto;background:var(--card-bg);border-radius:16px;box-shadow:0 20px 60px rgba(0,0,0,0.35);">
+    <div id="gcashModalBody" style="padding:1.5rem;"></div>
   </div>
 
   <!-- Logout Confirmation Modal -->

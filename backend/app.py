@@ -25,6 +25,10 @@ load_dotenv()
 # to any client.
 SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET')
 
+# PayMongo — secret key used for Basic Auth (as username, empty password)
+# against the PayMongo API. Server-side only, never sent to any client.
+PAYMONGO_SECRET_KEY = os.getenv('PAYMONGO_SECRET_KEY')
+
 # Initialize Flask
 app = Flask(__name__)
 app.secret_key = os.getenv('SECRET_KEY')
@@ -80,6 +84,105 @@ def send_email_resend(to_email, subject, html_body):
     except Exception as e:
         print(f'Brevo error: {e}')
         return False
+
+# ══════════════════════════════════════════════════════
+# PAYMONGO — GCash e-wallet payments (POS Staff web walk-in)
+# ══════════════════════════════════════════════════════
+import base64 as _b64
+
+PAYMONGO_API_BASE = 'https://api.paymongo.com/v1'
+
+class PayMongoError(Exception):
+    pass
+
+def _paymongo_request(method, path, json_body=None):
+    """Thin wrapper around the PayMongo REST API. Auth is HTTP Basic with
+    the secret key as username and an empty password — PayMongo's own
+    convention, nothing we invented."""
+    if not PAYMONGO_SECRET_KEY:
+        raise PayMongoError('PAYMONGO_SECRET_KEY is not configured on the server.')
+
+    auth_token = _b64.b64encode(f'{PAYMONGO_SECRET_KEY}:'.encode('utf-8')).decode('utf-8')
+    headers = {
+        'Authorization': f'Basic {auth_token}',
+        'Content-Type':  'application/json',
+    }
+    url = f'{PAYMONGO_API_BASE}{path}'
+    try:
+        resp = resend_requests.request(method, url, headers=headers, json=json_body, timeout=20)
+    except Exception as e:
+        raise PayMongoError(f'Could not reach PayMongo: {e}')
+
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+
+    if resp.status_code >= 400:
+        detail = ''
+        try:
+            detail = body.get('errors', [{}])[0].get('detail', '')
+        except Exception:
+            pass
+        raise PayMongoError(detail or f'PayMongo request failed ({resp.status_code}).')
+
+    return body
+
+def paymongo_create_gcash_intent(amount_pesos, return_url, description=''):
+    """Creates a Payment Intent, a GCash Payment Method, and attaches them —
+    returns (payment_intent_id, redirect_url). The staff screen renders
+    redirect_url as a QR code; the customer scans it with their own phone to
+    open GCash's authorization page and approve the payment there."""
+    amount_centavos = int(round(float(amount_pesos) * 100))
+
+    intent_body = {
+        'data': {
+            'attributes': {
+                'amount':                 amount_centavos,
+                'payment_method_allowed': ['gcash'],
+                'payment_method_options': {'gcash': {'request_three_d_secure': 'any'}},
+                'currency':               'PHP',
+                'capture_type':           'automatic',
+                'description':            description or 'TEFC E-Commerce — POS walk-in order',
+            }
+        }
+    }
+    intent_res = _paymongo_request('POST', '/payment_intents', intent_body)
+    intent_data       = intent_res['data']
+    payment_intent_id = intent_data['id']
+    client_key        = intent_data['attributes']['client_key']
+
+    method_body = {'data': {'attributes': {'type': 'gcash'}}}
+    method_res  = _paymongo_request('POST', '/payment_methods', method_body)
+    payment_method_id = method_res['data']['id']
+
+    attach_body = {
+        'data': {
+            'attributes': {
+                'payment_method': payment_method_id,
+                'client_key':     client_key,
+                'return_url':     return_url,
+            }
+        }
+    }
+    attach_res = _paymongo_request('POST', f'/payment_intents/{payment_intent_id}/attach', attach_body)
+
+    redirect_url = None
+    try:
+        redirect_url = attach_res['data']['attributes']['next_action']['redirect']['url']
+    except (KeyError, TypeError):
+        pass
+
+    if not redirect_url:
+        raise PayMongoError('PayMongo did not return a GCash authorization link.')
+
+    return payment_intent_id, redirect_url
+
+def paymongo_get_intent_status(payment_intent_id):
+    """Returns the current status string of a Payment Intent
+    ('awaiting_payment_method', 'processing', 'succeeded', etc.)."""
+    res = _paymongo_request('GET', f'/payment_intents/{payment_intent_id}')
+    return res['data']['attributes']['status']
 
 # ══════════════════════════════════════════════════════
 # HELPER FUNCTIONS
@@ -3178,25 +3281,115 @@ def staff_get_orders():
         print(f'Staff orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/staff/paymongo/gcash/create', methods=['POST'])
+@staff_required
+def staff_paymongo_gcash_create():
+    """Starts a GCash payment for the current POS sale. Returns a
+    payment_intent_id (to poll and to send back with the order) and a
+    redirect_url the staff screen renders as a QR code for the customer
+    to scan with their own GCash app."""
+    try:
+        data   = request.get_json() or {}
+        amount = data.get('amount')
+        if not amount or float(amount) <= 0:
+            return jsonify({'error': 'A valid amount is required.'}), 400
+
+        # Reflects whatever host this request actually arrived on — works
+        # locally and in production without guessing the deployed URL.
+        return_url = request.url_root.rstrip('/') + '/paymongo/gcash-return'
+
+        payment_intent_id, redirect_url = paymongo_create_gcash_intent(
+            amount_pesos = amount,
+            return_url   = return_url,
+            description  = 'TEFC E-Commerce — POS walk-in order',
+        )
+        return jsonify({
+            'payment_intent_id': payment_intent_id,
+            'redirect_url':      redirect_url,
+        }), 200
+    except PayMongoError as e:
+        print(f'PayMongo create error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Staff PayMongo create error: {e}')
+        return jsonify({'error': 'Could not start GCash payment.'}), 500
+
+@app.route('/api/staff/paymongo/gcash/status/<payment_intent_id>', methods=['GET'])
+@staff_required
+def staff_paymongo_gcash_status(payment_intent_id):
+    """Polled by the staff screen every few seconds while the QR is shown."""
+    try:
+        status = paymongo_get_intent_status(payment_intent_id)
+        return jsonify({'status': status}), 200
+    except PayMongoError as e:
+        print(f'PayMongo status error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Staff PayMongo status error: {e}')
+        return jsonify({'error': 'Could not check GCash payment status.'}), 500
+
+@app.route('/paymongo/gcash-return')
+def paymongo_gcash_return():
+    """Landing page the customer's browser is sent to after approving (or
+    cancelling) payment in GCash. The staff screen is the source of truth —
+    it's already polling for the result — so this page just tells the
+    customer they can close the tab and hand the phone back."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TEFC E-Commerce</title>
+  <style>
+    body { margin:0; font-family:'Segoe UI',Arial,sans-serif; background:#f0fdf4;
+           display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .card { background:#fff; border-radius:16px; padding:36px 28px; max-width:360px;
+            text-align:center; box-shadow:0 4px 24px rgba(0,0,0,0.08); }
+    h1 { color:#14532d; font-size:20px; margin:0 0 8px; }
+    p  { color:#6b7280; font-size:14px; margin:0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>You&rsquo;re all set!</h1>
+    <p>You can close this tab now and return the phone to the cashier.</p>
+  </div>
+</body>
+</html>"""
+
 @app.route('/api/staff/orders', methods=['POST'])
 @staff_required
 def staff_place_order():
     try:
-        data           = request.get_json()
-        cart_items     = data.get('cart_items', [])
-        payment_method = data.get('payment_method', '')
-        ref_no         = data.get('ref_no', '')
-        order_type     = data.get('order_type', 'walk_in')
-        quantity       = data.get('quantity', 0)
-        total          = data.get('total', 0)
-        branch_id      = data.get('branch_id')  # which branch processed this sale
+        data              = request.get_json()
+        cart_items        = data.get('cart_items', [])
+        payment_method    = data.get('payment_method', '')
+        ref_no            = data.get('ref_no', '')
+        payment_intent_id = data.get('payment_intent_id', '')
+        order_type        = data.get('order_type', 'walk_in')
+        quantity          = data.get('quantity', 0)
+        total             = data.get('total', 0)
+        branch_id         = data.get('branch_id')  # which branch processed this sale
         is_offline_sync = bool(data.get('is_offline_sync', False))  # True when this sale was made during a connection outage and is only now reaching the server
 
         if not cart_items or not payment_method:
             return jsonify({'error': 'Cart items and payment method are required.'}), 400
 
-        if payment_method == 'gcash' and not ref_no:
-            return jsonify({'error': 'GCash reference number is required.'}), 400
+        if payment_method == 'gcash' and not is_offline_sync:
+            # The GCash QR flow is online-only — verify the actual payment
+            # status with PayMongo rather than trusting anything the client
+            # claims. A manually-typed ref_no is only accepted as a legacy
+            # fallback when no payment_intent_id was sent.
+            if payment_intent_id:
+                try:
+                    status = paymongo_get_intent_status(payment_intent_id)
+                except PayMongoError as e:
+                    return jsonify({'error': f'Could not verify GCash payment: {e}'}), 502
+                if status != 'succeeded':
+                    return jsonify({'error': f'GCash payment has not succeeded yet (status: {status}).'}), 400
+                ref_no = ref_no or payment_intent_id
+            elif not ref_no:
+                return jsonify({'error': 'GCash reference number is required.'}), 400
 
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
