@@ -234,6 +234,29 @@ def _session_token_valid():
         print(f"Session check error: {e}")
         return True
 
+def _finalize_login(user, staff):
+    """Completes a login by granting the full session — shared by the
+    trusted-device path (login_post) and the post-MFA path
+    (verify_mfa). One-session-per-user: issues a fresh token for THIS
+    login and records it as the only valid one for this account."""
+    new_session_token = secrets.token_hex(32)
+    supabase.table('user').update(
+        {'active_session_token': new_session_token}
+    ).eq('user_id', user['user_id']).execute()
+
+    session['user_id']       = user['user_id']
+    session['staff_id']      = staff['staff_id']
+    session['role']          = user['role']
+    session['name']          = f"{staff['fname']} {staff['lname']}"
+    session['session_token'] = new_session_token
+    return new_session_token
+
+def _clear_pending_login():
+    for key in ('pending_login_user_id', 'pending_login_staff_id', 'pending_login_role',
+                'pending_login_name', 'mfa_otp_code', 'mfa_otp_sent',
+                'mfa_otp_created_at'):
+        session.pop(key, None)
+
 def login_required(role=None):
     def decorator(f):
         @wraps(f)
@@ -493,28 +516,61 @@ def login_post():
             if staff_res.data:
                 staff = staff_res.data[0]
 
-                # One-session-per-user: issue a fresh token for THIS login
-                # and record it as the only valid one for this account. Any
-                # other browser/device already logged into this account
-                # will fail _session_token_valid() on its next request and
-                # get bounced to /logout?reason=session_superseded.
-                new_session_token = secrets.token_hex(32)
-                supabase.table('user').update(
-                    {'active_session_token': new_session_token}
-                ).eq('user_id', user['user_id']).execute()
+                # MFA check: does this browser already carry an MFA-trust
+                # cookie that's on file for THIS account?
+                mfa_token   = request.cookies.get('tefc_mfa_token')
+                mfa_trusted = False
+                if mfa_token:
+                    try:
+                        td_res = supabase.table('mfa_device').select('id') \
+                            .eq('user_id', user['user_id']) \
+                            .eq('mfa_token', mfa_token).execute()
+                        if td_res.data:
+                            mfa_trusted = True
+                            supabase.table('mfa_device').update(
+                                {'last_used_at': datetime.now().isoformat()}
+                            ).eq('id', td_res.data[0]['id']).execute()
+                    except Exception as e:
+                        print(f"MFA trust check error: {e}")
 
-                session['user_id']       = user['user_id']
-                session['staff_id']      = staff['staff_id']
-                session['role']          = user['role']
-                session['name']          = f"{staff['fname']} {staff['lname']}"
-                session['session_token'] = new_session_token
+                if mfa_trusted:
+                    _finalize_login(user, staff)
+                    if user['role'] == 'admin':
+                        flash('Welcome, Admin!', 'success')
+                        return redirect(url_for('admin_dashboard'))
+                    else:
+                        flash('Welcome, Staff!', 'success')
+                        return redirect(url_for('staff_dashboard'))
 
-                if user['role'] == 'admin':
-                    flash('Welcome, Admin!', 'success')
-                    return redirect(url_for('admin_dashboard'))
-                elif user['role'] == 'staff':
-                    flash('Welcome, Staff!', 'success')
-                    return redirect(url_for('staff_dashboard'))
+                # Unrecognized browser/device — hold off on granting access
+                # and require an MFA email code first. No 'user_id' is set
+                # in the session yet, so login_required() still blocks
+                # every protected page until this verification succeeds.
+                session['pending_login_user_id']  = user['user_id']
+                session['pending_login_staff_id'] = staff['staff_id']
+                session['pending_login_role']     = user['role']
+                session['pending_login_name']     = f"{staff['fname']} {staff['lname']}"
+
+                otp = ''.join(random.choices(string.digits, k=6))
+                session['mfa_otp_code']       = otp
+                session['mfa_otp_sent']       = True
+                session['mfa_otp_created_at'] = datetime.now().isoformat()
+
+                try:
+                    send_email_resend(
+                        to_email  = staff.get('email'),
+                        subject   = 'TEFC E-Commerce — Multi-Factor Authentication Code',
+                        html_body = build_otp_email(
+                            otp,
+                            title='Multi-Factor Authentication',
+                            purpose='verify this login before signing in'
+                        )
+                    )
+                except Exception as email_error:
+                    print(f"WARNING: Failed to send MFA email: {email_error}")
+
+                flash("We don't recognize this browser. Enter the code we emailed you to continue.", 'success')
+                return redirect(url_for('verify_mfa'))
             else:
                 flash('Staff information not found.', 'login_error')
                 return redirect(url_for('login'))
@@ -666,6 +722,121 @@ def verify_otp():
             return redirect(url_for('verify_otp'))
 
     return render_template('verify_otp.html')
+
+
+# ─── MULTI-FACTOR AUTHENTICATION (login-time verification) ───────────
+
+@app.route('/verify-mfa', methods=['GET', 'POST'])
+def verify_mfa():
+    if not session.get('mfa_otp_sent') or not session.get('pending_login_user_id'):
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        otp = request.form.get('otp', '').strip()
+
+        if not otp:
+            flash('Please enter the code.', 'error')
+            return redirect(url_for('verify_mfa'))
+
+        try:
+            # Code expires after 5 minutes — matches the frontend countdown
+            otp_created_at = session.get('mfa_otp_created_at')
+            if otp_created_at:
+                created = datetime.fromisoformat(otp_created_at)
+                if (datetime.now() - created).total_seconds() > 300:
+                    _clear_pending_login()
+                    flash('Code has expired. Please log in again.', 'error')
+                    return redirect(url_for('login'))
+
+            stored_otp = session.get('mfa_otp_code', '')
+            if otp != stored_otp:
+                flash('Invalid code. Please try again.', 'error')
+                return redirect(url_for('verify_mfa'))
+
+            # Correct code — finalize the pending login (same one-session-
+            # per-user token issuance as a normal trusted-device login).
+            user_id  = session.get('pending_login_user_id')
+            staff_id = session.get('pending_login_staff_id')
+            role     = session.get('pending_login_role')
+            name     = session.get('pending_login_name')
+
+            new_session_token = secrets.token_hex(32)
+            supabase.table('user').update(
+                {'active_session_token': new_session_token}
+            ).eq('user_id', user_id).execute()
+
+            session['user_id']       = user_id
+            session['staff_id']      = staff_id
+            session['role']          = role
+            session['name']          = name
+            session['session_token'] = new_session_token
+
+            # ...and remember this browser/device from now on (trusted
+            # forever, until its cookie is cleared or a different browser
+            # is used).
+            new_mfa_token = secrets.token_hex(32)
+            supabase.table('mfa_device').insert({
+                'user_id':    user_id,
+                'mfa_token':  new_mfa_token,
+                'user_agent': request.headers.get('User-Agent', '')[:255],
+            }).execute()
+
+            _clear_pending_login()
+
+            resp = redirect(url_for('admin_dashboard') if role == 'admin' else url_for('staff_dashboard'))
+            resp.set_cookie(
+                'tefc_mfa_token', new_mfa_token,
+                max_age=60 * 60 * 24 * 365 * 5,  # effectively permanent
+                httponly=True, secure=True, samesite='Lax'
+            )
+            flash(f"Welcome, {'Admin' if role == 'admin' else 'Staff'}!", 'success')
+            return resp
+
+        except Exception as e:
+            print(f"MFA verification error: {type(e).__name__}: {str(e)}")
+            traceback.print_exc()
+            flash('Something went wrong. Please try again.', 'error')
+            return redirect(url_for('verify_mfa'))
+
+    return render_template('verify_mfa.html')
+
+
+@app.route('/resend-mfa-otp', methods=['POST'])
+def resend_mfa_otp():
+    if not session.get('mfa_otp_sent') or not session.get('pending_login_user_id'):
+        return jsonify({'ok': False, 'error': 'No active verification session. Please log in again.'}), 400
+
+    try:
+        user_id = session.get('pending_login_user_id')
+        staff_res = supabase.table('staff').select('email').eq('user_id', user_id).execute()
+        email = staff_res.data[0]['email'] if staff_res.data else None
+        if not email:
+            return jsonify({'ok': False, 'error': 'Could not find an email on file.'}), 400
+
+        otp = ''.join(random.choices(string.digits, k=6))
+        session['mfa_otp_code']       = otp
+        session['mfa_otp_created_at'] = datetime.now().isoformat()
+        session['mfa_otp_sent']       = True
+
+        try:
+            send_email_resend(
+                to_email  = email,
+                subject   = 'TEFC E-Commerce — Multi-Factor Authentication Code (Resent)',
+                html_body = build_otp_email(
+                    otp,
+                    title='Multi-Factor Authentication',
+                    purpose='verify this login before signing in'
+                )
+            )
+        except Exception as email_err:
+            print(f"WARNING: Resend MFA-otp email failed: {email_err}")
+
+        return jsonify({'ok': True}), 200
+
+    except Exception as e:
+        print(f"Resend MFA OTP error: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': 'An error occurred. Please try again.'}), 500
 
 
 # ─── RESET PASSWORD ───────────────────────────────────
