@@ -26,34 +26,39 @@ This system serves three types of users:
 - **PSGC Address Picker** — cascading Region → Province → City → Barangay
 - **Shipping fee calculation** (tiered flat + weight-based by zone)
 - **Delivery estimate** shown on checkout and order detail
-- GCash (13-digit reference number) and cash on delivery payment
+- **GCash payment via PayMongo** — in-app WebView checkout, server-verified before order is placed (no manual reference typing) — or cash on delivery
+- **Push notifications** (Firebase Cloud Messaging) — alerted the moment an order's status changes, in foreground, background, or killed app state
+- **Cart selection persists** — checked/unchecked items in the cart are remembered across navigation and app restarts
 - **Shopee-style order progress tracker** (Pending → Processing → Out for Delivery → Completed)
 - **Mark as Order Received** button (appears when status is Out for Delivery)
-- Order history with full detail: branch, address, selected options, images
+- Order history with full detail: branch, address, selected options, images, PayMongo reference for GCash orders
 - **Auto-refresh every 10 seconds** on Home and Orders screens
 - Forgot password via OTP (email)
 - 3-step registration with duplicate check (email, username, phone)
 - Profile management with PSGC address update
+- App version shown on splash screen (read from `package.json`)
 
 ### Admin (Web System)
 - **Product Management** — Add, edit, deactivate products with multiple images and option groups (variants). Image upload optional.
 - **Inventory Management** — Branch stock summary (side-by-side per branch), stock movement history, add stock, transfer, adjust stock. Low stock alert banner.
 - **Discount Management** — Create/edit discounts with start and end dates, countdown status badges, assign to products with branch filter, remove discounts. Products with discounts table.
 - **Purchase Order (PO)** — Create POs, mark as Ordered/Received (with branch selector), **digital receipt** generated after creation and after marking received.
-- **Orders** — Full order detail modal: product images, selected options, branch name, delivery address, shipping fee. **Pending orders badge** on nav. Auto-refresh every 5 seconds.
+- **Orders** — Full order detail modal: product images, selected options, branch name, delivery address, shipping fee. GCash orders show the **PayMongo Reference** and a verified **Paid** status. **Pending orders badge** on nav. Auto-refresh every 5 seconds.
 - **User Management** — Manage Admin and Staff accounts.
 - **Sales Report** — Sales analytics, revenue breakdown, walk-in vs online orders.
 - **Stock Requests** — Review and approve staff stock requests.
 - **Branch Stock Summary** — Side-by-side grid showing stock per product per branch (Triple E | Fiel Collince).
 
 ### Staff (Web System)
-- **POS (Sales Management)** — Process walk-in orders, GCash or cash payment, **VAT-inclusive receipt** (12%) with print support. Button disabled while processing.
+- **POS (Sales Management)** — Process walk-in orders, GCash (via PayMongo QR, server-verified) or cash payment, **VAT-inclusive receipt** (12%) with print support. Button disabled while processing.
 - **Inventory Management** — View branch-specific stock, submit stock requests to admin.
-- **Orders** — View online customer orders with full detail modal (product images, selected options, branch, delivery address). **Pending orders badge** on nav. Auto-refresh every 5 seconds.
+- **Orders** — View online customer orders with full detail modal (product images, selected options, branch, delivery address). GCash orders show the **PayMongo Reference** and a verified **Paid** status. **Pending orders badge** on nav. Auto-refresh every 5 seconds.
 - **Sales Summary** — View daily/weekly sales with walk-in and online breakdown.
 
 ### System-Wide
 - Unified login for all users — specific error messages (user not found vs wrong password)
+- **Multi-Factor Authentication (MFA) on web login** — an unrecognized browser must verify a 6-digit email code before admin/staff login completes; that browser is then trusted going forward
+- **Logout hardening** — Back/Forward navigation after logout cannot replay a cached dashboard; always lands back on login
 - Role-based dashboard routing (Admin / Staff / Customer)
 - Branch-based product visibility — controlled by branch stock (no `available_at` field)
 - Auto-refresh: 5 seconds (web) / 10 seconds (mobile)
@@ -73,6 +78,10 @@ This system serves three types of users:
 | Database | Supabase (PostgreSQL) |
 | Mobile Icons | React Native Vector Icons (Feather) |
 | Mobile Navigation | React Navigation v7 (Bottom Tabs + Stack) |
+| Payments | PayMongo API (GCash — Payment Intents, server-verified) |
+| Push Notifications | Firebase Cloud Messaging (`@react-native-firebase`) |
+| In-App Checkout | react-native-webview (GCash authorization) |
+| Local Storage | AsyncStorage (cart selection persistence) |
 | Email | Gmail SMTP via Flask-Mail (OTP delivery) |
 | Version Control | GitHub |
 | Deployment | Render |
@@ -141,12 +150,14 @@ ecommerce-pos/
 │   │   │   ├── api.js                ← axios instance (base URL config)
 │   │   │   ├── authService.js        ← login, register, logout, OTP
 │   │   │   ├── cartService.js        ← cart management with selected options
-│   │   │   └── orderService.js       ← order placement and history
+│   │   │   ├── orderService.js       ← order placement, history, PayMongo GCash intent/status
+│   │   │   └── notificationService.js ← FCM permission, token registration, foreground/background handlers
 │   │   └── utils/
 │   │       ├── constants.js          ← colors, spacing, typography, API URL toggle
 │   │       └── CartContext.js        ← global cart count context
 │   ├── android/                      ← Android build files
-│   ├── App.tsx                       ← app entry point
+│   ├── index.js                      ← app entry point; registers FCM background message handler
+│   ├── App.tsx
 │   └── package.json
 │
 ├── .gitignore
@@ -184,8 +195,11 @@ ecommerce-pos/
 | `/api/products/<id>` | GET | Get single product detail |
 | `/api/cart` | GET/POST | Get or add to cart |
 | `/api/cart/<id>` | PUT/DELETE | Update or remove cart item |
-| `/api/orders` | GET/POST | Get orders or place new order |
+| `/api/orders` | GET/POST | Get orders or place new order (GCash orders require a verified PayMongo payment intent) |
 | `/api/orders/<id>/received` | POST | Customer marks order as received |
+| `/api/orders/paymongo/gcash/create` | POST | Create a PayMongo GCash Payment Intent for checkout, returns the in-app WebView redirect URL |
+| `/api/orders/paymongo/gcash/status/<payment_intent_id>` | GET | Poll a Payment Intent's status (used while the GCash WebView is open) |
+| `/api/customer/fcm-token` | POST | Save/update the customer's Firebase Cloud Messaging device token |
 | `/api/profile` | GET/PUT | Get or update customer profile |
 
 ---
@@ -199,8 +213,9 @@ This project uses **Supabase (PostgreSQL)**.
 | Table | Description |
 |---|---|
 | `branch` | Store branches (Triple E, Fiel Collince) |
-| `customer` | Customer accounts and profiles |
+| `customer` | Customer accounts and profiles (includes `fcm_token` for push notifications) |
 | `user` | Admin and Staff accounts |
+| `mfa_device` | Trusted browsers for web login MFA (admin/staff) |
 | `staff` | Staff details and branch assignment |
 | `product` | Product catalog with option groups and net weight |
 | `branch_stock` | Per-product, per-branch stock quantities |
@@ -208,7 +223,7 @@ This project uses **Supabase (PostgreSQL)**.
 | `discount` | Discounts with percentage, start and end dates |
 | `order` | Customer orders (online and walk-in) with address and shipping fee |
 | `order_item` | Items per order with selected options |
-| `payment` | Payment records (GCash ref, cash) |
+| `payment` | Payment records — GCash via PayMongo-verified reference, or cash |
 | `cart` | Customer cart with selected options and branch |
 | `stock_request` | Staff stock requests to admin |
 | `purchase_order` | Admin purchase orders to suppliers |
@@ -218,9 +233,11 @@ This project uses **Supabase (PostgreSQL)**.
 ### Key Business Rules
 - **Branch stock controls visibility** — products only show on the app if the branch has stock > 0
 - **VAT Inclusive (12%)** — applied on POS walk-in receipts
-- Payment methods: **GCash** (13-digit reference number) or **walk-in cash**
+- Payment methods: **GCash** (verified via a PayMongo Payment Intent — no manual reference entry) or **walk-in cash**
 - Shipping fee: tiered flat + weight-based by zone (Koronadal, South Cotabato, Region XII, outside)
 - Order statuses: `pending` → `processing` → `out_for_delivery` → `completed` (set by customer) or `cancelled`
+- Order status changes push a **Firebase Cloud Messaging** notification to the customer's mobile app
+- Web login requires MFA from an unrecognized browser — verified browsers are trusted for future logins
 - One review per product per completed order (future feature)
 
 ---
@@ -231,6 +248,11 @@ This project uses **Supabase (PostgreSQL)**.
 - **Admin/Staff** — Web login at `/login`, redirected to their respective dashboard
 - **Customers** — Mobile API login at `/api/login` using email, username, or phone number
 - Specific error messages: "No account found" vs "Incorrect password"
+
+### Multi-Factor Authentication (Web Login)
+- An unrecognized browser (no matching trusted-device cookie) triggers a 6-digit email code challenge after a correct password, before access is granted
+- Once verified, that specific browser is trusted going forward — the same physical device logging in from a different browser (or after clearing cookies) is treated as unrecognized again
+- Applies to both Admin and Staff accounts
 
 ### Password Reset with OTP
 
@@ -273,6 +295,8 @@ SUPABASE_KEY=your_supabase_service_role_key
 SECRET_KEY=your_flask_secret_key
 STAFF_ACCESS_CODE=your_staff_access_code
 MAIL_PASSWORD=your_gmail_app_password
+PAYMONGO_SECRET_KEY=your_paymongo_secret_key
+FIREBASE_SERVICE_ACCOUNT_JSON=your_firebase_service_account_json   # for push notifications
 
 # 5. Run the application
 python app.py
@@ -287,6 +311,9 @@ python app.py
 # 1. Install dependencies
 cd ecommerce-pos/mobile
 npm install
+
+# 1a. Place your Firebase Android config at:
+# android/app/google-services.json   (required for push notifications)
 
 # 2. Set environment in constants.js
 const ENV = 'emulator';   # for Android emulator
