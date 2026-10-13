@@ -1,14 +1,14 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
   TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Image
 } from 'react-native';
+import { WebView } from 'react-native-webview';
 import Feather from 'react-native-vector-icons/Feather';
-import { placeOrder, getProfile, updateProfile } from '../services/orderService';
+import { placeOrder, getProfile, updateProfile, createGcashIntent, getGcashStatus } from '../services/orderService';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 import { getCustomerId, getCustomer } from '../services/authService';
-import { launchImageLibrary } from 'react-native-image-picker';
 import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -16,7 +16,7 @@ import NetworkBanner from '../components/NetworkBanner';
 
 const PAYMENT_METHODS = [
   { id: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'truck',      sub: 'Pay when your order arrives' },
-  { id: 'gcash',            label: 'GCash',            icon: 'smartphone', sub: 'Enter reference number after payment' },
+  { id: 'gcash',            label: 'GCash',            icon: 'smartphone', sub: 'Pay instantly via GCash' },
 ];
 
 export default function CheckoutScreen({ route, navigation }) {
@@ -26,13 +26,16 @@ export default function CheckoutScreen({ route, navigation }) {
   const insets = useSafeAreaInsets();
 
   const [payment,       setPayment]       = useState('cash_on_delivery');
-  const [refNo,         setRefNo]         = useState('');
-  const [senderNo,      setSenderNo]      = useState('');
-  const [gcashMethod,   setGcashMethod]   = useState('details'); // 'details' | 'image'
-  const [receiptImage,  setReceiptImage]  = useState(null);  // { uri, base64 }
-  const [refNoError,    setRefNoError]    = useState('');
-  const [senderError,   setSenderError]   = useState('');
   const [loading,       setLoading]       = useState(false);
+
+  // ─── GCash (PayMongo) payment modal ───────────────────
+  // 'idle' | 'loading' | 'webview' | 'confirmed' | 'placing' | 'error'
+  const [gcashModalVisible, setGcashModalVisible] = useState(false);
+  const [gcashStep,          setGcashStep]          = useState('idle');
+  const [gcashRedirectUrl,   setGcashRedirectUrl]   = useState('');
+  const [gcashPaymentIntentId, setGcashPaymentIntentId] = useState('');
+  const [gcashErrorMsg,     setGcashErrorMsg]       = useState('');
+  const gcashPollRef = useRef(null);
   const [shippingFee,   setShippingFee]   = useState(0);
   const [orderLoading,  setOrderLoading]  = useState(false);
   const isSubmitting = React.useRef(false); // prevent double order
@@ -130,6 +133,11 @@ export default function CheckoutScreen({ route, navigation }) {
     const extra = totalWeight > 5 ? Math.ceil((totalWeight - 5) * 35) : 0;
     return base + extra;
   }
+
+  // Stop polling if the screen unmounts mid-payment (e.g. user navigates away)
+  useEffect(() => {
+    return () => { if (gcashPollRef.current) clearInterval(gcashPollRef.current); };
+  }, []);
 
   useEffect(() => {
     async function init() {
@@ -243,7 +251,49 @@ export default function CheckoutScreen({ route, navigation }) {
     });
   }
 
-  // ─── Place Order ──────────────────────────────────────
+  // ─── Submit the order to the backend ──────────────────
+  // Shared by Cash on Delivery (paymentIntentId = '') and the post-GCash
+  // confirm step (paymentIntentId = the verified PayMongo intent).
+  async function submitOrder(paymentIntentId) {
+    setLoading(true);
+    try {
+      const items = cartItems.map(i => {
+        const disc       = Array.isArray(i.product?.discount) ? i.product.discount[0] : i.product?.discount;
+        const origPrice  = Number(i.product?.price || 0);
+        const finalPrice = disc ? origPrice * (1 - disc.percentage / 100) : origPrice;
+        return {
+          product_id:       i.product_id || i.product?.product_id,
+          cart_id:          (i.cart_id && i.cart_id !== 'buy_now') ? i.cart_id : null,
+          quantity:         i.quantity,
+          price:            finalPrice,
+          selected_options: i.selected_options || {},
+        };
+      });
+      const res = await placeOrder(
+        items,
+        payment,
+        paymentIntentId || '',
+        branchId || cartItems[0]?.branch_id || null,
+        shippingFee,
+        address + (addressNote ? ' | ' + addressNote : '')
+      );
+      showAlert({ type: 'success', title: 'Order Placed!',
+        message: `Your order has been placed!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
+        buttons: [
+          { text: 'View Orders', style: 'primary', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Orders' } }] }) },
+          { text: 'Continue Shopping', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Home' } }] }) },
+        ] });
+    } catch (e) {
+      const msg = e.response?.data?.error || 'Failed to place order. Please try again.';
+      showAlert({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setLoading(false);
+      setOrderLoading(false);
+      isSubmitting.current = false;
+    }
+  }
+
+  // ─── Place Order (Cash on Delivery) ───────────────────
   async function handlePlaceOrder() {
     if (orderLoading || isSubmitting.current) return;
     isSubmitting.current = true;
@@ -251,80 +301,78 @@ export default function CheckoutScreen({ route, navigation }) {
     if (!address.trim()) {
       showAlert({ type: 'warning', title: 'Address Required', message: 'Please add a delivery address before placing your order.', buttons: [ { text: 'Add Address', style: 'primary', onPress: openAddressModal }, { text: 'Cancel' } ] });
       setOrderLoading(false);
+      isSubmitting.current = false;
       return;
-    }
-
-    // GCash validation
-    if (payment === 'gcash') {
-      if (gcashMethod === 'details') {
-        const refClean    = refNo.trim().replace(/\D/g, '');
-        const senderClean = senderNo.trim().replace(/\D/g, '');
-        let hasError = false;
-        if (refClean.length !== 13) {
-          setRefNoError('Reference number must be exactly 13 digits.');
-          hasError = true;
-        } else { setRefNoError(''); }
-        if (senderClean.length !== 11 || !senderClean.startsWith('09')) {
-          setSenderError('Sender number must be 11 digits starting with 09.');
-          hasError = true;
-        } else { setSenderError(''); }
-        if (hasError) { setOrderLoading(false); return; }
-      } else {
-        if (!receiptImage) {
-          showAlert({ type: 'warning', title: 'Required', message: 'Please upload your GCash receipt image.' });
-          setOrderLoading(false);
-          return;
-        }
-      }
     }
 
     showAlert({ type: 'confirm', title: 'Confirm Order',
       message: `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nTotal: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}`,
       buttons: [
         { text: 'Cancel', onPress: () => { setOrderLoading(false); isSubmitting.current = false; } },
-        { text: 'Confirm', style: 'primary', onPress: async () => {
-            setLoading(true);
-            try {
-              const items = cartItems.map(i => {
-                const disc       = Array.isArray(i.product?.discount) ? i.product.discount[0] : i.product?.discount;
-                const origPrice  = Number(i.product?.price || 0);
-                const finalPrice = disc ? origPrice * (1 - disc.percentage / 100) : origPrice;
-                return {
-                  product_id:       i.product_id || i.product?.product_id,
-                  cart_id:          (i.cart_id && i.cart_id !== 'buy_now') ? i.cart_id : null,
-                  quantity:         i.quantity,
-                  price:            finalPrice,
-                  selected_options: i.selected_options || {},
-                };
-              });
-              const res = await placeOrder(
-                items,
-                payment,
-                gcashMethod === 'details' ? refNo.trim() : '',
-                branchId || cartItems[0]?.branch_id || null,
-                shippingFee,
-                address + (addressNote ? ' | ' + addressNote : ''),
-                gcashMethod === 'details' ? senderNo.trim() : '',
-                gcashMethod === 'image'   ? receiptImage   : null
-              );
-              showAlert({ type: 'success', title: 'Order Placed!',
-                message: `Your order has been placed!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
-                buttons: [
-                  { text: 'View Orders', style: 'primary', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Orders' } }] }) },
-                  { text: 'Continue Shopping', onPress: () => navigation.reset({ index: 0, routes: [{ name: 'Main', params: { screen: 'Home' } }] }) },
-                ] });
-            } catch (e) {
-              const msg = e.response?.data?.error || 'Failed to place order. Please try again.';
-              showAlert({ type: 'error', title: 'Error', message: msg });
-            } finally {
-              setLoading(false);
-              setOrderLoading(false);
-              isSubmitting.current = false;
-            }
-          }
-        },
+        { text: 'Confirm', style: 'primary', onPress: () => submitOrder('') },
       ]
     });
+  }
+
+  // ─── GCash payment (PayMongo, in-app WebView) ─────────
+  function resetGcashPayment() {
+    if (gcashPollRef.current) { clearInterval(gcashPollRef.current); gcashPollRef.current = null; }
+    setGcashStep('idle');
+    setGcashRedirectUrl('');
+    setGcashPaymentIntentId('');
+    setGcashErrorMsg('');
+  }
+
+  async function startGcashPayment() {
+    if (orderLoading || isSubmitting.current) return;
+    if (!address.trim()) {
+      showAlert({ type: 'warning', title: 'Address Required', message: 'Please add a delivery address before placing your order.', buttons: [ { text: 'Add Address', style: 'primary', onPress: openAddressModal }, { text: 'Cancel' } ] });
+      return;
+    }
+    isSubmitting.current = true;
+    setOrderLoading(true);
+    setGcashModalVisible(true);
+    setGcashStep('loading');
+    try {
+      const amount = total + shippingFee;
+      const { payment_intent_id, redirect_url } = await createGcashIntent(amount);
+      setGcashPaymentIntentId(payment_intent_id);
+      setGcashRedirectUrl(redirect_url);
+      setGcashStep('webview');
+      gcashPollRef.current = setInterval(() => pollGcashStatus(payment_intent_id), 3000);
+    } catch (e) {
+      setGcashErrorMsg(e.response?.data?.error || 'Could not start GCash payment. Please try again.');
+      setGcashStep('error');
+      setOrderLoading(false);
+      isSubmitting.current = false;
+    }
+  }
+
+  async function pollGcashStatus(intentId) {
+    try {
+      const { status } = await getGcashStatus(intentId);
+      if (status === 'succeeded') {
+        clearInterval(gcashPollRef.current);
+        gcashPollRef.current = null;
+        setGcashStep('confirmed');
+      }
+    } catch (e) {
+      // Transient network hiccup — keep polling on the next tick.
+    }
+  }
+
+  function cancelGcashPayment() {
+    resetGcashPayment();
+    setGcashModalVisible(false);
+    setOrderLoading(false);
+    isSubmitting.current = false;
+  }
+
+  async function confirmGcashOrder() {
+    setGcashStep('placing');
+    await submitOrder(gcashPaymentIntentId);
+    setGcashModalVisible(false);
+    resetGcashPayment();
   }
 
   return (
@@ -462,17 +510,7 @@ export default function CheckoutScreen({ route, navigation }) {
             <TouchableOpacity
               key={m.id}
               style={[styles.payMethod, payment === m.id && styles.payMethodActive]}
-              onPress={() => {
-                setPayment(m.id);
-                if (m.id !== 'gcash') {
-                  setRefNo('');
-                  setSenderNo('');
-                  setReceiptImage(null);
-                  setRefNoError('');
-                  setSenderError('');
-                  setGcashMethod('details');
-                }
-              }}
+              onPress={() => setPayment(m.id)}
             >
               <View style={[styles.payIcon, payment === m.id && styles.payIconActive]}>
                 <Feather name={m.icon} size={20} color={payment === m.id ? COLORS.white : COLORS.textMuted}/>
@@ -489,106 +527,12 @@ export default function CheckoutScreen({ route, navigation }) {
 
           {payment === 'gcash' && (
             <View style={styles.refWrap}>
-              {/* GCash Store Number */}
               <View style={styles.gcashNumberBox}>
                 <Feather name="smartphone" size={20} color="#1d4ed8"/>
                 <View style={{ flex:1 }}>
-                  <Text style={styles.gcashNumberLabel}>Send payment to this GCash number:</Text>
-                  <Text style={styles.gcashNumber}>09856446102</Text>
-                  <Text style={styles.gcashName}>Triple E & Fiel Collins GM</Text>
+                  <Text style={styles.gcashNumberLabel}>You'll be asked to complete your GCash payment securely after tapping "Pay with GCash" below.</Text>
                 </View>
               </View>
-
-              {/* Method Toggle */}
-              <View style={styles.gcashToggleRow}>
-                <TouchableOpacity
-                  style={[styles.gcashToggleBtn, gcashMethod === 'details' && styles.gcashToggleActive]}
-                  onPress={() => setGcashMethod('details')}
-                >
-                  <Feather name="edit-2" size={14} color={gcashMethod === 'details' ? '#fff' : COLORS.textMuted}/>
-                  <Text style={[styles.gcashToggleText, gcashMethod === 'details' && { color:'#fff' }]}>Enter Details</Text>
-                </TouchableOpacity>
-                <TouchableOpacity
-                  style={[styles.gcashToggleBtn, gcashMethod === 'image' && styles.gcashToggleActive]}
-                  onPress={() => setGcashMethod('image')}
-                >
-                  <Feather name="image" size={14} color={gcashMethod === 'image' ? '#fff' : COLORS.textMuted}/>
-                  <Text style={[styles.gcashToggleText, gcashMethod === 'image' && { color:'#fff' }]}>Upload Receipt</Text>
-                </TouchableOpacity>
-              </View>
-
-              {/* Option A — Enter Details */}
-              {gcashMethod === 'details' && (
-                <View>
-                  <Text style={styles.refLabel}>Sender's GCash Number *</Text>
-                  <View style={[styles.inputRow, senderError ? styles.inputError : null]}>
-                    <Feather name="phone" size={16} color={COLORS.textMuted} style={{ marginRight:8 }}/>
-                    <TextInput
-                      style={styles.refInput}
-                      placeholder="09XXXXXXXXX (11 digits)"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={senderNo}
-                      onChangeText={t => {
-                        const clean = t.replace(/\D/g,'').slice(0,11);
-                        setSenderNo(clean);
-                        setSenderError(clean.length === 11 && clean.startsWith('09') ? '' : '');
-                      }}
-                      keyboardType="number-pad"
-                      maxLength={11}
-                    />
-                  </View>
-                  {senderError ? <Text style={styles.inputErrText}>{senderError}</Text> : null}
-
-                  <Text style={[styles.refLabel, { marginTop:12 }]}>Reference Number *</Text>
-                  <View style={[styles.inputRow, refNoError ? styles.inputError : null]}>
-                    <Feather name="hash" size={16} color={COLORS.textMuted} style={{ marginRight:8 }}/>
-                    <TextInput
-                      style={styles.refInput}
-                      placeholder="13-digit reference number"
-                      placeholderTextColor={COLORS.textMuted}
-                      value={refNo}
-                      onChangeText={t => {
-                        const clean = t.replace(/\D/g,'').slice(0,13);
-                        setRefNo(clean);
-                        setRefNoError(clean.length === 13 ? '' : '');
-                      }}
-                      keyboardType="number-pad"
-                      maxLength={13}
-                    />
-                  </View>
-                  {refNoError ? <Text style={styles.inputErrText}>{refNoError}</Text> : null}
-                  <Text style={styles.refHint}>Complete GCash payment first, then enter the details.</Text>
-                </View>
-              )}
-
-              {/* Option B — Upload Receipt */}
-              {gcashMethod === 'image' && (
-                <View>
-                  <TouchableOpacity
-                    style={styles.uploadBtn}
-                    onPress={() => {
-                      launchImageLibrary({ mediaType:'photo', quality:0.8, includeBase64:true }, res => {
-                        if (res.assets && res.assets[0]) {
-                          setReceiptImage(res.assets[0]);
-                        }
-                      });
-                    }}
-                  >
-                    <Feather name="upload" size={18} color={COLORS.primary}/>
-                    <Text style={styles.uploadBtnText}>
-                      {receiptImage ? 'Change Receipt Image' : 'Upload GCash Receipt'}
-                    </Text>
-                  </TouchableOpacity>
-                  {receiptImage && (
-                    <Image
-                      source={{ uri: receiptImage.uri }}
-                      style={styles.receiptPreview}
-                      resizeMode="contain"
-                    />
-                  )}
-                  <Text style={styles.refHint}>Upload a screenshot of your GCash payment receipt.</Text>
-                </View>
-              )}
             </View>
           )}
         </View>
@@ -609,7 +553,7 @@ export default function CheckoutScreen({ route, navigation }) {
         </View>
         <TouchableOpacity
           style={styles.orderBtn}
-          onPress={handlePlaceOrder}
+          onPress={payment === 'gcash' ? startGcashPayment : handlePlaceOrder}
           disabled={orderLoading || loading}
           activeOpacity={0.85}
         >
@@ -617,12 +561,89 @@ export default function CheckoutScreen({ route, navigation }) {
             <ActivityIndicator color={COLORS.white}/>
           ) : (
             <View style={styles.orderBtnInner}>
-              <Feather name="check-circle" size={18} color={COLORS.white}/>
-              <Text style={styles.orderBtnText}>Place Order</Text>
+              <Feather name={payment === 'gcash' ? 'smartphone' : 'check-circle'} size={18} color={COLORS.white}/>
+              <Text style={styles.orderBtnText}>{payment === 'gcash' ? 'Pay with GCash' : 'Place Order'}</Text>
             </View>
           )}
         </TouchableOpacity>
       </View>
+
+      {/* ─── GCash Payment Modal ───────────────────────────
+          Same state-machine shape as the staff POS GCash modal: loading →
+          webview (customer authorizes) → confirmed → placing → done. Only
+          this modal's own buttons (Cancel / Confirm Order) close it — no
+          backdrop tap, no hardware-back dismissal mid-payment. */}
+      <Modal
+        visible={gcashModalVisible}
+        animationType="fade"
+        transparent
+        onRequestClose={() => { if (gcashStep === 'webview') cancelGcashPayment(); }}
+      >
+        <View style={styles.gcashModalOverlay}>
+          <View style={[styles.gcashModalCard, gcashStep === 'webview' && styles.gcashModalCardWebview]}>
+
+            {gcashStep === 'loading' && (
+              <View style={styles.gcashModalCenterPad}>
+                <ActivityIndicator color={COLORS.primary} size="large"/>
+                <Text style={styles.gcashModalText}>Setting up secure GCash payment…</Text>
+              </View>
+            )}
+
+            {gcashStep === 'webview' && (
+              <>
+                <View style={styles.gcashModalHeader}>
+                  <Text style={styles.gcashModalTitle}>GCash Payment</Text>
+                </View>
+                <WebView
+                  source={{ uri: gcashRedirectUrl }}
+                  style={{ flex: 1 }}
+                  startInLoadingState
+                  renderLoading={() => (
+                    <View style={styles.gcashModalCenterPad}>
+                      <ActivityIndicator color={COLORS.primary} size="large"/>
+                    </View>
+                  )}
+                />
+                <TouchableOpacity style={styles.gcashModalCancelBtn} onPress={cancelGcashPayment}>
+                  <Text style={styles.gcashModalCancelBtnText}>Cancel</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            {gcashStep === 'confirmed' && (
+              <View style={styles.gcashModalCenterPad}>
+                <Feather name="check-circle" size={48} color={COLORS.primary}/>
+                <Text style={[styles.gcashModalText, { fontWeight:'700', fontSize:16, marginTop:10 }]}>Payment Confirmed!</Text>
+                <Text style={styles.gcashModalText}>
+                  Total: ₱{(total + shippingFee).toFixed(2)}
+                </Text>
+                <TouchableOpacity style={styles.gcashModalConfirmBtn} onPress={confirmGcashOrder}>
+                  <Feather name="check-circle" size={18} color={COLORS.white}/>
+                  <Text style={styles.gcashModalConfirmBtnText}>Confirm Order</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {gcashStep === 'placing' && (
+              <View style={styles.gcashModalCenterPad}>
+                <ActivityIndicator color={COLORS.primary} size="large"/>
+                <Text style={styles.gcashModalText}>Placing your order…</Text>
+              </View>
+            )}
+
+            {gcashStep === 'error' && (
+              <View style={styles.gcashModalCenterPad}>
+                <Feather name="alert-circle" size={40} color="#ef4444"/>
+                <Text style={[styles.gcashModalText, { color:'#ef4444' }]}>{gcashErrorMsg}</Text>
+                <TouchableOpacity style={styles.gcashModalCancelBtn} onPress={cancelGcashPayment}>
+                  <Text style={styles.gcashModalCancelBtnText}>Close</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+          </View>
+        </View>
+      </Modal>
 
       {/* ─── Address Modal ─── */}
       <Modal
@@ -748,20 +769,22 @@ const styles = StyleSheet.create({
   payRadio:           { width: 20, height: 20, borderRadius: 10, borderWidth: 2, borderColor: COLORS.grayBorder, alignItems: 'center', justifyContent: 'center' },
   payRadioActive:     { borderColor: COLORS.primary },
   payRadioDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.primary },
-  gcashToggleRow:    { flexDirection:'row', gap:8, marginBottom:16, marginTop:8 },
-  gcashToggleBtn:    { flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', gap:6, padding:10, borderRadius:8, borderWidth:1.5, borderColor:COLORS.border, backgroundColor:COLORS.surface },
-  gcashToggleActive: { backgroundColor:COLORS.primary, borderColor:COLORS.primary },
-  gcashToggleText:   { fontSize:13, fontWeight:'600', color:COLORS.textMuted },
-  inputError:        { borderColor:'#ef4444' },
-  inputErrText:      { fontSize:11, color:'#ef4444', marginTop:4, marginLeft:4 },
-  uploadBtn:         { flexDirection:'row', alignItems:'center', gap:8, padding:14, borderRadius:10, borderWidth:1.5, borderColor:COLORS.primary, backgroundColor:'rgba(22,163,74,0.05)', justifyContent:'center', marginBottom:12 },
-  uploadBtnText:     { fontSize:14, fontWeight:'600', color:COLORS.primary },
-  receiptPreview:    { width:'100%', height:200, borderRadius:10, marginBottom:8, backgroundColor:COLORS.surface },
   refWrap:            { gap: 6, marginTop: SPACING.sm },
-  refLabel:           { fontSize: 12, fontWeight: '600', color: COLORS.dark },
-  inputRow:           { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg, paddingHorizontal: SPACING.sm },
-  refInput:           { flex: 1, padding: 10, fontSize: 14, color: COLORS.dark },
-  refHint:            { fontSize: 11, color: COLORS.textMuted },
+  gcashNumberBox:     { flexDirection:'row', alignItems:'flex-start', gap:10, padding:12, borderRadius:RADIUS.sm, backgroundColor:'rgba(29,78,216,0.06)', borderWidth:1, borderColor:'rgba(29,78,216,0.2)' },
+  gcashNumberLabel:   { fontSize:12, color:COLORS.textSecondary, lineHeight:17 },
+
+  // GCash Payment Modal
+  gcashModalOverlay:      { flex:1, backgroundColor:'rgba(0,0,0,0.6)', justifyContent:'center', alignItems:'center', padding:SPACING.lg },
+  gcashModalCard:         { width:'100%', maxWidth:400, maxHeight:'85%', backgroundColor:COLORS.white, borderRadius:RADIUS.xl, overflow:'hidden', ...SHADOW.sm },
+  gcashModalCardWebview:  { height:'85%' },
+  gcashModalHeader:       { padding:SPACING.md, borderBottomWidth:1, borderBottomColor:COLORS.grayBorder },
+  gcashModalTitle:        { fontSize:15, fontWeight:'700', color:COLORS.dark, textAlign:'center' },
+  gcashModalCenterPad:    { padding:SPACING.xl, alignItems:'center', gap:8 },
+  gcashModalText:         { fontSize:13, color:COLORS.textSecondary, textAlign:'center' },
+  gcashModalCancelBtn:    { padding:14, alignItems:'center', borderTopWidth:1, borderTopColor:COLORS.grayBorder },
+  gcashModalCancelBtnText:{ fontSize:14, fontWeight:'700', color:'#ef4444' },
+  gcashModalConfirmBtn:   { flexDirection:'row', alignItems:'center', gap:8, backgroundColor:COLORS.primary, borderRadius:RADIUS.sm, paddingVertical:12, paddingHorizontal:24, marginTop:14 },
+  gcashModalConfirmBtnText: { color:COLORS.white, fontWeight:'700', fontSize:14 },
 
   // Footer
   footer:             { backgroundColor: COLORS.white, padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.grayBorder, gap: SPACING.sm },

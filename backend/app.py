@@ -1747,16 +1747,30 @@ def api_place_order():
     except Exception as dup_err:
         print(f'Duplicate check warning: {dup_err}')
 
-    data           = request.get_json()
-    cart_items     = data.get('cart_items', [])
-    payment_method = data.get('payment_method', '')
-    ref_no         = data.get('ref_no', '')
+    data               = request.get_json()
+    cart_items         = data.get('cart_items', [])
+    payment_method     = data.get('payment_method', '')
+    payment_intent_id  = data.get('payment_intent_id', '')
+    ref_no             = ''
 
     if not cart_items or not payment_method:
         return jsonify({'error': 'Cart items and payment method are required.'}), 400
 
-    if payment_method == 'gcash' and not ref_no:
-        return jsonify({'error': 'GCash reference number is required.'}), 400
+    # GCash is verified-only — the mobile app completes payment via the
+    # PayMongo WebView flow first, then submits the order with the
+    # resulting payment_intent_id. We independently re-check with
+    # PayMongo here (never trusting the client) before accepting the
+    # order; this is the same server-side pattern used for the staff POS.
+    if payment_method == 'gcash':
+        if not payment_intent_id:
+            return jsonify({'error': 'A verified GCash payment is required.'}), 400
+        try:
+            status = paymongo_get_intent_status(payment_intent_id)
+        except PayMongoError as e:
+            return jsonify({'error': f'Could not verify GCash payment: {e}'}), 502
+        if status != 'succeeded':
+            return jsonify({'error': f'GCash payment has not succeeded yet (status: {status}).'}), 400
+        ref_no = payment_intent_id
 
     try:
         total    = sum(item['price'] * item['quantity'] for item in cart_items)
@@ -1764,10 +1778,8 @@ def api_place_order():
 
         branch_id    = data.get('branch_id')
         shipping_fee = float(data.get('shipping_fee', 0) or 0)
-        address           = data.get('address', '')
-        address_note      = data.get('address_note', '')
-        sender_number     = data.get('sender_number', '')
-        receipt_image_url = data.get('receipt_image_url', '')
+        address      = data.get('address', '')
+        address_note = data.get('address_note', '')
         order_res = supabase.table('order').insert({
             'customer_id':  customer_id,
             'order_type':   'online',
@@ -1836,9 +1848,13 @@ def api_place_order():
             'customer_id':       customer_id,
             'payment_method':    payment_method,
             'total':             total,
-            'ref_no':            ref_no            if ref_no            else None,
-            'sender_number':     sender_number     if sender_number     else None,
-            'receipt_image_url': receipt_image_url if receipt_image_url else None,
+            # GCash: ref_no is the PayMongo payment_intent_id, already
+            # verified 'succeeded' with PayMongo above. sender_number /
+            # receipt_image_url are no longer collected for GCash — that
+            # manual honor-system path has been fully replaced.
+            'ref_no':            ref_no if ref_no else None,
+            'sender_number':     None,
+            'receipt_image_url': None,
             'status':            'paid' if payment_method == 'gcash' else 'pending'
         }).execute()
 
@@ -1879,6 +1895,58 @@ def api_place_order():
     except Exception as e:
         print(f"API place order error: {e}")
         return jsonify({'error': 'Failed to place order.'}), 500
+
+
+@app.route('/api/orders/paymongo/gcash/create', methods=['POST'])
+def api_orders_paymongo_gcash_create():
+    """Starts a GCash payment for a mobile-app checkout. Returns a
+    payment_intent_id (to poll and to send back with the order) and a
+    redirect_url the app opens in an in-app WebView for the customer to
+    complete the GCash authorization themselves."""
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data   = request.get_json() or {}
+        amount = data.get('amount')
+        if not amount or float(amount) <= 0:
+            return jsonify({'error': 'A valid amount is required.'}), 400
+
+        return_url = request.url_root.rstrip('/') + '/paymongo/gcash-return'
+
+        payment_intent_id, redirect_url = paymongo_create_gcash_intent(
+            amount_pesos = amount,
+            return_url   = return_url,
+            description  = 'TEFC E-Commerce — Online order',
+        )
+        return jsonify({
+            'payment_intent_id': payment_intent_id,
+            'redirect_url':      redirect_url,
+        }), 200
+    except PayMongoError as e:
+        print(f'PayMongo create error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Mobile PayMongo create error: {e}')
+        return jsonify({'error': 'Could not start GCash payment.'}), 500
+
+
+@app.route('/api/orders/paymongo/gcash/status/<payment_intent_id>', methods=['GET'])
+def api_orders_paymongo_gcash_status(payment_intent_id):
+    """Polled by the mobile app every few seconds while the GCash WebView
+    is open."""
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        status = paymongo_get_intent_status(payment_intent_id)
+        return jsonify({'status': status}), 200
+    except PayMongoError as e:
+        print(f'PayMongo status error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Mobile PayMongo status error: {e}')
+        return jsonify({'error': 'Could not check GCash payment status.'}), 500
 
 
 # ══════════════════════════════════════════════════════

@@ -2506,9 +2506,8 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + (order.payment && order.payment.payment_method === 'gcash'
       ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
-        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">Ref No: <strong>' + order.payment.ref_no + '</strong></div>' : '')
-        + (order.payment.sender_number ? '<div style="margin-bottom:4px;">Sender: <strong>' + order.payment.sender_number + '</strong></div>' : '')
-        + (order.payment.receipt_image_url ? '<div><a href="' + order.payment.receipt_image_url + '" target="_blank" style="color:#3b82f6;font-size:12px;">View Receipt</a></div>' : '')
+        + '<div style="margin-bottom:4px;">Status: ' + badge(order.payment.status) + (order.payment.status === 'paid' ? ' <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>' : '') + '</div>'
+        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">PayMongo Reference: <strong>' + order.payment.ref_no + '</strong></div>' : '')
         + '</div>'
       : '')
     + addrHtml
@@ -2685,9 +2684,8 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + (order.payment && order.payment.payment_method === 'gcash'
       ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
-        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">Ref No: <strong>' + order.payment.ref_no + '</strong></div>' : '')
-        + (order.payment.sender_number ? '<div style="margin-bottom:4px;">Sender: <strong>' + order.payment.sender_number + '</strong></div>' : '')
-        + (order.payment.receipt_image_url ? '<div><a href="' + order.payment.receipt_image_url + '" target="_blank" style="color:#3b82f6;font-size:12px;">View Receipt</a></div>' : '')
+        + '<div style="margin-bottom:4px;">Status: ' + badge(order.payment.status) + (order.payment.status === 'paid' ? ' <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>' : '') + '</div>'
+        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">PayMongo Reference: <strong>' + order.payment.ref_no + '</strong></div>' : '')
         + '</div>'
       : '')
     + addrHtml

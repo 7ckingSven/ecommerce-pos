@@ -20,12 +20,19 @@ import CheckoutScreen      from '../screens/CheckoutScreen';
 import OrdersScreen        from '../screens/OrdersScreen';
 import ProfileScreen       from '../screens/ProfileScreen';
 
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Alert } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
 import { COLORS } from '../utils/constants';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CartProvider } from '../utils/CartContext';
 import { useCart } from '../utils/CartContext';
+import {
+  requestNotificationPermission,
+  registerFcmToken,
+  listenForTokenRefresh,
+  listenForForegroundMessages,
+  setupNotificationOpenHandlers,
+} from '../services/notificationService';
 
 const Tab   = createBottomTabNavigator();
 const Stack = createStackNavigator();
@@ -70,7 +77,7 @@ function TabBadge({ count, color }) {
 }
 
 // ─── Main Tabs ────────────────────────────────────────
-function MainTabs() {
+function MainTabs({ navigation }) {
   const insets = useSafeAreaInsets();
   const { cartCount } = useCart();
   const [orderCount, setOrderCount] = React.useState(0);
@@ -90,6 +97,32 @@ function MainTabs() {
     const interval = setInterval(fetchOrderCount, 30000);
     return () => clearInterval(interval);
   }, []);
+
+  // ─── Push notifications ──────────────────────────────
+  // Runs once MainTabs mounts (right after Splash, and again any time
+  // this screen remounts after a login) — requests permission, fetches
+  // and saves the FCM token, and wires up foreground/tap handling.
+  React.useEffect(() => {
+    let unsubRefresh, unsubForeground, unsubOpened;
+    (async () => {
+      await requestNotificationPermission();
+      await registerFcmToken();
+      unsubRefresh    = listenForTokenRefresh();
+      unsubForeground = listenForForegroundMessages((remoteMessage) => {
+        const title = remoteMessage?.notification?.title || 'Order Update';
+        const body  = remoteMessage?.notification?.body  || '';
+        Alert.alert(title, body);
+      });
+      unsubOpened = setupNotificationOpenHandlers(() => {
+        navigation.navigate('Orders');
+      });
+    })();
+    return () => {
+      if (unsubRefresh)    unsubRefresh();
+      if (unsubForeground) unsubForeground();
+      if (unsubOpened)     unsubOpened();
+    };
+  }, [navigation]);
   return (
     <Tab.Navigator
       screenOptions={({ route }) => ({

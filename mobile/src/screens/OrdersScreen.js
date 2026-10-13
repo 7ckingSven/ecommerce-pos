@@ -577,22 +577,35 @@ export default function OrdersScreen({ navigation }) {
               </View>
 
               {/* Payment */}
-              {selectedOrder?.payment && (
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionTitle}>Payment</Text>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Method</Text>
-                    <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.payment_method?.replace(/_/g,' ')}</Text>
-                  </View>
-
-                  {(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no && (
+              {selectedOrder?.payment && (() => {
+                const pmt    = Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment;
+                const isGcash = pmt?.payment_method === 'gcash';
+                return (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionTitle}>Payment</Text>
                     <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Ref No.</Text>
-                      <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no}</Text>
+                      <Text style={styles.detailLabel}>Method</Text>
+                      <Text style={styles.detailValue}>{pmt?.payment_method?.replace(/_/g,' ')}</Text>
                     </View>
-                  )}
-                </View>
-              )}
+
+                    {isGcash && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Status</Text>
+                        <Text style={[styles.detailValue, pmt?.status === 'paid' && { color: COLORS.primary, fontWeight:'700' }]}>
+                          {pmt?.status === 'paid' ? 'Paid (Verified)' : pmt?.status}
+                        </Text>
+                      </View>
+                    )}
+
+                    {pmt?.ref_no && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>{isGcash ? 'PayMongo Reference' : 'Ref No.'}</Text>
+                        <Text style={styles.detailValue}>{pmt.ref_no}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })()}
 
             </ScrollView>
 

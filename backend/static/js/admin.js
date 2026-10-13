@@ -2893,10 +2893,8 @@ function viewOrderItems(order) {
         ${order.payment?.payment_method === 'gcash' ? `
         <div style="grid-column:1/-1;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-top:4px;">
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCASH PAYMENT DETAILS</div>
-          ${order.payment.ref_no ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);"># Ref No:</span> <strong>${order.payment.ref_no}</strong></div>` : ''}
-          ${order.payment.sender_number ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">📱 Sender No:</span> <strong>${order.payment.sender_number}</strong></div>` : ''}
-          ${order.payment.receipt_image_url ? `<div style="margin-top:8px;"><a href="${order.payment.receipt_image_url}" target="_blank" style="color:#3b82f6;font-size:12px;font-weight:600;">View Receipt Image</a></div>` : ''}
-          ${!order.payment.ref_no && !order.payment.sender_number && !order.payment.receipt_image_url ? '<div style="font-size:12px;color:var(--text-muted);">No GCash details provided</div>' : ''}
+          <div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">Status:</span> ${badge(order.payment.status)}${order.payment.status === 'paid' ? ` <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>` : ''}</div>
+          ${order.payment.ref_no ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">PayMongo Reference:</span> <strong>${order.payment.ref_no}</strong></div>` : '<div style="font-size:12px;color:var(--text-muted);">No PayMongo reference available</div>'}
         </div>` : ''}
         <div><span style="color:var(--text-muted);">Date</span><br/><strong>${(() => {
             const raw = order.created_at || order.date || null; // prefer created_at (timestamptz) over date (date-only)

@@ -5,6 +5,7 @@ import {
   FlatList, Image, Alert, Modal, StatusBar,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
@@ -14,6 +15,14 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
+
+// Persists which cart items are checked so the selection survives
+// navigating away, closing the app, or a fresh cold start.
+const CART_SELECTED_KEY = '@cart_selected_items';
+
+function persistSelected(sel) {
+  AsyncStorage.setItem(CART_SELECTED_KEY, JSON.stringify(sel)).catch(() => {});
+}
 
 export default function CartScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -100,10 +109,21 @@ export default function CartScreen({ navigation }) {
       }));
 
       setCart(normalized);
-      // Default: all items selected
+      // Restore previously-checked state per cart_id; a cart item not seen
+      // in the saved map before (e.g. just added) defaults to checked.
+      let saved = {};
+      try {
+        const raw = await AsyncStorage.getItem(CART_SELECTED_KEY);
+        saved = raw ? JSON.parse(raw) : {};
+      } catch (e) {}
       const sel = {};
-      normalized.forEach(item => { sel[item.cart_id] = true; });
+      normalized.forEach(item => {
+        sel[item.cart_id] = Object.prototype.hasOwnProperty.call(saved, item.cart_id)
+          ? saved[item.cart_id]
+          : true;
+      });
       setSelected(sel);
+      persistSelected(sel);
       // Sync global cart count badge
       refreshCartCount();
       // Check variant-specific stock for items that have selected options
@@ -127,10 +147,15 @@ export default function CartScreen({ navigation }) {
     const sel = {};
     cart.forEach(i => { sel[i.cart_id] = newVal; });
     setSelected(sel);
+    persistSelected(sel);
   }
 
   function toggleItem(cartId) {
-    setSelected(prev => ({ ...prev, [cartId]: !prev[cartId] }));
+    setSelected(prev => {
+      const next = { ...prev, [cartId]: !prev[cartId] };
+      persistSelected(next);
+      return next;
+    });
   }
 
   // ─── Total (selected items only) ─────────────────────
@@ -205,6 +230,7 @@ export default function CartScreen({ navigation }) {
             setSelected(prev => {
               const s = { ...prev };
               delete s[cartId];
+              persistSelected(s);
               return s;
             });
           } catch (e) {
