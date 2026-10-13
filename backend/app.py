@@ -2,7 +2,7 @@ import json
 import random
 import secrets
 import traceback
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response
 from flask_cors import CORS
 # Resend email API (replaces Flask-Mail)
 import requests as resend_requests
@@ -246,7 +246,18 @@ def login_required(role=None):
                 return redirect(url_for('login'))
             if not _session_token_valid():
                 return redirect(url_for('logout', reason='session_superseded'))
-            return f(*args, **kwargs)
+
+            # Back/forward-after-logout protection: tell the browser never
+            # to cache this page (disk cache AND, in most browsers, the
+            # back/forward "bfcache") so that pressing Back after logging
+            # out can't silently show a stale, already-logged-out copy of
+            # a dashboard page. While still logged in, Back/Forward keeps
+            # working normally — this only stops a STALE copy being shown.
+            response = make_response(f(*args, **kwargs))
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
         return decorated
     return decorator
 
@@ -749,6 +760,8 @@ def logout():
         flash('You were logged out due to inactivity.', 'error')
     elif reason == 'session_superseded':
         flash('You were logged out because your account was signed in on another device or browser.', 'error')
+    elif reason == 'invalid_action':
+        flash('Please log in to continue.', 'error')
 
     return redirect(url_for('login'))
 

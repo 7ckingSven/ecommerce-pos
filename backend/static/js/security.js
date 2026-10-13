@@ -46,8 +46,13 @@
       .then(function (res) {
         if (res.status === 401) {
           return res.json().catch(function () { return {}; }).then(function (data) {
-            var reason = data && data.reason === 'session_superseded' ? 'session_superseded' : null;
-            window.location.href = reason ? '/logout?reason=' + reason : '/login';
+            // 'session_superseded' is a real, distinct reason; anything
+            // else here (no session at all — e.g. an already-logged-out
+            // page caught by Back/Forward) is an invalid action attempt,
+            // and still gets a clear message on the login page rather
+            // than silently landing there with nothing shown.
+            var reason = (data && data.reason === 'session_superseded') ? 'session_superseded' : 'invalid_action';
+            window.location.href = '/logout?reason=' + reason;
           });
         }
       })
@@ -71,4 +76,16 @@
   setInterval(checkIdle, CHECK_EVERY_MS);
   setInterval(checkSessionStillActive, CHECK_EVERY_MS);
   checkSessionStillActive();
+
+  // Back/forward-after-logout protection, belt-and-suspenders with the
+  // server's no-store headers: if this page is ever shown again via the
+  // browser's back/forward cache (bfcache) — e.g. pressing Back right
+  // after logging out — re-check the session immediately instead of
+  // waiting for the next 30s poll, so a stale cached dashboard can't
+  // linger on screen. While still logged in, Back/Forward is untouched.
+  window.addEventListener('pageshow', function (event) {
+    if (event.persisted) {
+      checkSessionStillActive();
+    }
+  });
 })();
