@@ -418,7 +418,7 @@ def login_post():
     remember_me = request.form.get('remember_me') == 'on'
 
     if not login_input or not password:
-        flash('Please fill in all fields.', 'error')
+        flash('Please fill in all fields.', 'login_error')
         return redirect(url_for('login'))
 
     if remember_me:
@@ -429,22 +429,22 @@ def login_post():
         user_res = supabase.table('user').select('*').eq('username', login_input).execute()
 
         if not user_res.data:
-            flash('No account found with that username.', 'error')
+            flash('No account found with that username.', 'login_error')
             return redirect(url_for('login'))
 
         user = user_res.data[0]
 
         if user['status'] != 'active':
-            flash('Your account is inactive. Please contact the administrator.', 'error')
+            flash('Your account is inactive. Please contact the administrator.', 'login_error')
             return redirect(url_for('login'))
 
         if not check_password(password, user['password']):
-            flash('Incorrect password. Please try again.', 'error')
+            flash('Incorrect password. Please try again.', 'login_error')
             return redirect(url_for('login'))
 
         # Web login is for admin and staff ONLY — customers use mobile app
         if user['role'] == 'customer':
-            flash('Customers must log in through the mobile app.', 'error')
+            flash('Customers must log in through the mobile app.', 'login_error')
             return redirect(url_for('login'))
         elif user['role'] in ('admin', 'staff'):
             # Direct login without access code
@@ -464,12 +464,12 @@ def login_post():
                     flash('Welcome, Staff!', 'success')
                     return redirect(url_for('staff_dashboard'))
             else:
-                flash('Staff information not found.', 'error')
+                flash('Staff information not found.', 'login_error')
                 return redirect(url_for('login'))
 
     except Exception as e:
         print(f"Login error: {e}")
-        flash('Something went wrong. Please try again.', 'error')
+        flash('Something went wrong. Please try again.', 'login_error')
 
     return redirect(url_for('login'))
 

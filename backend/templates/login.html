@@ -232,7 +232,11 @@
         {% with messages = get_flashed_messages(with_categories=true) %}
           {% if messages %}
             {% for category, message in messages %}
-              <div class="flash-msg {{ category }}">{{ message }}</div>
+              <!-- data-flash-category keeps 'login_error' (an actual failed
+                   credential attempt) distinguishable from plain 'error'
+                   (e.g. "please log in" redirects) for the lockout script,
+                   while both still render with the same red styling. -->
+              <div class="flash-msg {{ 'error' if category == 'login_error' else category }}" data-flash-category="{{ category }}">{{ message }}</div>
             {% endfor %}
           {% endif %}
         {% endwith %}
@@ -272,6 +276,8 @@
               Remember me
             </label>
           </div>
+          <p id="loginAttemptsWarning" class="flash-msg error" style="display:none;"></p>
+          <p id="loginLockoutCountdown" style="display:none;text-align:center;font-size:13px;font-weight:700;color:#991B1B;margin-bottom:10px;"></p>
           <button type="submit" id="loginSubmitBtn" class="btn btn-solid-green btn-full">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;">
               <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
@@ -429,6 +435,19 @@
     }
   </script>
   </footer>
+
+  <!-- Login Lockout Modal — no overlay onclick, no × button: closable
+       ONLY by its own Close button. Closing it does not cancel the
+       60-second lockout itself, which keeps counting down in the background. -->
+  <div id="lockoutModalOverlay" style="display:none;position:fixed;inset:0;background:rgba(20,83,45,0.55);z-index:5000;"></div>
+  <div id="lockoutModal" style="display:none;position:fixed;top:50%;left:50%;transform:translate(-50%,-50%);z-index:5001;width:90%;max-width:380px;background:var(--white);border:1px solid var(--border);border-radius:var(--radius-xl);padding:2rem;box-shadow:var(--shadow-lg);text-align:center;">
+    <div style="width:52px;height:52px;margin:0 auto 1rem;background:#FEF2F2;border:1.5px solid #FECACA;border-radius:var(--radius-md);display:flex;align-items:center;justify-content:center;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="#991B1B" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:24px;height:24px;"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+    </div>
+    <h3 style="font-family:'Cormorant Garamond',serif;font-size:1.3rem;font-weight:700;color:var(--text-primary);margin-bottom:0.5rem;">You&rsquo;ve reached login failed attempts</h3>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:1.5rem;">Please wait before trying again.</p>
+    <button type="button" id="lockoutModalCloseBtn" class="btn btn-solid-green" style="width:100%;justify-content:center;">Close</button>
+  </div>
 
   <script src="{{ url_for('static', filename='js/login.js') }}"></script>
   <script>
