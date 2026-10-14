@@ -5019,6 +5019,7 @@ function showPOReceipt(po, items, total) {
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);">
         ${i.product?.product_name || i.product_name || '—'}
         ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}</div>` : ''}
+        ${i.branch_note ? `<div style="font-size:10px;color:var(--text-muted);">→ ${i.branch_note}</div>` : ''}
       </td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
@@ -5342,8 +5343,32 @@ async function submitPOReceive(poId) {
       // 'partially_received' with the shortfall still outstanding.
       showToast(body.message || 'Receipt saved!');
       closePODetailModal();
-      invalidateSection('purchase_orders'); loadPurchaseOrders();
+      invalidateSection('purchase_orders'); await loadPurchaseOrders();
       invalidateSection('inventory'); loadInventory();
+
+      // Issue a receipt for THIS batch regardless of whether it completed
+      // the PO or only partially filled it — a receipt should be given
+      // either way, not just on a full receive.
+      const receiptItems = itemsPayload
+        .filter(function(e) { return e.received_quantity > 0; })
+        .map(function(e) {
+          const srcItem  = items.find(function(it) { return it.po_item_id === e.po_item_id; }) || {};
+          const noteText = (e.branches || [])
+            .map(function(b) {
+              const br = allBranches.find(function(x) { return x.branch_id === b.branch_id; });
+              return (br ? br.branch_name : b.branch_id) + ': ' + b.quantity;
+            })
+            .join(', ');
+          return {
+            product_name:    srcItem.product?.product_name,
+            variant_options: srcItem.variant_options,
+            quantity:        e.received_quantity,
+            unit_cost:       srcItem.unit_cost,
+            branch_note:     noteText,
+          };
+        });
+      const receiptTotal = receiptItems.reduce(function(s, i) { return s + Number(i.unit_cost || 0) * Number(i.quantity || 0); }, 0);
+      showPOReceipt({ ...po, status: body.status || po.status }, receiptItems, receiptTotal);
     } else {
       showToast(body.error || 'Failed to receive PO.', 'error');
       setButtonLoading(btn, false);
@@ -5371,7 +5396,7 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
     if (res.ok) {
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
-      invalidateSection('purchase_orders'); loadPurchaseOrders();
+      invalidateSection('purchase_orders'); await loadPurchaseOrders();
       if (status === 'received') { invalidateSection('inventory'); loadInventory(); }
       // Show receipt when marked as ordered or received
       if (status === 'ordered' || status === 'received') {

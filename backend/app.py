@@ -1397,8 +1397,13 @@ def api_get_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
+        # branch_stock/variant_stock are included so the app can enforce the
+        # real stock cap on the quantity stepper — without them, every
+        # product's stock limit silently reads as undefined and the +
+        # button never disables no matter how high the quantity goes
+        # (branch-level AND per-variant).
         res = supabase_retry(lambda: supabase.table('cart').select(
-            '*, branch_id, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage))'
+            '*, branch_id, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage), branch_stock(branch_id, quantity), variant_stock(branch_id, quantity, options))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -2299,11 +2304,12 @@ def admin_create_purchase_order():
         # Insert PO items
         for item in items:
             supabase.table('po_item').insert({
-                'po_id':           po_id,
-                'product_id':      item['product_id'],
-                'quantity':        int(item['quantity']),
-                'unit_cost':       float(item.get('unit_cost', 0)),
-                'variant_options': item.get('variant_options') or None,
+                'po_id':             po_id,
+                'product_id':        item['product_id'],
+                'quantity':          int(item['quantity']),
+                'unit_cost':         float(item.get('unit_cost', 0)),
+                'variant_options':   item.get('variant_options') or None,
+                'received_quantity': 0,
             }).execute()
 
         return jsonify({'message': 'Purchase order created.', 'po_id': po_id, 'po_number': po_num}), 201
@@ -2426,6 +2432,13 @@ def admin_update_purchase_order(po_id):
             'po_item_id, product_id, quantity, received_quantity, variant_options'
         ).eq('po_id', po_id).execute()
         all_items   = all_items_res.data or []
+        # received_quantity can come back NULL from the DB (e.g. for rows
+        # inserted before this column was being tracked) — dict.get(key, 0)
+        # does NOT protect against that, since the key IS present, just with
+        # value None, and 0 + None / quantity - None raises a TypeError.
+        # Normalize to 0 right away so every downstream calc is safe.
+        for i in all_items:
+            i['received_quantity'] = i.get('received_quantity') or 0
         items_by_id = {i['po_item_id']: i for i in all_items}
 
         # Validate BEFORE writing anything:
@@ -2441,7 +2454,7 @@ def admin_update_purchase_order(po_id):
             this_batch = int(item_entry.get('received_quantity', 0))
             if this_batch <= 0:
                 continue  # not receiving this item in this batch — fine
-            outstanding = po_item['quantity'] - po_item.get('received_quantity', 0)
+            outstanding = po_item['quantity'] - po_item['received_quantity']
             if this_batch > outstanding:
                 return jsonify({
                     'error': f"Quantity arriving ({this_batch}) exceeds what's still outstanding ({outstanding}) for one or more items."
@@ -2470,7 +2483,7 @@ def admin_update_purchase_order(po_id):
                     continue
                 _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
 
-            new_received = po_item.get('received_quantity', 0) + this_batch
+            new_received = po_item['received_quantity'] + this_batch
             supabase.table('po_item').update({'received_quantity': new_received}).eq('po_item_id', po_item['po_item_id']).execute()
             po_item['received_quantity'] = new_received  # keep local copy in sync for the completeness check below
 
@@ -2486,7 +2499,7 @@ def admin_update_purchase_order(po_id):
         if data.get('note'):     updates['note']     = data['note']
         supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
 
-        return jsonify({'message': f'PO status updated to {final_status}.'}), 200
+        return jsonify({'message': f'PO status updated to {final_status}.', 'status': final_status}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

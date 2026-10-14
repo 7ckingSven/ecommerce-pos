@@ -66,9 +66,32 @@ export default function ProductDetailScreen({ route, navigation }) {
   const allOptsSelected  = hasVariants && Object.keys(selectedOptions).length === (product.option_groups || []).length;
   const variantOutOfStock = allOptsSelected && variantStock === 0;
 
+  // The stepper previously only ever checked branchQty (the branch's total
+  // stock across every variant combo), so a product with variants let you
+  // keep pressing + past the quantity actually available for the selected
+  // variant — variantStock (fetched above by checkVariantStock) was used
+  // only for the "out of stock" label/button gating, never to cap the
+  // stepper itself. Once all option groups are selected and we have a real
+  // variant-stock reading, that specific combo's stock is the real ceiling;
+  // otherwise branchQty is the best we know.
+  const variantStockKnown = allOptsSelected && typeof variantStock === 'number';
+  const effectiveMaxQty    = variantStockKnown ? Math.min(variantStock, branchQty) : branchQty;
+  const maxQtyLabel        = variantStockKnown ? variantStock : branchQty;
+
+  // If the selected variant changes (or its stock reading comes back lower
+  // than the quantity already dialed in), pull the quantity back down to
+  // the new ceiling instead of leaving it stuck above what's available.
+  useEffect(() => {
+    if (quantity > effectiveMaxQty) {
+      const clamped = Math.max(effectiveMaxQty, 0);
+      setQty(clamped);
+      setQtyText(String(clamped));
+    }
+  }, [effectiveMaxQty]);
+
   function increment() {
-    if (quantity >= branchQty) {
-      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${branchQty} unit(s) available.` });
+    if (quantity >= effectiveMaxQty) {
+      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${maxQtyLabel} unit(s) available.` });
       return;
     }
     const next = quantity + 1;
@@ -95,9 +118,9 @@ export default function ProductDetailScreen({ route, navigation }) {
   function commitQtyText() {
     const num = parseInt(qtyText, 10) || 0;
     let final = num;
-    if (num > branchQty) {
-      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${branchQty} unit(s) available.` });
-      final = branchQty;
+    if (num > effectiveMaxQty) {
+      showAlert({ type: 'warning', title: 'Maximum Stock', message: `Only ${maxQtyLabel} unit(s) available.` });
+      final = effectiveMaxQty;
     } else if (num < 1) {
       final = 1;
     }
@@ -385,11 +408,11 @@ export default function ProductDetailScreen({ route, navigation }) {
                   selectTextOnFocus
                 />
                 <TouchableOpacity
-                  style={[styles.qtyBtn, quantity >= branchQty && styles.qtyBtnDisabled]}
+                  style={[styles.qtyBtn, quantity >= effectiveMaxQty && styles.qtyBtnDisabled]}
                   onPress={increment}
-                  disabled={quantity >= branchQty}
+                  disabled={quantity >= effectiveMaxQty}
                 >
-                  <Feather name="plus" size={16} color={quantity >= branchQty ? COLORS.grayLight : COLORS.dark}/>
+                  <Feather name="plus" size={16} color={quantity >= effectiveMaxQty ? COLORS.grayLight : COLORS.dark}/>
                 </TouchableOpacity>
               </View>
             </View>

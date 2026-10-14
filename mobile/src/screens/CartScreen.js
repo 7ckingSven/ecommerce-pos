@@ -24,6 +24,35 @@ function persistSelected(sel) {
   AsyncStorage.setItem(CART_SELECTED_KEY, JSON.stringify(sel)).catch(() => {});
 }
 
+// The quantity stepper's cap previously read item.product?.quantity, but the
+// backend's /api/cart select never actually returned a `quantity` field on
+// the nested product — so this was always undefined and `quantity >=
+// undefined` is always false, meaning the + button never disabled for ANY
+// item no matter how much stock it had. Now that the cart query includes
+// branch_stock/variant_stock, resolve the real cap here: prefer the specific
+// selected variant's stock when the item has one and we can match it,
+// otherwise fall back to the branch-level stock total.
+function getCartItemMaxQty(product, branchId, selectedOptions) {
+  if (!product) return null;
+  const variantStockList = Array.isArray(product.variant_stock) ? product.variant_stock : [];
+  if (selectedOptions && Object.keys(selectedOptions).length > 0 && variantStockList.length > 0) {
+    const match = variantStockList.find(v => {
+      if (branchId != null && v.branch_id !== branchId) return false;
+      return JSON.stringify(v.options || {}) === JSON.stringify(selectedOptions || {});
+    });
+    if (match) return Number(match.quantity ?? 0);
+  }
+  const branchStockList = Array.isArray(product.branch_stock) ? product.branch_stock : [];
+  if (branchId != null) {
+    const bMatch = branchStockList.find(b => b.branch_id === branchId);
+    if (bMatch) return Number(bMatch.quantity ?? 0);
+  }
+  if (branchStockList.length > 0) {
+    return branchStockList.reduce((s, b) => s + Number(b.quantity || 0), 0);
+  }
+  return null;
+}
+
 export default function CartScreen({ navigation }) {
   const insets = useSafeAreaInsets();
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
@@ -172,7 +201,9 @@ export default function CartScreen({ navigation }) {
   async function handleUpdateQty(cartId, qty, maxStock) {
     if (qty < 1) { handleRemove(cartId); return; }
     const limit = maxStock != null ? Number(maxStock) : null;
-    if (limit !== null && limit > 0 && qty > limit) {
+    // Was `limit > 0 && qty > limit` — that let a legitimately out-of-stock
+    // (limit === 0) row slip through uncapped instead of being blocked.
+    if (limit !== null && qty > limit) {
       Alert.alert('Maximum Stock', `Only ${limit} unit(s) available.`);
       return;
     }
@@ -207,7 +238,7 @@ export default function CartScreen({ navigation }) {
     if (raw === undefined) return; // field was never touched
     const limit = maxStock != null ? Number(maxStock) : null;
     let num = parseInt(raw, 10) || 1;
-    if (limit !== null && limit > 0 && num > limit) {
+    if (limit !== null && num > limit) {
       Alert.alert('Maximum Stock', `Only ${limit} unit(s) available.`);
       num = limit;
     }
@@ -354,6 +385,7 @@ export default function CartScreen({ navigation }) {
                 ? price * (1 - Number(disc.percentage || 0) / 100)
                 : price;
               const finalSub   = finalPrice * item.quantity;
+              const maxQty     = getCartItemMaxQty(product, item.branch_id, item.selected_options);
 
               return (
                 <View style={[styles.cartItem, isSelected && styles.cartItemSelected]}>
@@ -418,7 +450,7 @@ export default function CartScreen({ navigation }) {
                     <View style={styles.qtyRow}>
                       <TouchableOpacity
                         style={styles.qtyBtn}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, item.product ? item.product.quantity : null)}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, maxQty)}
                       >
                         <Feather name="minus" size={13} color={COLORS.dark}/>
                       </TouchableOpacity>
@@ -427,17 +459,17 @@ export default function CartScreen({ navigation }) {
                         value={qtyEditText[item.cart_id] !== undefined ? qtyEditText[item.cart_id] : String(item.quantity)}
                         onFocus={() => handleQtyFocus(item.cart_id)}
                         onChangeText={v => handleQtyChangeText(item.cart_id, v)}
-                        onBlur={() => commitQtyInput(item.cart_id, item.product?.quantity)}
-                        onSubmitEditing={() => commitQtyInput(item.cart_id, item.product?.quantity)}
+                        onBlur={() => commitQtyInput(item.cart_id, maxQty)}
+                        onSubmitEditing={() => commitQtyInput(item.cart_id, maxQty)}
                         keyboardType="number-pad"
                         maxLength={4}
                       />
                       <TouchableOpacity
-                        style={[styles.qtyBtn, item.quantity >= item.product?.quantity && styles.qtyBtnDisabled]}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, item.product ? item.product.quantity : null)}
-                        disabled={item.quantity >= item.product?.quantity}
+                        style={[styles.qtyBtn, maxQty != null && item.quantity >= maxQty && styles.qtyBtnDisabled]}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, maxQty)}
+                        disabled={maxQty != null && item.quantity >= maxQty}
                       >
-                        <Feather name="plus" size={13} color={item.quantity >= item.product?.quantity ? COLORS.grayLight : COLORS.dark}/>
+                        <Feather name="plus" size={13} color={maxQty != null && item.quantity >= maxQty ? COLORS.grayLight : COLORS.dark}/>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.removeBtn}
