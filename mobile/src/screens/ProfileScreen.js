@@ -330,16 +330,14 @@ export default function ProfileScreen({ navigation }) {
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
-      {/* translucent={false}: with translucent={true}, Android ignores
-          backgroundColor entirely and overlays its own default dimming
-          scrim instead — that's why the status bar showed up as a
-          visibly different/darker shade of green than the header even
-          though both used the same COLORS.primary. */}
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
-      {/* Android now auto-reserves space for the solid status bar, so
-          insets.top there too would double-pad it — only iOS still
-          needs it added manually. */}
-      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <SkeletonLoader type="profile" />
@@ -348,16 +346,14 @@ export default function ProfileScreen({ navigation }) {
 
   if (error) return (
     <View style={styles.container}>
-      {/* translucent={false}: with translucent={true}, Android ignores
-          backgroundColor entirely and overlays its own default dimming
-          scrim instead — that's why the status bar showed up as a
-          visibly different/darker shade of green than the header even
-          though both used the same COLORS.primary. */}
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
-      {/* Android now auto-reserves space for the solid status bar, so
-          insets.top there too would double-pad it — only iOS still
-          needs it added manually. */}
-      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <View style={styles.emptyWrap}>
@@ -378,16 +374,14 @@ export default function ProfileScreen({ navigation }) {
 
   if (!loggedIn) return (
     <View style={styles.container}>
-      {/* translucent={false}: with translucent={true}, Android ignores
-          backgroundColor entirely and overlays its own default dimming
-          scrim instead — that's why the status bar showed up as a
-          visibly different/darker shade of green than the header even
-          though both used the same COLORS.primary. */}
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
-      {/* Android now auto-reserves space for the solid status bar, so
-          insets.top there too would double-pad it — only iOS still
-          needs it added manually. */}
-      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <View style={styles.emptyWrap}>
@@ -403,16 +397,14 @@ export default function ProfileScreen({ navigation }) {
 
   if (loggedIn) return (
     <View style={styles.container}>
-      {/* translucent={false}: with translucent={true}, Android ignores
-          backgroundColor entirely and overlays its own default dimming
-          scrim instead — that's why the status bar showed up as a
-          visibly different/darker shade of green than the header even
-          though both used the same COLORS.primary. */}
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
-      {/* Android now auto-reserves space for the solid status bar, so
-          insets.top there too would double-pad it — only iOS still
-          needs it added manually. */}
-      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <NetworkBanner />
