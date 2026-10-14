@@ -243,8 +243,12 @@ export default function OrdersScreen({ navigation }) {
   if (!loggedIn) {
     return (
       <View style={styles.container}>
-        <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
-        <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+        {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we draw this
+          area ourselves instead: StatusBar stays fully transparent, and
+          the header's own background extends up through insets.top. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
+      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
           <Text style={styles.headerTitle}>My Orders</Text>
         </View>
         <View style={styles.emptyWrap}>
@@ -261,7 +265,13 @@ export default function OrdersScreen({ navigation }) {
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Orders</Text>
       </View>
@@ -271,7 +281,13 @@ export default function OrdersScreen({ navigation }) {
 
   if (error) return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Orders</Text>
       </View>
@@ -288,7 +304,13 @@ export default function OrdersScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Orders</Text>
       </View>
@@ -577,22 +599,35 @@ export default function OrdersScreen({ navigation }) {
               </View>
 
               {/* Payment */}
-              {selectedOrder?.payment && (
-                <View style={styles.detailSection}>
-                  <Text style={styles.detailSectionTitle}>Payment</Text>
-                  <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Method</Text>
-                    <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.payment_method?.replace(/_/g,' ')}</Text>
-                  </View>
-
-                  {(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no && (
+              {selectedOrder?.payment && (() => {
+                const pmt    = Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment;
+                const isGcash = pmt?.payment_method === 'gcash';
+                return (
+                  <View style={styles.detailSection}>
+                    <Text style={styles.detailSectionTitle}>Payment</Text>
                     <View style={styles.detailRow}>
-                      <Text style={styles.detailLabel}>Ref No.</Text>
-                      <Text style={styles.detailValue}>{(Array.isArray(selectedOrder.payment) ? selectedOrder.payment[0] : selectedOrder.payment)?.ref_no}</Text>
+                      <Text style={styles.detailLabel}>Method</Text>
+                      <Text style={styles.detailValue}>{pmt?.payment_method?.replace(/_/g,' ')}</Text>
                     </View>
-                  )}
-                </View>
-              )}
+
+                    {isGcash && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>Status</Text>
+                        <Text style={[styles.detailValue, pmt?.status === 'paid' && { color: COLORS.primary, fontWeight:'700' }]}>
+                          {pmt?.status === 'paid' ? 'Paid (Verified)' : pmt?.status}
+                        </Text>
+                      </View>
+                    )}
+
+                    {pmt?.ref_no && (
+                      <View style={styles.detailRow}>
+                        <Text style={styles.detailLabel}>{isGcash ? 'PayMongo Reference' : 'Ref No.'}</Text>
+                        <Text style={styles.detailValue}>{pmt.ref_no}</Text>
+                      </View>
+                    )}
+                  </View>
+                );
+              })()}
 
             </ScrollView>
 

@@ -2,9 +2,10 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
-  FlatList, Image, Alert, Modal, StatusBar,
+  FlatList, Image, Alert, Modal, StatusBar, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
@@ -14,6 +15,43 @@ import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
+
+// Persists which cart items are checked so the selection survives
+// navigating away, closing the app, or a fresh cold start.
+const CART_SELECTED_KEY = '@cart_selected_items';
+
+function persistSelected(sel) {
+  AsyncStorage.setItem(CART_SELECTED_KEY, JSON.stringify(sel)).catch(() => {});
+}
+
+// The quantity stepper's cap previously read item.product?.quantity, but the
+// backend's /api/cart select never actually returned a `quantity` field on
+// the nested product — so this was always undefined and `quantity >=
+// undefined` is always false, meaning the + button never disabled for ANY
+// item no matter how much stock it had. Now that the cart query includes
+// branch_stock/variant_stock, resolve the real cap here: prefer the specific
+// selected variant's stock when the item has one and we can match it,
+// otherwise fall back to the branch-level stock total.
+function getCartItemMaxQty(product, branchId, selectedOptions) {
+  if (!product) return null;
+  const variantStockList = Array.isArray(product.variant_stock) ? product.variant_stock : [];
+  if (selectedOptions && Object.keys(selectedOptions).length > 0 && variantStockList.length > 0) {
+    const match = variantStockList.find(v => {
+      if (branchId != null && v.branch_id !== branchId) return false;
+      return JSON.stringify(v.options || {}) === JSON.stringify(selectedOptions || {});
+    });
+    if (match) return Number(match.quantity ?? 0);
+  }
+  const branchStockList = Array.isArray(product.branch_stock) ? product.branch_stock : [];
+  if (branchId != null) {
+    const bMatch = branchStockList.find(b => b.branch_id === branchId);
+    if (bMatch) return Number(bMatch.quantity ?? 0);
+  }
+  if (branchStockList.length > 0) {
+    return branchStockList.reduce((s, b) => s + Number(b.quantity || 0), 0);
+  }
+  return null;
+}
 
 export default function CartScreen({ navigation }) {
   const insets = useSafeAreaInsets();
@@ -100,10 +138,21 @@ export default function CartScreen({ navigation }) {
       }));
 
       setCart(normalized);
-      // Default: all items selected
+      // Restore previously-checked state per cart_id; a cart item not seen
+      // in the saved map before (e.g. just added) defaults to checked.
+      let saved = {};
+      try {
+        const raw = await AsyncStorage.getItem(CART_SELECTED_KEY);
+        saved = raw ? JSON.parse(raw) : {};
+      } catch (e) {}
       const sel = {};
-      normalized.forEach(item => { sel[item.cart_id] = true; });
+      normalized.forEach(item => {
+        sel[item.cart_id] = Object.prototype.hasOwnProperty.call(saved, item.cart_id)
+          ? saved[item.cart_id]
+          : true;
+      });
       setSelected(sel);
+      persistSelected(sel);
       // Sync global cart count badge
       refreshCartCount();
       // Check variant-specific stock for items that have selected options
@@ -127,10 +176,15 @@ export default function CartScreen({ navigation }) {
     const sel = {};
     cart.forEach(i => { sel[i.cart_id] = newVal; });
     setSelected(sel);
+    persistSelected(sel);
   }
 
   function toggleItem(cartId) {
-    setSelected(prev => ({ ...prev, [cartId]: !prev[cartId] }));
+    setSelected(prev => {
+      const next = { ...prev, [cartId]: !prev[cartId] };
+      persistSelected(next);
+      return next;
+    });
   }
 
   // ─── Total (selected items only) ─────────────────────
@@ -147,7 +201,9 @@ export default function CartScreen({ navigation }) {
   async function handleUpdateQty(cartId, qty, maxStock) {
     if (qty < 1) { handleRemove(cartId); return; }
     const limit = maxStock != null ? Number(maxStock) : null;
-    if (limit !== null && limit > 0 && qty > limit) {
+    // Was `limit > 0 && qty > limit` — that let a legitimately out-of-stock
+    // (limit === 0) row slip through uncapped instead of being blocked.
+    if (limit !== null && qty > limit) {
       Alert.alert('Maximum Stock', `Only ${limit} unit(s) available.`);
       return;
     }
@@ -182,7 +238,7 @@ export default function CartScreen({ navigation }) {
     if (raw === undefined) return; // field was never touched
     const limit = maxStock != null ? Number(maxStock) : null;
     let num = parseInt(raw, 10) || 1;
-    if (limit !== null && limit > 0 && num > limit) {
+    if (limit !== null && num > limit) {
       Alert.alert('Maximum Stock', `Only ${limit} unit(s) available.`);
       num = limit;
     }
@@ -205,6 +261,7 @@ export default function CartScreen({ navigation }) {
             setSelected(prev => {
               const s = { ...prev };
               delete s[cartId];
+              persistSelected(s);
               return s;
             });
           } catch (e) {
@@ -229,7 +286,13 @@ export default function CartScreen({ navigation }) {
   // ─── Not Logged In ────────────────────────────────────
   if (!loggedIn) return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Cart</Text>
       </View>
@@ -246,7 +309,13 @@ export default function CartScreen({ navigation }) {
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Cart</Text>
       </View>
@@ -259,7 +328,13 @@ export default function CartScreen({ navigation }) {
 
   return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Modern Android (15+/edge-to-edge) ignores StatusBar's
+          backgroundColor/translucent props entirely, so we stop relying
+          on the OS to paint that area and draw it ourselves instead:
+          StatusBar stays fully transparent, and the header's own
+          background now extends up through insets.top on every
+          platform, so there's no seam for the OS to get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
         <Text style={styles.headerTitle}>My Cart</Text>
       </View>
@@ -328,6 +403,7 @@ export default function CartScreen({ navigation }) {
                 ? price * (1 - Number(disc.percentage || 0) / 100)
                 : price;
               const finalSub   = finalPrice * item.quantity;
+              const maxQty     = getCartItemMaxQty(product, item.branch_id, item.selected_options);
 
               return (
                 <View style={[styles.cartItem, isSelected && styles.cartItemSelected]}>
@@ -392,7 +468,7 @@ export default function CartScreen({ navigation }) {
                     <View style={styles.qtyRow}>
                       <TouchableOpacity
                         style={styles.qtyBtn}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, item.product ? item.product.quantity : null)}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity - 1, maxQty)}
                       >
                         <Feather name="minus" size={13} color={COLORS.dark}/>
                       </TouchableOpacity>
@@ -401,17 +477,17 @@ export default function CartScreen({ navigation }) {
                         value={qtyEditText[item.cart_id] !== undefined ? qtyEditText[item.cart_id] : String(item.quantity)}
                         onFocus={() => handleQtyFocus(item.cart_id)}
                         onChangeText={v => handleQtyChangeText(item.cart_id, v)}
-                        onBlur={() => commitQtyInput(item.cart_id, item.product?.quantity)}
-                        onSubmitEditing={() => commitQtyInput(item.cart_id, item.product?.quantity)}
+                        onBlur={() => commitQtyInput(item.cart_id, maxQty)}
+                        onSubmitEditing={() => commitQtyInput(item.cart_id, maxQty)}
                         keyboardType="number-pad"
                         maxLength={4}
                       />
                       <TouchableOpacity
-                        style={[styles.qtyBtn, item.quantity >= item.product?.quantity && styles.qtyBtnDisabled]}
-                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, item.product ? item.product.quantity : null)}
-                        disabled={item.quantity >= item.product?.quantity}
+                        style={[styles.qtyBtn, maxQty != null && item.quantity >= maxQty && styles.qtyBtnDisabled]}
+                        onPress={() => handleUpdateQty(item.cart_id, item.quantity + 1, maxQty)}
+                        disabled={maxQty != null && item.quantity >= maxQty}
                       >
-                        <Feather name="plus" size={13} color={item.quantity >= item.product?.quantity ? COLORS.grayLight : COLORS.dark}/>
+                        <Feather name="plus" size={13} color={maxQty != null && item.quantity >= maxQty ? COLORS.grayLight : COLORS.dark}/>
                       </TouchableOpacity>
                       <TouchableOpacity
                         style={styles.removeBtn}
