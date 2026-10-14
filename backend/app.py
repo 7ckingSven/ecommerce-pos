@@ -2465,6 +2465,21 @@ def admin_update_purchase_order(po_id):
                     'error': f'Branch distribution ({dist_total}) must equal the quantity arriving this batch ({this_batch}) for one or more items.'
                 }), 400
 
+        # Each item's write is now isolated in its own try/except. Before
+        # this, one item throwing partway through (a transient Supabase
+        # error, etc.) aborted the ENTIRE request with a 500 — but any
+        # items already written earlier in the same loop had already been
+        # committed to the database. Since the PO's own status update sits
+        # after this loop, that 500 meant the admin's screen showed a
+        # failure, the modal never closed, and the status silently stayed
+        # "Ordered" — while the database quietly already had a partial
+        # receive sitting underneath it, invisible until a hard refresh.
+        # Continuing past a single item's failure (instead of letting it
+        # kill the whole batch) means whatever DID save gets reflected in
+        # the final status, and the response tells the frontend exactly
+        # which item(s), if any, still need to be retried.
+        item_errors   = []
+        any_succeeded = False
         for item_entry in items_payload:
             po_item = items_by_id.get(item_entry.get('po_item_id'))
             if not po_item:
@@ -2472,25 +2487,31 @@ def admin_update_purchase_order(po_id):
             this_batch      = int(item_entry.get('received_quantity', 0))
             if this_batch <= 0:
                 continue
-            product_id      = item_entry.get('product_id') or po_item['product_id']
-            branch_dist     = item_entry.get('branches', [])  # [{branch_id, quantity}]
-            variant_options = po_item.get('variant_options')
+            try:
+                product_id      = item_entry.get('product_id') or po_item['product_id']
+                branch_dist     = item_entry.get('branches', [])  # [{branch_id, quantity}]
+                variant_options = po_item.get('variant_options')
 
-            for b in branch_dist:
-                b_id  = b.get('branch_id')
-                b_qty = int(b.get('quantity', 0))
-                if not b_id or b_qty <= 0:
-                    continue
-                _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
+                for b in branch_dist:
+                    b_id  = b.get('branch_id')
+                    b_qty = int(b.get('quantity', 0))
+                    if not b_id or b_qty <= 0:
+                        continue
+                    _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
 
-            new_received = po_item['received_quantity'] + this_batch
-            supabase.table('po_item').update({'received_quantity': new_received}).eq('po_item_id', po_item['po_item_id']).execute()
-            po_item['received_quantity'] = new_received  # keep local copy in sync for the completeness check below
+                new_received = po_item['received_quantity'] + this_batch
+                supabase.table('po_item').update({'received_quantity': new_received}).eq('po_item_id', po_item['po_item_id']).execute()
+                po_item['received_quantity'] = new_received  # keep local copy in sync for the completeness check below
+                any_succeeded = True
+            except Exception as item_err:
+                item_errors.append({'po_item_id': po_item['po_item_id'], 'error': str(item_err)})
 
         # The whole PO only becomes 'received' once every line item's
         # running total has reached its ordered quantity — otherwise it
         # stays 'partially_received' so it can be opened again later for
-        # whatever the supplier still owes.
+        # whatever the supplier still owes. Computed from whatever actually
+        # got written above, so a partial-batch failure still leaves the
+        # status accurate instead of stuck on the pre-batch value.
         all_complete = all(i['received_quantity'] >= i['quantity'] for i in all_items)
         final_status = 'received' if all_complete else 'partially_received'
 
@@ -2498,6 +2519,19 @@ def admin_update_purchase_order(po_id):
         if data.get('supplier'): updates['supplier'] = data['supplier']
         if data.get('note'):     updates['note']     = data['note']
         supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
+
+        if item_errors:
+            # 207: some items saved, some didn't — tell the frontend which,
+            # so it can close the modal / refresh / show a receipt for what
+            # DID save, instead of a blanket failure that hides it.
+            # If NOTHING saved this batch, fall back to a plain 500 so the
+            # frontend keeps its existing all-failed behavior.
+            status_code = 207 if any_succeeded else 500
+            return jsonify({
+                'message':     f'PO status updated to {final_status}, but {len(item_errors)} item(s) failed to save this batch.',
+                'status':      final_status,
+                'item_errors': item_errors,
+            }), status_code
 
         return jsonify({'message': f'PO status updated to {final_status}.', 'status': final_status}), 200
     except Exception as e:

@@ -5341,16 +5341,35 @@ async function submitPOReceive(poId) {
       // Backend decides the real outcome — 'received' only if every item's
       // running total now meets its ordered qty, otherwise
       // 'partially_received' with the shortfall still outstanding.
-      showToast(body.message || 'Receipt saved!');
+      //
+      // A 2xx here can now also mean "mostly saved" (HTTP 207) — the
+      // backend isolates each item's write, so one item failing no longer
+      // takes the whole batch down with it. body.item_errors lists which
+      // po_item_ids, if any, didn't save this round; everything else here
+      // (modal close, refresh, receipt) still needs to happen for the
+      // items that DID go through, instead of the old all-or-nothing
+      // behavior that left a real partial receive hidden behind a failed
+      // request and a stuck "Ordered" status.
+      const failedIds = new Set((body.item_errors || []).map(function(e) { return e.po_item_id; }));
+      if (failedIds.size) {
+        const names = itemsPayload
+          .filter(function(e) { return failedIds.has(e.po_item_id); })
+          .map(function(e) { const it = items.find(function(x) { return x.po_item_id === e.po_item_id; }); return it?.product?.product_name || e.po_item_id; });
+        showToast('Saved, but failed for: ' + names.join(', ') + ' — reopen this PO to retry just those.', 'error');
+      } else {
+        showToast(body.message || 'Receipt saved!');
+      }
       closePODetailModal();
       invalidateSection('purchase_orders'); await loadPurchaseOrders();
       invalidateSection('inventory'); loadInventory();
 
       // Issue a receipt for THIS batch regardless of whether it completed
       // the PO or only partially filled it — a receipt should be given
-      // either way, not just on a full receive.
+      // either way, not just on a full receive. Items that failed to save
+      // (see failedIds above) are left off the receipt since they didn't
+      // actually go in.
       const receiptItems = itemsPayload
-        .filter(function(e) { return e.received_quantity > 0; })
+        .filter(function(e) { return e.received_quantity > 0 && !failedIds.has(e.po_item_id); })
         .map(function(e) {
           const srcItem  = items.find(function(it) { return it.po_item_id === e.po_item_id; }) || {};
           const noteText = (e.branches || [])
@@ -5367,9 +5386,15 @@ async function submitPOReceive(poId) {
             branch_note:     noteText,
           };
         });
-      const receiptTotal = receiptItems.reduce(function(s, i) { return s + Number(i.unit_cost || 0) * Number(i.quantity || 0); }, 0);
-      showPOReceipt({ ...po, status: body.status || po.status }, receiptItems, receiptTotal);
+      if (receiptItems.length) {
+        const receiptTotal = receiptItems.reduce(function(s, i) { return s + Number(i.unit_cost || 0) * Number(i.quantity || 0); }, 0);
+        showPOReceipt({ ...po, status: body.status || po.status }, receiptItems, receiptTotal);
+      }
     } else {
+      // A plain failure (not 207) now means NOTHING from this batch was
+      // written — the backend only returns a hard error status when every
+      // item failed, so there's no stale state to clean up here; the modal
+      // staying open and the PO list staying as-is both reflect reality.
       showToast(body.error || 'Failed to receive PO.', 'error');
       setButtonLoading(btn, false);
     }
