@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   View, Text, Image, TouchableOpacity, TextInput, StyleSheet,
-  ScrollView, Alert, ActivityIndicator, FlatList, Dimensions,
+  ScrollView, Alert, ActivityIndicator, FlatList, Dimensions, StatusBar,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { useFocusEffect } from '@react-navigation/native';
@@ -253,6 +253,15 @@ export default function ProductDetailScreen({ route, navigation }) {
 
   return (
     <View style={[styles.container, { paddingTop: insets.top }]}>
+      {/* Unlike the other screens, this one has no solid-color header bar —
+          the product photo IS the top of the screen, with a floating back
+          button over it. The other screens now also paint their own
+          header background up through insets.top rather than relying on
+          the OS, but this screen has no header to paint with — it
+          intentionally keeps StatusBar transparent/translucent so the
+          photo bleeds up behind it, same as a typical product-detail
+          screen. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <NetworkBanner />
 
       {/* Back Button */}

@@ -2,7 +2,8 @@ import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, RefreshControl, Image, Alert,
-  StatusBar, Keyboard, Modal, ScrollView,
+  StatusBar, Keyboard, Modal, ScrollView, Animated, PanResponder, Dimensions,
+  Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import { getProducts, searchProducts } from '../services/productService';
@@ -158,6 +159,71 @@ export default function HomeScreen({ navigation }) {
   const SUGG_PER_PAGE = 10;
   const searchRef = useRef(null);
   const [headerHeight, setHeaderHeight] = useState(0);
+
+  // ─── Draggable filter sheet ───────────────────────────
+  // The sheet opens at a comfortable default height and can be dragged up
+  // by its handle to expand all the way to the top of the screen (leaving
+  // just the safe-area inset clear), or dragged down to dismiss.
+  const screenHeight          = Dimensions.get('window').height;
+  const FILTER_SHEET_COLLAPSED = Math.round(screenHeight * 0.62);
+  const FILTER_SHEET_EXPANDED  = screenHeight - insets.top - 16;
+  const filterSheetHeight     = useRef(new Animated.Value(FILTER_SHEET_COLLAPSED)).current;
+  const filterSheetHeightRef  = useRef(FILTER_SHEET_COLLAPSED);
+  const filterDragStartHeight = useRef(FILTER_SHEET_COLLAPSED);
+
+  useEffect(() => {
+    const id = filterSheetHeight.addListener(({ value }) => { filterSheetHeightRef.current = value; });
+    return () => filterSheetHeight.removeListener(id);
+  }, []);
+
+  function openFilterModal() {
+    // Always reopen at the default (collapsed) height, not wherever it was
+    // left expanded/dragged to last time.
+    filterSheetHeight.setValue(FILTER_SHEET_COLLAPSED);
+    filterSheetHeightRef.current = FILTER_SHEET_COLLAPSED;
+    setTempCat(selectedCat);
+    setTempBrand(selectedBrand);
+    setTempSort(selectedSort);
+    setFilterVisible(true);
+  }
+
+  const filterPanResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: (_, g) => Math.abs(g.dy) > 2,
+      onPanResponderGrant: () => {
+        filterDragStartHeight.current = filterSheetHeightRef.current;
+      },
+      onPanResponderMove: (_, g) => {
+        // Dragging UP (negative dy) grows the sheet; dragging DOWN shrinks it.
+        const next    = filterDragStartHeight.current - g.dy;
+        const clamped = Math.max(FILTER_SHEET_COLLAPSED * 0.5, Math.min(FILTER_SHEET_EXPANDED, next));
+        filterSheetHeight.setValue(clamped);
+      },
+      onPanResponderRelease: (_, g) => {
+        const finalHeight = filterDragStartHeight.current - g.dy;
+        // Dragged down far enough (or flung down fast) → dismiss, same as
+        // swiping away a bottom sheet.
+        if (finalHeight < FILTER_SHEET_COLLAPSED * 0.55 || g.vy > 1.2) {
+          Animated.timing(filterSheetHeight, {
+            toValue:      FILTER_SHEET_COLLAPSED * 0.3,
+            duration:     150,
+            useNativeDriver: false,
+          }).start(() => setFilterVisible(false));
+          return;
+        }
+        // Otherwise snap to whichever anchor (collapsed/fully expanded) is
+        // closer — a fast upward flick always snaps to fully expanded.
+        const midpoint    = (FILTER_SHEET_COLLAPSED + FILTER_SHEET_EXPANDED) / 2;
+        const goToExpanded = g.vy < -0.5 || finalHeight > midpoint;
+        Animated.spring(filterSheetHeight, {
+          toValue:         goToExpanded ? FILTER_SHEET_EXPANDED : FILTER_SHEET_COLLAPSED,
+          useNativeDriver: false,
+          bounciness:      4,
+        }).start();
+      },
+    })
+  ).current;
 
   // Kept as a ref (not plain state) so loadProductsSilent — called from the
   // tabPress listener below, which may be holding an older closure — always
@@ -449,12 +515,19 @@ export default function HomeScreen({ navigation }) {
   return (
     <View style={styles.container}>
 
-      {/* Status Bar — COLORS.primary to match header (and the bottom nav's
-          active-tab green / Cart, Orders & Profile headers) */}
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
+      {/* Status Bar — fully transparent/translucent. Modern Android
+          (15+/edge-to-edge) ignores backgroundColor/translucent props
+          entirely, so instead of relying on the OS to paint this area we
+          draw it ourselves: the header's own background now extends up
+          through insets.top below, so there's no seam left for the OS to
+          get wrong. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
 
       {/* Header — Compact */}
       <View
+        // Header background now reaches up through insets.top on every
+        // platform (paints over the status-bar area itself), since we can
+        // no longer count on the native StatusBar component to color it.
         style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}
         onLayout={e => setHeaderHeight(e.nativeEvent.layout.height)}
       >
@@ -500,7 +573,7 @@ export default function HomeScreen({ navigation }) {
           </View>
           {/* Bug fix: filter button always visible, not just when searchFocused */}
           <TouchableOpacity
-            onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setTempSort(selectedSort); setFilterVisible(true); }}
+            onPress={openFilterModal}
             style={styles.filterIconBtn}
           >
             <Feather name="sliders" size={18} color="#fff"/>
@@ -684,131 +757,114 @@ export default function HomeScreen({ navigation }) {
       )}
       <CustomAlert config={alertConfig} onHide={hideAlert}/>
 
-      {/* ─── Filter Modal ─── */}
+      {/* ─── Filter Modal — Shopee-style chip layout ─── */}
       <Modal visible={filterVisible} transparent animationType="slide" onRequestClose={() => setFilterVisible(false)}>
         <TouchableOpacity style={styles.filterOverlay} activeOpacity={1} onPress={() => setFilterVisible(false)}/>
-        <View style={styles.filterModal}>
-          {/* Handle */}
-          <View style={styles.filterHandle}/>
+        <Animated.View style={[styles.filterModal, { height: filterSheetHeight }]}>
+          {/* Drag handle — grab and pull up to expand the sheet to the top
+              of the screen, or pull down to dismiss it. */}
+          <View {...filterPanResponder.panHandlers} style={styles.filterDragZone}>
+            <View style={styles.filterHandle}/>
+          </View>
 
-          {/* Title */}
+          {/* Title row — just the close button; Reset lives in the footer
+              next to Apply, matching Shopee's filter-panel footer. */}
           <View style={styles.filterModalHeader}>
             <Text style={styles.filterModalTitle}>Filters</Text>
-            <TouchableOpacity onPress={() => { setTempCat(''); setTempBrand(''); setTempSort('relevance'); }}>
-              <Text style={{ fontSize: 12, color: COLORS.primary, fontWeight: '600' }}>Reset</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={() => setFilterVisible(false)}>
-              <Feather name="x" size={20} color={COLORS.textMuted}/>
+            <TouchableOpacity style={styles.filterCloseBtn} onPress={() => setFilterVisible(false)}>
+              <Feather name="x" size={18} color={COLORS.dark}/>
             </TouchableOpacity>
           </View>
 
-          {/* Sort By */}
-          <View style={styles.filterSectionLabel}>
-            <View style={styles.filterAccentBar}/>
-            <Text style={styles.filterDropLabel}>Sort By</Text>
-          </View>
-          <View style={styles.filterDropBox}>
-            {SORT_OPTIONS.map(item => (
-              <TouchableOpacity
-                key={item.id}
-                style={[styles.filterDropItem, tempSort === item.id && styles.filterDropItemActive]}
-                onPress={() => setTempSort(item.id)}
-              >
-                {tempSort === item.id ? (
-                  <View style={styles.filterSelectedPill}>
-                    <Text style={styles.filterDropItemTextActive}>{item.name}</Text>
+          <ScrollView showsVerticalScrollIndicator={false} style={styles.filterScroll}>
+            {/* Sort By */}
+            <View style={styles.filterSection}>
+              <Text style={styles.filterSectionTitle}>SORT BY</Text>
+              <View style={styles.filterChipRow}>
+                {SORT_OPTIONS.map(item => (
+                  <TouchableOpacity
+                    key={item.id}
+                    style={[styles.filterChip, tempSort === item.id && styles.filterChipActive]}
+                    onPress={() => setTempSort(item.id)}
+                  >
+                    <Text style={[styles.filterChipText, tempSort === item.id && styles.filterChipTextActive]}>
+                      {item.name}
+                    </Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+            </View>
+
+            {/* Category — filtered by selected brand */}
+            {(() => {
+              const availableCats = tempBrand
+                ? [...new Set(allProducts.filter(p => p.brand?.trim() === tempBrand).map(p => p.category?.trim()).filter(Boolean))].sort()
+                : categories;
+              return (
+                <View style={styles.filterSection}>
+                  <View style={styles.filterSectionTitleRow}>
+                    <Text style={styles.filterSectionTitle}>CATEGORY</Text>
+                    {tempBrand ? <Text style={styles.filterDropCount}>{availableCats.length} available</Text> : null}
                   </View>
-                ) : (
-                  <Text style={styles.filterDropItemText}>{item.name}</Text>
-                )}
-                {tempSort === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
-              </TouchableOpacity>
-            ))}
-          </View>
-
-          {/* Category Dropdown — filtered by selected brand */}
-          {(() => {
-            const availableCats = tempBrand
-              ? [...new Set(allProducts.filter(p => p.brand?.trim() === tempBrand).map(p => p.category?.trim()).filter(Boolean))].sort()
-              : categories;
-            return (
-              <>
-                {/* Section label with accent bar */}
-                <View style={styles.filterSectionLabel}>
-                  <View style={styles.filterAccentBar}/>
-                  <Text style={styles.filterDropLabel}>Category</Text>
-                  {tempBrand ? <Text style={styles.filterDropCount}>({availableCats.length} available)</Text> : null}
+                  <View style={styles.filterChipRow}>
+                    {[{ id: '', name: 'All' }, ...availableCats.map(c => ({ id: c, name: c }))].map(item => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[styles.filterChip, tempCat === item.id && styles.filterChipActive]}
+                        onPress={() => setTempCat(item.id)}
+                      >
+                        <Text style={[styles.filterChipText, tempCat === item.id && styles.filterChipTextActive]}>
+                          {item.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
-                <ScrollView style={styles.filterDropBox} nestedScrollEnabled>
-                  {[{ id: '', name: 'All Categories' }, ...availableCats.map(c => ({ id: c, name: c }))].map(item => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.filterDropItem, tempCat === item.id && styles.filterDropItemActive]}
-                      onPress={() => setTempCat(item.id)}
-                    >
-                      {tempCat === item.id && item.id !== '' ? (
-                        <View style={styles.filterSelectedPill}>
-                          <Text style={styles.filterDropItemTextActive}>{item.name}</Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.filterDropItemText}>{item.name}</Text>
-                      )}
-                      {tempCat === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            );
-          })()}
+              );
+            })()}
 
-          {/* Brand Dropdown — filtered by selected category */}
-          {(() => {
-            const availableBrands = tempCat
-              ? [...new Set(allProducts.filter(p => p.category?.trim() === tempCat).map(p => p.brand?.trim()).filter(Boolean))].sort()
-              : brands;
-            return (
-              <>
-                {/* Section label with accent bar */}
-                <View style={styles.filterSectionLabel}>
-                  <View style={styles.filterAccentBar}/>
-                  <Text style={styles.filterDropLabel}>Brand</Text>
-                  {tempCat ? <Text style={styles.filterDropCount}>({availableBrands.length} available)</Text> : null}
+            {/* Brand — filtered by selected category */}
+            {(() => {
+              const availableBrands = tempCat
+                ? [...new Set(allProducts.filter(p => p.category?.trim() === tempCat).map(p => p.brand?.trim()).filter(Boolean))].sort()
+                : brands;
+              return (
+                <View style={[styles.filterSection, styles.filterSectionLast]}>
+                  <View style={styles.filterSectionTitleRow}>
+                    <Text style={styles.filterSectionTitle}>BRAND</Text>
+                    {tempCat ? <Text style={styles.filterDropCount}>{availableBrands.length} available</Text> : null}
+                  </View>
+                  <View style={styles.filterChipRow}>
+                    {[{ id: '', name: 'All' }, ...availableBrands.map(b => ({ id: b, name: b }))].map(item => (
+                      <TouchableOpacity
+                        key={item.id}
+                        style={[styles.filterChip, tempBrand === item.id && styles.filterChipActive]}
+                        onPress={() => {
+                          setTempBrand(item.id);
+                          if (item.id && tempCat) {
+                            const catsForBrand = [...new Set(allProducts.filter(p => p.brand?.trim() === item.id).map(p => p.category?.trim()).filter(Boolean))];
+                            if (!catsForBrand.includes(tempCat)) setTempCat('');
+                          }
+                        }}
+                      >
+                        <Text style={[styles.filterChipText, tempBrand === item.id && styles.filterChipTextActive]}>
+                          {item.name}
+                        </Text>
+                      </TouchableOpacity>
+                    ))}
+                  </View>
                 </View>
-                <ScrollView style={styles.filterDropBox} nestedScrollEnabled>
-                  {[{ id: '', name: 'All Brands' }, ...availableBrands.map(b => ({ id: b, name: b }))].map(item => (
-                    <TouchableOpacity
-                      key={item.id}
-                      style={[styles.filterDropItem, tempBrand === item.id && styles.filterDropItemActive]}
-                      onPress={() => {
-                        setTempBrand(item.id);
-                        if (item.id && tempCat) {
-                          const catsForBrand = [...new Set(allProducts.filter(p => p.brand?.trim() === item.id).map(p => p.category?.trim()).filter(Boolean))];
-                          if (!catsForBrand.includes(tempCat)) setTempCat('');
-                        }
-                      }}
-                    >
-                      {tempBrand === item.id && item.id !== '' ? (
-                        <View style={styles.filterSelectedPill}>
-                          <Text style={styles.filterDropItemTextActive}>{item.name}</Text>
-                        </View>
-                      ) : (
-                        <Text style={styles.filterDropItemText}>{item.name}</Text>
-                      )}
-                      {tempBrand === item.id && <Feather name="check" size={14} color={COLORS.primary}/>}
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </>
-            );
-          })()}
+              );
+            })()}
+          </ScrollView>
 
-          {/* Buttons */}
+          {/* Footer — Reset (outline) + Apply (filled, badge count) */}
           <View style={styles.filterBtnRow}>
             <TouchableOpacity
               style={styles.filterCancelBtn}
-              onPress={() => { setTempCat(selectedCat); setTempBrand(selectedBrand); setTempSort(selectedSort); setFilterVisible(false); }}
+              onPress={() => { setTempCat(''); setTempBrand(''); setTempSort('relevance'); }}
             >
-              <Text style={styles.filterCancelText}>Cancel</Text>
+              <Text style={styles.filterCancelText}>Reset</Text>
             </TouchableOpacity>
             <TouchableOpacity
               style={styles.filterApplyBtn}
@@ -830,7 +886,7 @@ export default function HomeScreen({ navigation }) {
               ) : null}
             </TouchableOpacity>
           </View>
-        </View>
+        </Animated.View>
       </Modal>
 
     </View>
@@ -874,33 +930,42 @@ const styles = StyleSheet.create({
   // Categories
   catScroll:              { maxHeight: 44 }, // kept for compatibility
   catContent:             { paddingHorizontal: SPACING.md, gap: 8, alignItems: 'center' },
-  filterSection:          { marginBottom: 6, marginTop: SPACING.sm },
   filterIconBtn:          { padding: 6, marginLeft: 6, position: 'relative' },
   filterDot:              { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
   activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6, backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   activeTag:              { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.primaryBorder },
   activeTagText:          { fontSize: 11, color: COLORS.primary, fontWeight: '600' },
   filterOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
-  filterModal:            { backgroundColor: COLORS.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: SPACING.md, paddingBottom: 32, maxHeight: '80%' },
-  filterHandle:           { width: 44, height: 5, backgroundColor: COLORS.grayLight, borderRadius: 3, alignSelf: 'center', marginBottom: SPACING.sm },
-  filterModalHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.md },
-  filterModalTitle:       { fontSize: 16, fontWeight: '700', color: COLORS.dark },
-  // Section label with colored accent bar
-  filterSectionLabel:     { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 6, marginTop: SPACING.sm },
-  filterAccentBar:        { width: 3, height: 14, backgroundColor: COLORS.primary, borderRadius: 2 },
-  filterDropLabel:        { fontSize: 12, fontWeight: '700', color: COLORS.dark },
+  // Shopee-style filter panel: clean bottom sheet, uppercase section
+  // labels, and chip grids in place of the old boxed dropdown lists.
+  // No maxHeight here — the sheet's height is driven by the animated
+  // filterSheetHeight value instead, so dragging the handle can expand it
+  // all the way to the top of the screen.
+  filterModal:            { backgroundColor: COLORS.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: SPACING.md, paddingBottom: 20, overflow: 'hidden', ...SHADOW.lg },
+  filterDragZone:         { paddingTop: SPACING.sm, paddingBottom: SPACING.sm, alignItems: 'center' },
+  filterHandle:           { width: 40, height: 4, backgroundColor: COLORS.grayBorder, borderRadius: 2 },
+  filterModalHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm, paddingBottom: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.grayBg },
+  filterModalTitle:       { fontSize: 17, fontWeight: '700', color: COLORS.dark },
+  filterCloseBtn:         { width: 30, height: 30, borderRadius: 15, backgroundColor: COLORS.grayBg, alignItems: 'center', justifyContent: 'center' },
+  // flex: 1 instead of a fixed maxHeight so it grows/shrinks along with the
+  // sheet's animated height as it's dragged.
+  filterScroll:           { flex: 1 },
+  // Each filter group — uppercase muted label, chip grid, light divider
+  // between groups instead of the old heavy bordered boxes.
+  filterSection:          { paddingVertical: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.grayBg },
+  filterSectionLast:      { borderBottomWidth: 0, paddingBottom: SPACING.xs },
+  filterSectionTitleRow:  { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: SPACING.sm },
+  filterSectionTitle:     { fontSize: 11, fontWeight: '700', color: COLORS.gray, letterSpacing: 0.6, marginBottom: SPACING.sm },
   filterDropCount:        { fontSize: 11, fontWeight: '400', color: COLORS.textMuted },
-  filterDropBox:          { maxHeight: 150, borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, marginBottom: 8 },
-  filterDropItem:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.sm, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
-  filterDropItemActive:   { backgroundColor: COLORS.primaryBg },
-  filterDropItemText:     { fontSize: 13, color: COLORS.dark },
-  filterDropItemTextActive: { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
-  // Pill chip on selected item
-  filterSelectedPill:     { backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 3, borderWidth: 1, borderColor: COLORS.primaryBorder },
+  filterChipRow:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+  filterChip:             { paddingHorizontal: 14, paddingVertical: 9, borderRadius: RADIUS.full, borderWidth: 1.3, borderColor: COLORS.grayBorder, backgroundColor: COLORS.white },
+  filterChipActive:       { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
+  filterChipText:         { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
+  filterChipTextActive:   { color: COLORS.primary, fontWeight: '700' },
   filterBtnRow:           { flexDirection: 'row', gap: 10, marginTop: SPACING.md },
-  filterCancelBtn:        { flex: 1, paddingVertical: 13, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.grayBorder, alignItems: 'center' },
-  filterCancelText:       { fontSize: 14, fontWeight: '600', color: COLORS.textMuted },
-  filterApplyBtn:         { flex: 2, paddingVertical: 14, borderRadius: RADIUS.sm, backgroundColor: COLORS.primary, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
+  filterCancelBtn:        { flex: 1, paddingVertical: 13, borderRadius: RADIUS.full, borderWidth: 1.5, borderColor: COLORS.grayBorder, alignItems: 'center' },
+  filterCancelText:       { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
+  filterApplyBtn:         { flex: 2, paddingVertical: 14, borderRadius: RADIUS.full, backgroundColor: COLORS.primary, alignItems: 'center', flexDirection: 'row', justifyContent: 'center', gap: 8 },
   filterApplyText:        { fontSize: 14, fontWeight: '700', color: '#fff' },
   filterApplyBadge:       { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: RADIUS.full, paddingHorizontal: 7, paddingVertical: 1, minWidth: 20, alignItems: 'center' },
   filterApplyBadgeText:   { fontSize: 12, fontWeight: '700', color: '#fff' },

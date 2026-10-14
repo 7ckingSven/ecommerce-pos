@@ -330,8 +330,16 @@ export default function ProfileScreen({ navigation }) {
 
   if (loading) return (
     <View style={{ flex: 1, backgroundColor: COLORS.grayBg }}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
-      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+      {/* translucent={false}: with translucent={true}, Android ignores
+          backgroundColor entirely and overlays its own default dimming
+          scrim instead — that's why the status bar showed up as a
+          visibly different/darker shade of green than the header even
+          though both used the same COLORS.primary. */}
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
+      {/* Android now auto-reserves space for the solid status bar, so
+          insets.top there too would double-pad it — only iOS still
+          needs it added manually. */}
+      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <SkeletonLoader type="profile" />
@@ -340,8 +348,16 @@ export default function ProfileScreen({ navigation }) {
 
   if (error) return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
-      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+      {/* translucent={false}: with translucent={true}, Android ignores
+          backgroundColor entirely and overlays its own default dimming
+          scrim instead — that's why the status bar showed up as a
+          visibly different/darker shade of green than the header even
+          though both used the same COLORS.primary. */}
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
+      {/* Android now auto-reserves space for the solid status bar, so
+          insets.top there too would double-pad it — only iOS still
+          needs it added manually. */}
+      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <View style={styles.emptyWrap}>
@@ -362,8 +378,16 @@ export default function ProfileScreen({ navigation }) {
 
   if (!loggedIn) return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
-      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+      {/* translucent={false}: with translucent={true}, Android ignores
+          backgroundColor entirely and overlays its own default dimming
+          scrim instead — that's why the status bar showed up as a
+          visibly different/darker shade of green than the header even
+          though both used the same COLORS.primary. */}
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
+      {/* Android now auto-reserves space for the solid status bar, so
+          insets.top there too would double-pad it — only iOS still
+          needs it added manually. */}
+      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <View style={styles.emptyWrap}>
@@ -379,8 +403,16 @@ export default function ProfileScreen({ navigation }) {
 
   if (loggedIn) return (
     <View style={styles.container}>
-      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={true}/>
-      <View style={[styles.header, { paddingTop: SPACING.sm + insets.top }]}>
+      {/* translucent={false}: with translucent={true}, Android ignores
+          backgroundColor entirely and overlays its own default dimming
+          scrim instead — that's why the status bar showed up as a
+          visibly different/darker shade of green than the header even
+          though both used the same COLORS.primary. */}
+      <StatusBar backgroundColor={COLORS.primary} barStyle="light-content" translucent={false}/>
+      {/* Android now auto-reserves space for the solid status bar, so
+          insets.top there too would double-pad it — only iOS still
+          needs it added manually. */}
+      <View style={[styles.header, { paddingTop: SPACING.sm + (Platform.OS === 'ios' ? insets.top : 0) }]}>
         <Text style={styles.headerTitle}>My Profile</Text>
       </View>
       <NetworkBanner />
@@ -484,51 +516,60 @@ export default function ProfileScreen({ navigation }) {
           <Text style={styles.logoutText}>Log Out</Text>
         </TouchableOpacity>
 
-        {/* Legal Modal */}
-        {legalModal && (
-          <View style={{ position:'absolute', inset:0, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:16, zIndex:999 }}>
-            <View style={{ backgroundColor: COLORS.white, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' }}>
-              <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder }}>
-                <Text style={{ fontSize:16, fontWeight:'700', color: COLORS.dark }}>
-                  {legalModal === 'terms' ? 'Terms & Conditions' : 'Privacy Policy'}
-                </Text>
-                <TouchableOpacity onPress={() => setLegalModal(null)}>
-                  <Feather name="x" size={20} color={COLORS.textMuted}/>
-                </TouchableOpacity>
-              </View>
-              <ScrollView style={{ padding:16 }}>
-                {legalModal === 'terms' ? (
-                  <>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Acceptance of Terms</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>By using TEFC E-Commerce, you agree to be bound by these Terms and Conditions.</Text>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. Account Registration</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>You must provide accurate information when creating an account and are responsible for your credentials.</Text>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Orders and Payments</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>All orders are subject to availability. We accept Cash and GCash payments.</Text>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Cancellation Policy</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Orders may be cancelled while in Pending status only.</Text>
-                  </>
-                ) : (
-                  <>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Information We Collect</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>We collect your name, email, phone number, and delivery address when you register or place an order.</Text>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. How We Use Your Information</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Your information is used to process orders, manage your account, and send OTP codes.</Text>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Data Security</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Passwords are securely hashed. We take reasonable measures to protect your data.</Text>
-                    <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Contact Us</Text>
-                    <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Contact us at tripleefielcollince@gmail.com for privacy concerns.</Text>
-                  </>
-                )}
-              </ScrollView>
-            </View>
-          </View>
-        )}
-
         {/* Extra bottom spacer so the last section can scroll clear of the
             now-floating (position:'absolute') tab bar in AppNavigator. */}
         <View style={{ height: SPACING.xl + 60 + insets.bottom }}/>
       </ScrollView>
+
+      {/* ─── LEGAL MODAL (Privacy Policy / Terms & Conditions) ───
+          Was previously an absolutely-positioned View rendered INSIDE the
+          ScrollView's content — "position:absolute, inset:0" there is
+          scoped to the scrollable content container (which is taller than
+          the screen), so it centered itself in the whole content area
+          instead of the viewport you were actually looking at: scroll down
+          first and it would pop up near the top, off-screen from where you
+          tapped it. A real Modal renders in its own screen-level overlay,
+          so it's always centered on the visible screen regardless of
+          scroll position — same fix pattern as the Edit modal below. */}
+      <Modal visible={!!legalModal} transparent animationType="fade" onRequestClose={() => setLegalModal(null)}>
+        <View style={styles.legalOverlay}>
+          <View style={styles.legalSheet}>
+            <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder }}>
+              <Text style={{ fontSize:16, fontWeight:'700', color: COLORS.dark }}>
+                {legalModal === 'terms' ? 'Terms & Conditions' : 'Privacy Policy'}
+              </Text>
+              <TouchableOpacity onPress={() => setLegalModal(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+            <ScrollView style={{ padding:16 }}>
+              {legalModal === 'terms' ? (
+                <>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Acceptance of Terms</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>By using TEFC E-Commerce, you agree to be bound by these Terms and Conditions.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. Account Registration</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>You must provide accurate information when creating an account and are responsible for your credentials.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Orders and Payments</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>All orders are subject to availability. We accept Cash and GCash payments.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Cancellation Policy</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Orders may be cancelled while in Pending status only.</Text>
+                </>
+              ) : (
+                <>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>1. Information We Collect</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>We collect your name, email, phone number, and delivery address when you register or place an order.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>2. How We Use Your Information</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Your information is used to process orders, manage your account, and send OTP codes.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>3. Data Security</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:12 }}>Passwords are securely hashed. We take reasonable measures to protect your data.</Text>
+                  <Text style={{ fontWeight:'700', color: COLORS.primary, marginBottom:6 }}>4. Contact Us</Text>
+                  <Text style={{ fontSize:13, color: COLORS.textSecondary, lineHeight:20, marginBottom:24 }}>Contact us at tripleefielcollince@gmail.com for privacy concerns.</Text>
+                </>
+              )}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
       {/* ─── EDIT MODAL ─── */}
       <Modal visible={showEditModal} transparent animationType="slide">
@@ -749,6 +790,11 @@ const styles = StyleSheet.create({
   loginBtn:           { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, paddingHorizontal: SPACING.lg, paddingVertical:12, marginTop: SPACING.sm },
   loginBtnText:       { color: COLORS.white, fontWeight:'700', fontSize:14 },
   registerLink:       { fontSize:13, color: COLORS.primary, fontWeight:'600', marginTop: SPACING.sm },
+
+  // Legal Modal (Privacy Policy / Terms & Conditions) — centered on the
+  // real screen since this is a top-level Modal, not scroll content.
+  legalOverlay:       { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:16 },
+  legalSheet:         { backgroundColor: COLORS.white, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' },
 
   // Modal
   modalOverlay:       { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },

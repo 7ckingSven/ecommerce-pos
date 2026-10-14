@@ -37,10 +37,18 @@ import {
 const Tab   = createBottomTabNavigator();
 const Stack = createStackNavigator();
 
+// Every navigator below gets this same cardStyle/sceneContainerStyle.
+// Without it, React Navigation's default scene background (white) sits
+// behind every screen — including the area under a translucent status
+// bar — so instead of each screen's own colored header showing through,
+// you'd see a flash/sliver of that default white, which read as "the
+// status bar doesn't match the header" on every screen in the app.
+const SCREEN_BG = { backgroundColor: COLORS.primary };
+
 // ─── Home Stack ───────────────────────────────────────
 function HomeStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: SCREEN_BG }}>
       <Stack.Screen name="HomeMain"       component={HomeScreen}/>
       <Stack.Screen name="ProductDetail"  component={ProductDetailScreen}/>
       <Stack.Screen name="Checkout"       component={CheckoutScreen}/>
@@ -51,7 +59,7 @@ function HomeStack() {
 // ─── Cart Stack ───────────────────────────────────────
 function CartStack() {
   return (
-    <Stack.Navigator screenOptions={{ headerShown: false }}>
+    <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: SCREEN_BG }}>
       <Stack.Screen name="CartMain"  component={CartScreen}/>
       <Stack.Screen name="Checkout"  component={CheckoutScreen}/>
     </Stack.Navigator>
@@ -127,6 +135,8 @@ function MainTabs({ navigation }) {
     <Tab.Navigator
       screenOptions={({ route }) => ({
         headerShown: false,
+        // See SCREEN_BG above — the Tab.Navigator's equivalent of cardStyle.
+        sceneContainerStyle: SCREEN_BG,
         // Real frosted-glass look (like Messenger) — tabBarBackground below
         // renders a native BlurView behind the bar, with a white tint layered
         // on top of it so the blur and the transparency mix together instead
@@ -196,6 +206,12 @@ function MainTabs({ navigation }) {
 }
 
 // ─── Root Navigator ───────────────────────────────────
+// Note: the root Stack.Navigator here also hosts Splash/Login/Register/etc,
+// which weren't part of this fix (they weren't shown to use the same green
+// header + translucent status bar pattern as Home/Cart/Orders/Profile), so
+// its cardStyle/theme is deliberately left at the default rather than
+// forced green — forcing it without knowing those screens' own background
+// could introduce the exact same mismatch in the other direction.
 export default function AppNavigator() {
   return (
     <SafeAreaProvider>

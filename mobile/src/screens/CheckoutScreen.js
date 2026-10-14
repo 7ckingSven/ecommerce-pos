@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
-  TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Image
+  TextInput, Alert, ActivityIndicator, Modal, KeyboardAvoidingView, Platform, Image,
+  StatusBar,
 } from 'react-native';
 import { WebView } from 'react-native-webview';
 import Feather from 'react-native-vector-icons/Feather';
@@ -377,9 +378,18 @@ export default function CheckoutScreen({ route, navigation }) {
 
   return (
     <View style={styles.container}>
+      {/* This screen never rendered its own StatusBar before — it just
+          inherited whatever the previous screen (Home or Cart) left set,
+          which happened to work by coincidence but is fragile. Made
+          explicit here: fully transparent/translucent, matching the other
+          screens — modern Android (15+/edge-to-edge) ignores
+          backgroundColor/translucent anyway, so the header's own
+          background (below) is what actually paints this area now. */}
+      <StatusBar backgroundColor="transparent" barStyle="light-content" translucent={true}/>
       <NetworkBanner />
 
-      {/* Header */}
+      {/* Header background now reaches up through insets.top on every
+          platform, painting over the status-bar area itself. */}
       <View style={[styles.header, { paddingTop: SPACING.xl + insets.top }]}>
         <TouchableOpacity onPress={() => navigation.goBack()}>
           <Feather name="arrow-left" size={22} color={COLORS.white}/>
