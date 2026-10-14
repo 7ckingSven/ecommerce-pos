@@ -11,29 +11,37 @@ export async function getOrders() {
   return res.data;
 }
 
-export async function placeOrder(cartItems, paymentMethod, refNo = '', branchId = null, shippingFee = 0, address = '', senderNumber = '', receiptImage = null) {
+// GCash orders now go through a verified PayMongo payment (see
+// createGcashIntent / getGcashStatus below) instead of a manually-typed
+// reference number, so placeOrder() just forwards the payment_intent_id —
+// the server independently re-verifies it with PayMongo before accepting
+// the order. Cash on Delivery orders are unaffected and pass no intent id.
+export async function placeOrder(cartItems, paymentMethod, paymentIntentId = '', branchId = null, shippingFee = 0, address = '') {
   const customerId = await getCustomerId();
 
-  // Upload receipt image to Supabase if provided
-  let receiptImageUrl = null;
-  if (receiptImage && receiptImage.base64) {
-    try {
-      const uploadRes = await api.post('/upload/gcash-receipt', {
-        image_base64:  receiptImage.base64,
-        file_name:     receiptImage.fileName || 'receipt.jpg',
-        content_type:  receiptImage.type     || 'image/jpeg',
-      }, { headers: { 'X-Customer-ID': customerId } });
-      receiptImageUrl = uploadRes.data?.url || null;
-    } catch (e) {
-      console.warn('Receipt upload failed:', e);
-    }
-  }
-
   const res = await api.post('/orders',
-    { cart_items: cartItems, payment_method: paymentMethod, ref_no: refNo, branch_id: branchId, shipping_fee: shippingFee, address: address, sender_number: senderNumber, receipt_image_url: receiptImageUrl },
+    { cart_items: cartItems, payment_method: paymentMethod, payment_intent_id: paymentIntentId, branch_id: branchId, shipping_fee: shippingFee, address: address },
     { headers: headers(customerId) }
   );
   return res.data;
+}
+
+// ─── GCash (PayMongo) ──────────────────────────────────
+export async function createGcashIntent(amount) {
+  const customerId = await getCustomerId();
+  const res = await api.post('/orders/paymongo/gcash/create',
+    { amount },
+    { headers: headers(customerId) }
+  );
+  return res.data; // { payment_intent_id, redirect_url }
+}
+
+export async function getGcashStatus(paymentIntentId) {
+  const customerId = await getCustomerId();
+  const res = await api.get(`/orders/paymongo/gcash/status/${paymentIntentId}`, {
+    headers: headers(customerId),
+  });
+  return res.data; // { status }
 }
 
 export async function getProfile() {

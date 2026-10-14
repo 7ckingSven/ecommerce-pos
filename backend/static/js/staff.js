@@ -634,6 +634,8 @@ async function updateOfflinePendingBadge() {
     gcashBtn.style.opacity = posIsOnline ? '' : '0.5';
     gcashBtn.style.cursor  = posIsOnline ? '' : 'not-allowed';
     if (!posIsOnline && selectedPayment === 'gcash') {
+      resetGcashPayment();
+      closeGcashModal();
       selectedPayment = 'walk_in_cash';
       document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
       document.querySelector('.pos-pay-btn[onclick*="walk_in_cash"]')?.classList.add('active');
@@ -1286,7 +1288,7 @@ function clearOrder() {
   if (_dNone) _dNone.classList.add('active');
   document.getElementById('posCashReceived').value = '';
   document.getElementById('posChange').value        = '';
-  document.getElementById('posGcashRef').value      = '';
+  resetGcashPayment();
 
   // Reset payment method back to default (walk_in_cash)
   selectedPayment = 'walk_in_cash';
@@ -1314,12 +1316,267 @@ function confirmClearOrder() {
 }
 
 function selectPayment(method, el) {
+  // Switching away from GCash mid-flow cancels any pending QR/poll so it
+  // doesn't keep running (and can't be reused) in the background.
+  if (selectedPayment === 'gcash' && method !== 'gcash') {
+    resetGcashPayment();
+  }
   selectedPayment = method;
   document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
   document.getElementById('posRefNo').style.display     = method === 'gcash' ? 'flex' : 'none';
   document.getElementById('posCashInput').style.display = method === 'walk_in_cash' ? 'flex' : 'none';
   validateCheckoutButton();
+}
+
+// ─── GCash via PayMongo (modal QR → confirm → receipt) ────────────────
+// Staff clicks "Pay with GCash" → a modal opens showing a QR code (built
+// from a PayMongo Payment Intent + GCash Payment Method for the current
+// order total). The customer scans it with their own phone and completes
+// payment there. Once PayMongo itself reports the intent as "succeeded"
+// (never by trusting anything typed on the staff screen), the modal's
+// Cancel button turns into Confirm Order; pressing it places the order and
+// the same modal becomes the receipt. While a payment is in progress the
+// modal has no other way to close — only Cancel or Confirm Order do that.
+let gcashPollTimer       = null;
+let gcashPaymentIntentId = null;
+let gcashConfirmed       = false;
+
+function computePosTotal() {
+  const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const sel      = document.getElementById('posDiscount');
+  const discPct  = sel?.options[sel.selectedIndex]?.dataset?.pct ? parseFloat(sel.options[sel.selectedIndex].dataset.pct) : 0;
+  return subtotal - (subtotal * discPct / 100);
+}
+
+function resetGcashPayment() {
+  if (gcashPollTimer) { clearInterval(gcashPollTimer); gcashPollTimer = null; }
+  gcashPaymentIntentId = null;
+  gcashConfirmed        = false;
+  document.getElementById('posGcashRef').value        = '';
+  document.getElementById('posPaymentIntentId').value = '';
+  const genBtn = document.getElementById('posGcashGenerateBtn');
+  if (genBtn) { genBtn.disabled = false; genBtn.textContent = 'Pay with GCash'; }
+  const inlineStatus = document.getElementById('posGcashInlineStatus');
+  if (inlineStatus) inlineStatus.textContent = '';
+  validateCheckoutButton();
+}
+
+function openGcashModal()  {
+  document.getElementById('gcashModalOverlay').style.display = 'block';
+  document.getElementById('gcashModal').style.display        = 'block';
+}
+function closeGcashModal() {
+  document.getElementById('gcashModalOverlay').style.display = 'none';
+  document.getElementById('gcashModal').style.display        = 'none';
+}
+
+function renderGcashModalLoading() {
+  document.getElementById('gcashModalBody').innerHTML = `
+    <div style="text-align:center;padding:1rem 0;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:28px;height:28px;animation:spin 1s linear infinite;color:var(--g-400);"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg>
+      <p style="margin:12px 0 0;font-size:13px;color:var(--text-muted);">Starting GCash payment...</p>
+    </div>`;
+}
+
+function renderGcashModalQr(qrUrl) {
+  document.getElementById('gcashModalBody').innerHTML = `
+    <h3 style="margin:0 0 4px;font-size:15px;font-weight:700;color:var(--text);text-align:center;">Scan to Pay with GCash</h3>
+    <p style="margin:0 0 14px;font-size:13px;font-weight:600;color:var(--g-400);text-align:center;">${peso(computePosTotal())}</p>
+    <div style="display:flex;justify-content:center;margin-bottom:12px;">
+      <img src="${qrUrl}" alt="Scan with GCash" style="width:200px;height:200px;border-radius:8px;background:#fff;padding:8px;border:1px solid var(--border);"/>
+    </div>
+    <p id="gcashModalStatusText" style="margin:0 0 16px;font-size:13px;font-weight:600;color:var(--text-muted);text-align:center;">Waiting for customer to scan &amp; pay...</p>
+    <button class="btn btn-cancel" style="width:100%;" onclick="cancelGcashPayment()">Cancel</button>`;
+}
+
+function renderGcashModalConfirmed() {
+  document.getElementById('gcashModalBody').innerHTML = `
+    <div style="text-align:center;margin-bottom:16px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="width:40px;height:40px;color:var(--g-400);"><circle cx="12" cy="12" r="10"/><polyline points="8 12 12 16 16 8"/></svg>
+      <h3 style="margin:10px 0 2px;font-size:15px;font-weight:700;color:var(--text);">Payment Received!</h3>
+      <p style="margin:0;font-size:12px;color:var(--text-muted);">${peso(computePosTotal())} paid via GCash</p>
+    </div>
+    <button class="btn btn-solid-green" style="width:100%;" onclick="confirmGcashOrder()">Confirm Order</button>`;
+}
+
+async function startGcashPayment() {
+  const amount = computePosTotal();
+  if (!(amount > 0)) {
+    showToast('Add items to the order first.', 'error');
+    return;
+  }
+
+  openGcashModal();
+  renderGcashModalLoading();
+
+  try {
+    const res  = await fetch('/api/staff/paymongo/gcash/create', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ amount }),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      showToast(data.error || 'Could not start GCash payment.', 'error');
+      closeGcashModal();
+      return;
+    }
+
+    gcashPaymentIntentId = data.payment_intent_id;
+    document.getElementById('posPaymentIntentId').value = gcashPaymentIntentId;
+
+    const qrUrl = 'https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=' + encodeURIComponent(data.redirect_url);
+    renderGcashModalQr(qrUrl);
+
+    gcashPollTimer = setInterval(() => pollGcashStatus(gcashPaymentIntentId), 3000);
+  } catch (e) {
+    showToast('Could not reach the server to start GCash payment.', 'error');
+    closeGcashModal();
+  }
+}
+
+async function pollGcashStatus(intentId) {
+  // A cancelled/cleared order may have already reset this — don't act on
+  // a stale poll for an intent we've moved on from.
+  if (intentId !== gcashPaymentIntentId) return;
+  try {
+    const res  = await fetch('/api/staff/paymongo/gcash/status/' + intentId);
+    const data = await res.json();
+    if (!res.ok) return;
+
+    if (data.status === 'succeeded') {
+      gcashConfirmed = true;
+      if (gcashPollTimer) { clearInterval(gcashPollTimer); gcashPollTimer = null; }
+      document.getElementById('posGcashRef').value = intentId;
+      const inlineStatus = document.getElementById('posGcashInlineStatus');
+      if (inlineStatus) inlineStatus.textContent = '✓ Payment confirmed — finish in the window above';
+      renderGcashModalConfirmed();
+    }
+    // 'processing' / 'awaiting_next_action' / 'awaiting_payment_method' — keep waiting
+  } catch (e) {
+    // transient network hiccup — the next poll will retry
+  }
+}
+
+// Cancel (shown before payment is confirmed) — only way to close the modal
+// at that stage besides the payment itself succeeding.
+function cancelGcashPayment() {
+  resetGcashPayment();
+  closeGcashModal();
+  // Nothing to confirm anymore — fall back to Cash so checkout isn't stuck.
+  selectedPayment = 'walk_in_cash';
+  document.querySelectorAll('.pos-pay-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('.pos-pay-btn[onclick*="walk_in_cash"]')?.classList.add('active');
+  document.getElementById('posRefNo').style.display     = 'none';
+  document.getElementById('posCashInput').style.display = 'flex';
+  validateCheckoutButton();
+}
+
+// Confirm Order (shown after payment is confirmed) — places the order and
+// turns this same modal into the receipt. This is the GCash equivalent of
+// pressing the bottom "Process Order" button, which stays disabled for
+// GCash since the whole flow now happens inside this modal.
+async function confirmGcashOrder() {
+  const branchId = staffBranchId || document.getElementById('posBranch').value;
+  if (!branchId) {
+    showToast('Branch not assigned. Please contact admin.', 'error');
+    return;
+  }
+
+  const body = document.getElementById('gcashModalBody');
+  const btn  = body.querySelector('button.btn-solid-green');
+  if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
+
+  const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+  const quantity = orderItems.reduce((s, i) => s + i.quantity, 0);
+  const discSel  = document.getElementById('posDiscount');
+  const discOpt  = discSel?.options[discSel.selectedIndex];
+  const discPct  = discOpt?.dataset?.pct ? parseFloat(discOpt.dataset.pct) : 0;
+  const discId   = discSel?.value || null;
+  const discName = discPct > 0 ? discOpt.text.split('(')[0].trim() : null;
+  const discAmt  = subtotal * (discPct / 100);
+  const total    = subtotal - discAmt;
+
+  const orderPayload = {
+    order_type:        'walk_in',
+    quantity,
+    total,
+    ref_no:            document.getElementById('posGcashRef').value || null,
+    payment_intent_id: document.getElementById('posPaymentIntentId').value || null,
+    payment_method:    'gcash',
+    branch_id:         branchId,
+    cart_items:        orderItems.map(i => ({
+      product_id:       i.product_id,
+      quantity:         i.quantity,
+      price:            i.price,
+      selected_options: i.selected_options || {},
+    })),
+    customer_name:   document.getElementById('posCustomer').value.trim(),
+    discount_id:     discId,
+    discount_name:   discName,
+    discount_pct:    discPct || null,
+    discount_amount: discAmt || null,
+  };
+
+  // Snapshot for the receipt before clearOrder() wipes the cart.
+  const receiptItems    = [...orderItems];
+  const receiptRefNo    = document.getElementById('posGcashRef').value;
+  const receiptCustomer = document.getElementById('posCustomer')?.value?.trim() || '';
+  const receiptDiscount = { id: discId, name: discName, pct: discPct, amount: discAmt };
+
+  try {
+    const res  = await fetch('/api/staff/orders', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(orderPayload),
+    });
+    const data = await res.json();
+    if (res.ok) {
+      clearOrder();
+      invalidateSection('pos'); loadPosProducts();
+      loadPosDiscounts();
+      invalidateSection('orders'); loadOrders();
+      invalidateSection('summary'); loadSummary();
+      renderGcashModalReceipt(data, receiptItems, receiptRefNo, receiptCustomer, receiptDiscount);
+    } else {
+      if (btn) { btn.disabled = false; btn.textContent = 'Confirm Order'; }
+      showToast(data.error || 'Failed to process order.', 'error');
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Confirm Order'; }
+    showToast('Error processing order.', 'error');
+  }
+}
+
+// Turns the gcashModal into the receipt — same modal, no close/reopen flash.
+// "Done" is the only close path at this stage, same rule as the rest of the flow.
+function renderGcashModalReceipt(data, items, refNo, customerName, orderDiscount) {
+  const html = buildReceiptHtml(data, items, 0, 'gcash', refNo, customerName, orderDiscount);
+  document.getElementById('gcashModalBody').innerHTML = `
+    <div id="gcashReceiptContent" style="font-size:13px;">${html}</div>
+    <div style="display:flex;gap:8px;margin-top:14px;">
+      <button class="btn btn-outline" style="flex:1;" onclick="printGcashReceipt()">🖨️ Print</button>
+      <button class="btn btn-solid-green" style="flex:1;" onclick="closeGcashModal()">Done</button>
+    </div>`;
+}
+
+function printGcashReceipt() {
+  const content = document.getElementById('gcashReceiptContent').innerHTML;
+  const win      = window.open('', '_blank', 'width=400,height=600');
+  win.document.write(`
+    <html><head><title>Receipt</title>
+    <style>
+      body { font-family: 'Courier New', monospace; font-size: 12px; padding: 20px; }
+      .receipt-row { display: flex; justify-content: space-between; }
+      hr { border: none; border-top: 1px dashed #ccc; margin: 6px 0; }
+      .receipt-header { text-align: center; margin-bottom: 10px; }
+      .receipt-total { font-weight: bold; font-size: 14px; }
+      .receipt-footer { text-align: center; margin-top: 10px; color: #666; }
+    </style>
+    </head><body>${content}</body></html>`);
+  win.document.close();
+  win.print();
 }
 
 function computeChange() {
@@ -1355,8 +1612,10 @@ function validateCheckoutButton() {
     const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
     btn.disabled = !(received > 0 && received >= total);
   } else if (selectedPayment === 'gcash') {
-    const refNo = (document.getElementById('posGcashRef').value || '').trim();
-    btn.disabled = !/^\d{13}$/.test(refNo);
+    // GCash is placed entirely through the gcashModal's own "Confirm Order"
+    // button once PayMongo reports the payment succeeded — this bottom
+    // button plays no part in that flow and stays disabled throughout.
+    btn.disabled = true;
   } else {
     btn.disabled = false;
   }
@@ -1364,6 +1623,11 @@ function validateCheckoutButton() {
 
 async function processOrder() {
   if (!orderItems.length) return;
+  if (selectedPayment === 'gcash') {
+    // GCash orders are placed from inside the gcashModal (Confirm Order),
+    // never from this bottom button — it stays disabled for gcash anyway.
+    return;
+  }
   const processBtn = document.getElementById('processOrderBtn');
   setButtonLoading(processBtn, true);
 
@@ -1375,28 +1639,8 @@ async function processOrder() {
     return;
   }
 
-  const refNo = document.getElementById('posGcashRef').value.trim().replace(/\s/g, '');
-  // GCash needs a live reference check — not available offline. The pay
-  // button is already disabled in this case (updateOfflinePendingBadge),
-  // this is just a safety net against a stale click.
-  if (!posIsOnline && selectedPayment === 'gcash') {
-    setButtonLoading(processBtn, false);
-    showToast('GCash is unavailable offline — switch to Cash.', 'error');
-    return;
-  }
-  if (selectedPayment === 'gcash') {
-    if (!refNo) {
-      setButtonLoading(processBtn, false);
-      showToast('Please enter GCash reference number.', 'error');
-      return;
-    }
-    if (!/^\d{13}$/.test(refNo)) {
-      setButtonLoading(processBtn, false);
-      showToast('GCash reference number must be exactly 13 digits.', 'error');
-      return;
-    }
-  }
-
+  // GCash never reaches this function (see the early return above) — this
+  // button only ever handles Cash from here on.
   if (selectedPayment === 'walk_in_cash') {
     const _sub  = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
     const _dSel = document.getElementById('posDiscount');
@@ -1424,7 +1668,7 @@ async function processOrder() {
     order_type:      'walk_in',
     quantity,
     total,
-    ref_no:          refNo || null,
+    ref_no:          null,  // Cash orders carry no reference — GCash orders go through confirmGcashOrder() instead
     payment_method:  selectedPayment,
     branch_id:       branchId,
     cart_items:      orderItems.map(i => ({
@@ -1522,13 +1766,10 @@ async function processOrder() {
 }
 
 // ─── Receipt ──────────────────────────────────────────
-function showReceipt(data, items, received, payment, refNo, customerName = '', orderDiscount = {}) {
-  // Use passed parameters (captured before clearOrder)
-  items    = items    || orderItems;
-  received = received !== undefined ? received : parseFloat(document.getElementById('posCashReceived').value) || 0;
-  payment  = payment  || selectedPayment;
-  refNo    = refNo    || document.getElementById('posGcashRef').value;
-
+// buildReceiptHtml() returns the receipt markup only — shared by the cash
+// flow's #receiptModal (showReceipt) and the GCash modal's own receipt
+// state (renderGcashModalReceipt), so both stay visually identical.
+function buildReceiptHtml(data, items, received, payment, refNo, customerName = '', orderDiscount = {}) {
   const subtotal    = items.reduce((s, i) => s + i.price * i.quantity, 0);
   const prodSavings = items.reduce((s, i) => {
     if (i.original_price && i.original_price > i.price) return s + (i.original_price - i.price) * i.quantity;
@@ -1552,7 +1793,7 @@ function showReceipt(data, items, received, payment, refNo, customerName = '', o
   const branchId   = staffBranchId || document.getElementById('posBranch').value;
   const branchName = staffBranchName || allBranches.find(b => b.branch_id === branchId)?.branch_name || '';
 
-  document.getElementById('receiptContent').innerHTML = `
+  return `
     <div class="receipt-header">
       <strong>Triple E & Fiel Collince</strong><br>
       <span>General Merchandise</span><br>
@@ -1643,7 +1884,17 @@ function showReceipt(data, items, received, payment, refNo, customerName = '', o
       Payment: ${payment.replace(/_/g, ' ').toUpperCase()}<br>
       Thank you for shopping!
     </div>`;
+}
 
+// Cash-flow receipt — opens the standalone #receiptModal, as before.
+function showReceipt(data, items, received, payment, refNo, customerName = '', orderDiscount = {}) {
+  // Use passed parameters (captured before clearOrder)
+  items    = items    || orderItems;
+  received = received !== undefined ? received : parseFloat(document.getElementById('posCashReceived').value) || 0;
+  payment  = payment  || selectedPayment;
+  refNo    = refNo    || document.getElementById('posGcashRef').value;
+
+  document.getElementById('receiptContent').innerHTML = buildReceiptHtml(data, items, received, payment, refNo, customerName, orderDiscount);
   document.getElementById('receiptModalOverlay').style.display = 'block';
   document.getElementById('receiptModal').style.display = 'block';
 }
@@ -2255,9 +2506,8 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + (order.payment && order.payment.payment_method === 'gcash'
       ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
-        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">Ref No: <strong>' + order.payment.ref_no + '</strong></div>' : '')
-        + (order.payment.sender_number ? '<div style="margin-bottom:4px;">Sender: <strong>' + order.payment.sender_number + '</strong></div>' : '')
-        + (order.payment.receipt_image_url ? '<div><a href="' + order.payment.receipt_image_url + '" target="_blank" style="color:#3b82f6;font-size:12px;">View Receipt</a></div>' : '')
+        + '<div style="margin-bottom:4px;">Status: ' + badge(order.payment.status) + (order.payment.status === 'paid' ? ' <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>' : '') + '</div>'
+        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">PayMongo Reference: <strong>' + order.payment.ref_no + '</strong></div>' : '')
         + '</div>'
       : '')
     + addrHtml
@@ -2434,9 +2684,8 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + (order.payment && order.payment.payment_method === 'gcash'
       ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
-        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">Ref No: <strong>' + order.payment.ref_no + '</strong></div>' : '')
-        + (order.payment.sender_number ? '<div style="margin-bottom:4px;">Sender: <strong>' + order.payment.sender_number + '</strong></div>' : '')
-        + (order.payment.receipt_image_url ? '<div><a href="' + order.payment.receipt_image_url + '" target="_blank" style="color:#3b82f6;font-size:12px;">View Receipt</a></div>' : '')
+        + '<div style="margin-bottom:4px;">Status: ' + badge(order.payment.status) + (order.payment.status === 'paid' ? ' <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>' : '') + '</div>'
+        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">PayMongo Reference: <strong>' + order.payment.ref_no + '</strong></div>' : '')
         + '</div>'
       : '')
     + addrHtml

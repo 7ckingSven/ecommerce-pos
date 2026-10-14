@@ -1,7 +1,8 @@
 import json
 import random
+import secrets
 import traceback
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response
 from flask_cors import CORS
 # Resend email API (replaces Flask-Mail)
 import requests as resend_requests
@@ -24,6 +25,10 @@ load_dotenv()
 # without a separate Supabase Auth account. Server-side only, never sent
 # to any client.
 SUPABASE_JWT_SECRET = os.getenv('SUPABASE_JWT_SECRET')
+
+# PayMongo — secret key used for Basic Auth (as username, empty password)
+# against the PayMongo API. Server-side only, never sent to any client.
+PAYMONGO_SECRET_KEY = os.getenv('PAYMONGO_SECRET_KEY')
 
 # Initialize Flask
 app = Flask(__name__)
@@ -82,6 +87,105 @@ def send_email_resend(to_email, subject, html_body):
         return False
 
 # ══════════════════════════════════════════════════════
+# PAYMONGO — GCash e-wallet payments (POS Staff web walk-in)
+# ══════════════════════════════════════════════════════
+import base64 as _b64
+
+PAYMONGO_API_BASE = 'https://api.paymongo.com/v1'
+
+class PayMongoError(Exception):
+    pass
+
+def _paymongo_request(method, path, json_body=None):
+    """Thin wrapper around the PayMongo REST API. Auth is HTTP Basic with
+    the secret key as username and an empty password — PayMongo's own
+    convention, nothing we invented."""
+    if not PAYMONGO_SECRET_KEY:
+        raise PayMongoError('PAYMONGO_SECRET_KEY is not configured on the server.')
+
+    auth_token = _b64.b64encode(f'{PAYMONGO_SECRET_KEY}:'.encode('utf-8')).decode('utf-8')
+    headers = {
+        'Authorization': f'Basic {auth_token}',
+        'Content-Type':  'application/json',
+    }
+    url = f'{PAYMONGO_API_BASE}{path}'
+    try:
+        resp = resend_requests.request(method, url, headers=headers, json=json_body, timeout=20)
+    except Exception as e:
+        raise PayMongoError(f'Could not reach PayMongo: {e}')
+
+    try:
+        body = resp.json()
+    except Exception:
+        body = {}
+
+    if resp.status_code >= 400:
+        detail = ''
+        try:
+            detail = body.get('errors', [{}])[0].get('detail', '')
+        except Exception:
+            pass
+        raise PayMongoError(detail or f'PayMongo request failed ({resp.status_code}).')
+
+    return body
+
+def paymongo_create_gcash_intent(amount_pesos, return_url, description=''):
+    """Creates a Payment Intent, a GCash Payment Method, and attaches them —
+    returns (payment_intent_id, redirect_url). The staff screen renders
+    redirect_url as a QR code; the customer scans it with their own phone to
+    open GCash's authorization page and approve the payment there."""
+    amount_centavos = int(round(float(amount_pesos) * 100))
+
+    intent_body = {
+        'data': {
+            'attributes': {
+                'amount':                 amount_centavos,
+                'payment_method_allowed': ['gcash'],
+                'payment_method_options': {'gcash': {'request_three_d_secure': 'any'}},
+                'currency':               'PHP',
+                'capture_type':           'automatic',
+                'description':            description or 'TEFC E-Commerce — POS walk-in order',
+            }
+        }
+    }
+    intent_res = _paymongo_request('POST', '/payment_intents', intent_body)
+    intent_data       = intent_res['data']
+    payment_intent_id = intent_data['id']
+    client_key        = intent_data['attributes']['client_key']
+
+    method_body = {'data': {'attributes': {'type': 'gcash'}}}
+    method_res  = _paymongo_request('POST', '/payment_methods', method_body)
+    payment_method_id = method_res['data']['id']
+
+    attach_body = {
+        'data': {
+            'attributes': {
+                'payment_method': payment_method_id,
+                'client_key':     client_key,
+                'return_url':     return_url,
+            }
+        }
+    }
+    attach_res = _paymongo_request('POST', f'/payment_intents/{payment_intent_id}/attach', attach_body)
+
+    redirect_url = None
+    try:
+        redirect_url = attach_res['data']['attributes']['next_action']['redirect']['url']
+    except (KeyError, TypeError):
+        pass
+
+    if not redirect_url:
+        raise PayMongoError('PayMongo did not return a GCash authorization link.')
+
+    return payment_intent_id, redirect_url
+
+def paymongo_get_intent_status(payment_intent_id):
+    """Returns the current status string of a Payment Intent
+    ('awaiting_payment_method', 'processing', 'succeeded', etc.)."""
+    res = _paymongo_request('GET', f'/payment_intents/{payment_intent_id}')
+    return res['data']['attributes']['status']
+
+# ══════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════
 
@@ -108,6 +212,51 @@ def make_supabase_token(customer_id, expires_in=3600):
     }
     return jwt.encode(payload, SUPABASE_JWT_SECRET, algorithm='HS256')
 
+def _session_token_valid():
+    """One-session-per-user check.
+
+    Returns True only if this browser session's token still matches the
+    token on file for this user in the database — i.e. no newer login
+    (from another device/browser) has taken over this account since this
+    session started. Fails OPEN on a transient DB error so a brief
+    Supabase hiccup never force-logs-out everyone.
+    """
+    user_id = session.get('user_id')
+    token   = session.get('session_token')
+    if not user_id or not token:
+        return False
+    try:
+        res = supabase.table('user').select('active_session_token').eq('user_id', user_id).execute()
+        if not res.data:
+            return False
+        return res.data[0].get('active_session_token') == token
+    except Exception as e:
+        print(f"Session check error: {e}")
+        return True
+
+def _finalize_login(user, staff):
+    """Completes a login by granting the full session — shared by the
+    trusted-device path (login_post) and the post-MFA path
+    (verify_mfa). One-session-per-user: issues a fresh token for THIS
+    login and records it as the only valid one for this account."""
+    new_session_token = secrets.token_hex(32)
+    supabase.table('user').update(
+        {'active_session_token': new_session_token}
+    ).eq('user_id', user['user_id']).execute()
+
+    session['user_id']       = user['user_id']
+    session['staff_id']      = staff['staff_id']
+    session['role']          = user['role']
+    session['name']          = f"{staff['fname']} {staff['lname']}"
+    session['session_token'] = new_session_token
+    return new_session_token
+
+def _clear_pending_login():
+    for key in ('pending_login_user_id', 'pending_login_staff_id', 'pending_login_role',
+                'pending_login_name', 'mfa_otp_code', 'mfa_otp_sent',
+                'mfa_otp_created_at'):
+        session.pop(key, None)
+
 def login_required(role=None):
     def decorator(f):
         @wraps(f)
@@ -118,7 +267,20 @@ def login_required(role=None):
             if role and session.get('role') != role:
                 flash('You do not have permission to access this page.', 'error')
                 return redirect(url_for('login'))
-            return f(*args, **kwargs)
+            if not _session_token_valid():
+                return redirect(url_for('logout', reason='session_superseded'))
+
+            # Back/forward-after-logout protection: tell the browser never
+            # to cache this page (disk cache AND, in most browsers, the
+            # back/forward "bfcache") so that pressing Back after logging
+            # out can't silently show a stale, already-logged-out copy of
+            # a dashboard page. While still logged in, Back/Forward keeps
+            # working normally — this only stops a STALE copy being shown.
+            response = make_response(f(*args, **kwargs))
+            response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            return response
         return decorated
     return decorator
 
@@ -128,6 +290,8 @@ def admin_required(f):
     def decorated(*args, **kwargs):
         if session.get('role') != 'admin':
             return jsonify({'error': 'Unauthorized'}), 401
+        if not _session_token_valid():
+            return jsonify({'error': 'Session expired - signed in elsewhere', 'reason': 'session_superseded'}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -137,6 +301,8 @@ def staff_required(f):
     def decorated(*args, **kwargs):
         if session.get('role') not in ('admin', 'staff'):
             return jsonify({'error': 'Unauthorized'}), 401
+        if not _session_token_valid():
+            return jsonify({'error': 'Session expired - signed in elsewhere', 'reason': 'session_superseded'}), 401
         return f(*args, **kwargs)
     return decorated
 
@@ -315,7 +481,7 @@ def login_post():
     remember_me = request.form.get('remember_me') == 'on'
 
     if not login_input or not password:
-        flash('Please fill in all fields.', 'error')
+        flash('Please fill in all fields.', 'login_error')
         return redirect(url_for('login'))
 
     if remember_me:
@@ -326,22 +492,22 @@ def login_post():
         user_res = supabase.table('user').select('*').eq('username', login_input).execute()
 
         if not user_res.data:
-            flash('No account found with that username.', 'error')
+            flash('No account found with that username.', 'login_error')
             return redirect(url_for('login'))
 
         user = user_res.data[0]
 
         if user['status'] != 'active':
-            flash('Your account is inactive. Please contact the administrator.', 'error')
+            flash('Your account is inactive. Please contact the administrator.', 'login_error')
             return redirect(url_for('login'))
 
         if not check_password(password, user['password']):
-            flash('Incorrect password. Please try again.', 'error')
+            flash('Incorrect password. Please try again.', 'login_error')
             return redirect(url_for('login'))
 
         # Web login is for admin and staff ONLY — customers use mobile app
         if user['role'] == 'customer':
-            flash('Customers must log in through the mobile app.', 'error')
+            flash('Customers must log in through the mobile app.', 'login_error')
             return redirect(url_for('login'))
         elif user['role'] in ('admin', 'staff'):
             # Direct login without access code
@@ -349,24 +515,69 @@ def login_post():
             
             if staff_res.data:
                 staff = staff_res.data[0]
-                session['user_id']  = user['user_id']
-                session['staff_id'] = staff['staff_id']
-                session['role']     = user['role']
-                session['name']     = f"{staff['fname']} {staff['lname']}"
-                
-                if user['role'] == 'admin':
-                    flash('Welcome, Admin!', 'success')
-                    return redirect(url_for('admin_dashboard'))
-                elif user['role'] == 'staff':
-                    flash('Welcome, Staff!', 'success')
-                    return redirect(url_for('staff_dashboard'))
+
+                # MFA check: does this browser already carry an MFA-trust
+                # cookie that's on file for THIS account?
+                mfa_token   = request.cookies.get('tefc_mfa_token')
+                mfa_trusted = False
+                if mfa_token:
+                    try:
+                        td_res = supabase.table('mfa_device').select('id') \
+                            .eq('user_id', user['user_id']) \
+                            .eq('mfa_token', mfa_token).execute()
+                        if td_res.data:
+                            mfa_trusted = True
+                            supabase.table('mfa_device').update(
+                                {'last_used_at': datetime.now().isoformat()}
+                            ).eq('id', td_res.data[0]['id']).execute()
+                    except Exception as e:
+                        print(f"MFA trust check error: {e}")
+
+                if mfa_trusted:
+                    _finalize_login(user, staff)
+                    if user['role'] == 'admin':
+                        flash('Welcome, Admin!', 'success')
+                        return redirect(url_for('admin_dashboard'))
+                    else:
+                        flash('Welcome, Staff!', 'success')
+                        return redirect(url_for('staff_dashboard'))
+
+                # Unrecognized browser/device — hold off on granting access
+                # and require an MFA email code first. No 'user_id' is set
+                # in the session yet, so login_required() still blocks
+                # every protected page until this verification succeeds.
+                session['pending_login_user_id']  = user['user_id']
+                session['pending_login_staff_id'] = staff['staff_id']
+                session['pending_login_role']     = user['role']
+                session['pending_login_name']     = f"{staff['fname']} {staff['lname']}"
+
+                otp = ''.join(random.choices(string.digits, k=6))
+                session['mfa_otp_code']       = otp
+                session['mfa_otp_sent']       = True
+                session['mfa_otp_created_at'] = datetime.now().isoformat()
+
+                try:
+                    send_email_resend(
+                        to_email  = staff.get('email'),
+                        subject   = 'TEFC E-Commerce — Multi-Factor Authentication Code',
+                        html_body = build_otp_email(
+                            otp,
+                            title='Multi-Factor Authentication',
+                            purpose='verify this login before signing in'
+                        )
+                    )
+                except Exception as email_error:
+                    print(f"WARNING: Failed to send MFA email: {email_error}")
+
+                flash("We don't recognize this browser. Enter the code we emailed you to continue.", 'success')
+                return redirect(url_for('verify_mfa'))
             else:
-                flash('Staff information not found.', 'error')
+                flash('Staff information not found.', 'login_error')
                 return redirect(url_for('login'))
 
     except Exception as e:
         print(f"Login error: {e}")
-        flash('Something went wrong. Please try again.', 'error')
+        flash('Something went wrong. Please try again.', 'login_error')
 
     return redirect(url_for('login'))
 
@@ -513,6 +724,121 @@ def verify_otp():
     return render_template('verify_otp.html')
 
 
+# ─── MULTI-FACTOR AUTHENTICATION (login-time verification) ───────────
+
+@app.route('/verify-mfa', methods=['GET', 'POST'])
+def verify_mfa():
+    if not session.get('mfa_otp_sent') or not session.get('pending_login_user_id'):
+        return redirect(url_for('login'))
+
+    if request.method == 'POST':
+        otp = request.form.get('otp', '').strip()
+
+        if not otp:
+            flash('Please enter the code.', 'error')
+            return redirect(url_for('verify_mfa'))
+
+        try:
+            # Code expires after 5 minutes — matches the frontend countdown
+            otp_created_at = session.get('mfa_otp_created_at')
+            if otp_created_at:
+                created = datetime.fromisoformat(otp_created_at)
+                if (datetime.now() - created).total_seconds() > 300:
+                    _clear_pending_login()
+                    flash('Code has expired. Please log in again.', 'error')
+                    return redirect(url_for('login'))
+
+            stored_otp = session.get('mfa_otp_code', '')
+            if otp != stored_otp:
+                flash('Invalid code. Please try again.', 'error')
+                return redirect(url_for('verify_mfa'))
+
+            # Correct code — finalize the pending login (same one-session-
+            # per-user token issuance as a normal trusted-device login).
+            user_id  = session.get('pending_login_user_id')
+            staff_id = session.get('pending_login_staff_id')
+            role     = session.get('pending_login_role')
+            name     = session.get('pending_login_name')
+
+            new_session_token = secrets.token_hex(32)
+            supabase.table('user').update(
+                {'active_session_token': new_session_token}
+            ).eq('user_id', user_id).execute()
+
+            session['user_id']       = user_id
+            session['staff_id']      = staff_id
+            session['role']          = role
+            session['name']          = name
+            session['session_token'] = new_session_token
+
+            # ...and remember this browser/device from now on (trusted
+            # forever, until its cookie is cleared or a different browser
+            # is used).
+            new_mfa_token = secrets.token_hex(32)
+            supabase.table('mfa_device').insert({
+                'user_id':    user_id,
+                'mfa_token':  new_mfa_token,
+                'user_agent': request.headers.get('User-Agent', '')[:255],
+            }).execute()
+
+            _clear_pending_login()
+
+            resp = redirect(url_for('admin_dashboard') if role == 'admin' else url_for('staff_dashboard'))
+            resp.set_cookie(
+                'tefc_mfa_token', new_mfa_token,
+                max_age=60 * 60 * 24 * 365 * 5,  # effectively permanent
+                httponly=True, secure=True, samesite='Lax'
+            )
+            flash(f"Welcome, {'Admin' if role == 'admin' else 'Staff'}!", 'success')
+            return resp
+
+        except Exception as e:
+            print(f"MFA verification error: {type(e).__name__}: {str(e)}")
+            traceback.print_exc()
+            flash('Something went wrong. Please try again.', 'error')
+            return redirect(url_for('verify_mfa'))
+
+    return render_template('verify_mfa.html')
+
+
+@app.route('/resend-mfa-otp', methods=['POST'])
+def resend_mfa_otp():
+    if not session.get('mfa_otp_sent') or not session.get('pending_login_user_id'):
+        return jsonify({'ok': False, 'error': 'No active verification session. Please log in again.'}), 400
+
+    try:
+        user_id = session.get('pending_login_user_id')
+        staff_res = supabase.table('staff').select('email').eq('user_id', user_id).execute()
+        email = staff_res.data[0]['email'] if staff_res.data else None
+        if not email:
+            return jsonify({'ok': False, 'error': 'Could not find an email on file.'}), 400
+
+        otp = ''.join(random.choices(string.digits, k=6))
+        session['mfa_otp_code']       = otp
+        session['mfa_otp_created_at'] = datetime.now().isoformat()
+        session['mfa_otp_sent']       = True
+
+        try:
+            send_email_resend(
+                to_email  = email,
+                subject   = 'TEFC E-Commerce — Multi-Factor Authentication Code (Resent)',
+                html_body = build_otp_email(
+                    otp,
+                    title='Multi-Factor Authentication',
+                    purpose='verify this login before signing in'
+                )
+            )
+        except Exception as email_err:
+            print(f"WARNING: Resend MFA-otp email failed: {email_err}")
+
+        return jsonify({'ok': True}), 200
+
+    except Exception as e:
+        print(f"Resend MFA OTP error: {type(e).__name__}: {str(e)}")
+        traceback.print_exc()
+        return jsonify({'ok': False, 'error': 'An error occurred. Please try again.'}), 500
+
+
 # ─── RESET PASSWORD ───────────────────────────────────
 
 @app.route('/reset-password', methods=['GET', 'POST'])
@@ -584,8 +910,40 @@ def staff_dashboard():
 
 @app.route('/logout')
 def logout():
+    reason  = request.args.get('reason')
+    user_id = session.get('user_id')
+    token   = session.get('session_token')
+
+    # Clear the account's active-session token on a normal/idle logout —
+    # but NOT when this session is the one being superseded, since the DB
+    # token already belongs to the newer login and must not be wiped.
+    if reason != 'session_superseded' and user_id and token:
+        try:
+            current = supabase.table('user').select('active_session_token').eq('user_id', user_id).execute()
+            if current.data and current.data[0].get('active_session_token') == token:
+                supabase.table('user').update({'active_session_token': None}).eq('user_id', user_id).execute()
+        except Exception as e:
+            print(f"Logout token-clear error: {e}")
+
     session.clear()
+
+    if reason == 'idle':
+        flash('You were logged out due to inactivity.', 'error')
+    elif reason == 'session_superseded':
+        flash('You were logged out because your account was signed in on another device or browser.', 'error')
+    elif reason == 'invalid_action':
+        flash('Please log in to continue.', 'error')
+
     return redirect(url_for('login'))
+
+# ─── SESSION CHECK (polled by security.js) ────────────
+@app.route('/api/session/check')
+def api_session_check():
+    if 'user_id' not in session:
+        return jsonify({'valid': False}), 401
+    if not _session_token_valid():
+        return jsonify({'valid': False, 'reason': 'session_superseded'}), 401
+    return jsonify({'valid': True}), 200
 
 # ─── PING (network banner health check) ───────────────
 @app.route('/ping')
@@ -1039,8 +1397,13 @@ def api_get_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
+        # branch_stock/variant_stock are included so the app can enforce the
+        # real stock cap on the quantity stepper — without them, every
+        # product's stock limit silently reads as undefined and the +
+        # button never disables no matter how high the quantity goes
+        # (branch-level AND per-variant).
         res = supabase_retry(lambda: supabase.table('cart').select(
-            '*, branch_id, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage))'
+            '*, branch_id, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage), branch_stock(branch_id, quantity), variant_stock(branch_id, quantity, options))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -1389,16 +1752,30 @@ def api_place_order():
     except Exception as dup_err:
         print(f'Duplicate check warning: {dup_err}')
 
-    data           = request.get_json()
-    cart_items     = data.get('cart_items', [])
-    payment_method = data.get('payment_method', '')
-    ref_no         = data.get('ref_no', '')
+    data               = request.get_json()
+    cart_items         = data.get('cart_items', [])
+    payment_method     = data.get('payment_method', '')
+    payment_intent_id  = data.get('payment_intent_id', '')
+    ref_no             = ''
 
     if not cart_items or not payment_method:
         return jsonify({'error': 'Cart items and payment method are required.'}), 400
 
-    if payment_method == 'gcash' and not ref_no:
-        return jsonify({'error': 'GCash reference number is required.'}), 400
+    # GCash is verified-only — the mobile app completes payment via the
+    # PayMongo WebView flow first, then submits the order with the
+    # resulting payment_intent_id. We independently re-check with
+    # PayMongo here (never trusting the client) before accepting the
+    # order; this is the same server-side pattern used for the staff POS.
+    if payment_method == 'gcash':
+        if not payment_intent_id:
+            return jsonify({'error': 'A verified GCash payment is required.'}), 400
+        try:
+            status = paymongo_get_intent_status(payment_intent_id)
+        except PayMongoError as e:
+            return jsonify({'error': f'Could not verify GCash payment: {e}'}), 502
+        if status != 'succeeded':
+            return jsonify({'error': f'GCash payment has not succeeded yet (status: {status}).'}), 400
+        ref_no = payment_intent_id
 
     try:
         total    = sum(item['price'] * item['quantity'] for item in cart_items)
@@ -1406,10 +1783,8 @@ def api_place_order():
 
         branch_id    = data.get('branch_id')
         shipping_fee = float(data.get('shipping_fee', 0) or 0)
-        address           = data.get('address', '')
-        address_note      = data.get('address_note', '')
-        sender_number     = data.get('sender_number', '')
-        receipt_image_url = data.get('receipt_image_url', '')
+        address      = data.get('address', '')
+        address_note = data.get('address_note', '')
         order_res = supabase.table('order').insert({
             'customer_id':  customer_id,
             'order_type':   'online',
@@ -1478,9 +1853,13 @@ def api_place_order():
             'customer_id':       customer_id,
             'payment_method':    payment_method,
             'total':             total,
-            'ref_no':            ref_no            if ref_no            else None,
-            'sender_number':     sender_number     if sender_number     else None,
-            'receipt_image_url': receipt_image_url if receipt_image_url else None,
+            # GCash: ref_no is the PayMongo payment_intent_id, already
+            # verified 'succeeded' with PayMongo above. sender_number /
+            # receipt_image_url are no longer collected for GCash — that
+            # manual honor-system path has been fully replaced.
+            'ref_no':            ref_no if ref_no else None,
+            'sender_number':     None,
+            'receipt_image_url': None,
             'status':            'paid' if payment_method == 'gcash' else 'pending'
         }).execute()
 
@@ -1521,6 +1900,58 @@ def api_place_order():
     except Exception as e:
         print(f"API place order error: {e}")
         return jsonify({'error': 'Failed to place order.'}), 500
+
+
+@app.route('/api/orders/paymongo/gcash/create', methods=['POST'])
+def api_orders_paymongo_gcash_create():
+    """Starts a GCash payment for a mobile-app checkout. Returns a
+    payment_intent_id (to poll and to send back with the order) and a
+    redirect_url the app opens in an in-app WebView for the customer to
+    complete the GCash authorization themselves."""
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data   = request.get_json() or {}
+        amount = data.get('amount')
+        if not amount or float(amount) <= 0:
+            return jsonify({'error': 'A valid amount is required.'}), 400
+
+        return_url = request.url_root.rstrip('/') + '/paymongo/gcash-return'
+
+        payment_intent_id, redirect_url = paymongo_create_gcash_intent(
+            amount_pesos = amount,
+            return_url   = return_url,
+            description  = 'TEFC E-Commerce — Online order',
+        )
+        return jsonify({
+            'payment_intent_id': payment_intent_id,
+            'redirect_url':      redirect_url,
+        }), 200
+    except PayMongoError as e:
+        print(f'PayMongo create error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Mobile PayMongo create error: {e}')
+        return jsonify({'error': 'Could not start GCash payment.'}), 500
+
+
+@app.route('/api/orders/paymongo/gcash/status/<payment_intent_id>', methods=['GET'])
+def api_orders_paymongo_gcash_status(payment_intent_id):
+    """Polled by the mobile app every few seconds while the GCash WebView
+    is open."""
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        status = paymongo_get_intent_status(payment_intent_id)
+        return jsonify({'status': status}), 200
+    except PayMongoError as e:
+        print(f'PayMongo status error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Mobile PayMongo status error: {e}')
+        return jsonify({'error': 'Could not check GCash payment status.'}), 500
 
 
 # ══════════════════════════════════════════════════════
@@ -1873,11 +2304,12 @@ def admin_create_purchase_order():
         # Insert PO items
         for item in items:
             supabase.table('po_item').insert({
-                'po_id':           po_id,
-                'product_id':      item['product_id'],
-                'quantity':        int(item['quantity']),
-                'unit_cost':       float(item.get('unit_cost', 0)),
-                'variant_options': item.get('variant_options') or None,
+                'po_id':             po_id,
+                'product_id':        item['product_id'],
+                'quantity':          int(item['quantity']),
+                'unit_cost':         float(item.get('unit_cost', 0)),
+                'variant_options':   item.get('variant_options') or None,
+                'received_quantity': 0,
             }).execute()
 
         return jsonify({'message': 'Purchase order created.', 'po_id': po_id, 'po_number': po_num}), 201
@@ -2000,6 +2432,13 @@ def admin_update_purchase_order(po_id):
             'po_item_id, product_id, quantity, received_quantity, variant_options'
         ).eq('po_id', po_id).execute()
         all_items   = all_items_res.data or []
+        # received_quantity can come back NULL from the DB (e.g. for rows
+        # inserted before this column was being tracked) — dict.get(key, 0)
+        # does NOT protect against that, since the key IS present, just with
+        # value None, and 0 + None / quantity - None raises a TypeError.
+        # Normalize to 0 right away so every downstream calc is safe.
+        for i in all_items:
+            i['received_quantity'] = i.get('received_quantity') or 0
         items_by_id = {i['po_item_id']: i for i in all_items}
 
         # Validate BEFORE writing anything:
@@ -2015,7 +2454,7 @@ def admin_update_purchase_order(po_id):
             this_batch = int(item_entry.get('received_quantity', 0))
             if this_batch <= 0:
                 continue  # not receiving this item in this batch — fine
-            outstanding = po_item['quantity'] - po_item.get('received_quantity', 0)
+            outstanding = po_item['quantity'] - po_item['received_quantity']
             if this_batch > outstanding:
                 return jsonify({
                     'error': f"Quantity arriving ({this_batch}) exceeds what's still outstanding ({outstanding}) for one or more items."
@@ -2044,7 +2483,7 @@ def admin_update_purchase_order(po_id):
                     continue
                 _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
 
-            new_received = po_item.get('received_quantity', 0) + this_batch
+            new_received = po_item['received_quantity'] + this_batch
             supabase.table('po_item').update({'received_quantity': new_received}).eq('po_item_id', po_item['po_item_id']).execute()
             po_item['received_quantity'] = new_received  # keep local copy in sync for the completeness check below
 
@@ -2060,7 +2499,7 @@ def admin_update_purchase_order(po_id):
         if data.get('note'):     updates['note']     = data['note']
         supabase.table('purchase_order').update(updates).eq('po_id', po_id).execute()
 
-        return jsonify({'message': f'PO status updated to {final_status}.'}), 200
+        return jsonify({'message': f'PO status updated to {final_status}.', 'status': final_status}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3178,25 +3617,115 @@ def staff_get_orders():
         print(f'Staff orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/staff/paymongo/gcash/create', methods=['POST'])
+@staff_required
+def staff_paymongo_gcash_create():
+    """Starts a GCash payment for the current POS sale. Returns a
+    payment_intent_id (to poll and to send back with the order) and a
+    redirect_url the staff screen renders as a QR code for the customer
+    to scan with their own GCash app."""
+    try:
+        data   = request.get_json() or {}
+        amount = data.get('amount')
+        if not amount or float(amount) <= 0:
+            return jsonify({'error': 'A valid amount is required.'}), 400
+
+        # Reflects whatever host this request actually arrived on — works
+        # locally and in production without guessing the deployed URL.
+        return_url = request.url_root.rstrip('/') + '/paymongo/gcash-return'
+
+        payment_intent_id, redirect_url = paymongo_create_gcash_intent(
+            amount_pesos = amount,
+            return_url   = return_url,
+            description  = 'TEFC E-Commerce — POS walk-in order',
+        )
+        return jsonify({
+            'payment_intent_id': payment_intent_id,
+            'redirect_url':      redirect_url,
+        }), 200
+    except PayMongoError as e:
+        print(f'PayMongo create error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Staff PayMongo create error: {e}')
+        return jsonify({'error': 'Could not start GCash payment.'}), 500
+
+@app.route('/api/staff/paymongo/gcash/status/<payment_intent_id>', methods=['GET'])
+@staff_required
+def staff_paymongo_gcash_status(payment_intent_id):
+    """Polled by the staff screen every few seconds while the QR is shown."""
+    try:
+        status = paymongo_get_intent_status(payment_intent_id)
+        return jsonify({'status': status}), 200
+    except PayMongoError as e:
+        print(f'PayMongo status error: {e}')
+        return jsonify({'error': str(e)}), 502
+    except Exception as e:
+        print(f'Staff PayMongo status error: {e}')
+        return jsonify({'error': 'Could not check GCash payment status.'}), 500
+
+@app.route('/paymongo/gcash-return')
+def paymongo_gcash_return():
+    """Landing page the customer's browser is sent to after approving (or
+    cancelling) payment in GCash. The staff screen is the source of truth —
+    it's already polling for the result — so this page just tells the
+    customer they can close the tab and hand the phone back."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>TEFC E-Commerce</title>
+  <style>
+    body { margin:0; font-family:'Segoe UI',Arial,sans-serif; background:#f0fdf4;
+           display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .card { background:#fff; border-radius:16px; padding:36px 28px; max-width:360px;
+            text-align:center; box-shadow:0 4px 24px rgba(0,0,0,0.08); }
+    h1 { color:#14532d; font-size:20px; margin:0 0 8px; }
+    p  { color:#6b7280; font-size:14px; margin:0; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>You&rsquo;re all set!</h1>
+    <p>You can close this tab now and return the phone to the cashier.</p>
+  </div>
+</body>
+</html>"""
+
 @app.route('/api/staff/orders', methods=['POST'])
 @staff_required
 def staff_place_order():
     try:
-        data           = request.get_json()
-        cart_items     = data.get('cart_items', [])
-        payment_method = data.get('payment_method', '')
-        ref_no         = data.get('ref_no', '')
-        order_type     = data.get('order_type', 'walk_in')
-        quantity       = data.get('quantity', 0)
-        total          = data.get('total', 0)
-        branch_id      = data.get('branch_id')  # which branch processed this sale
+        data              = request.get_json()
+        cart_items        = data.get('cart_items', [])
+        payment_method    = data.get('payment_method', '')
+        ref_no            = data.get('ref_no', '')
+        payment_intent_id = data.get('payment_intent_id', '')
+        order_type        = data.get('order_type', 'walk_in')
+        quantity          = data.get('quantity', 0)
+        total             = data.get('total', 0)
+        branch_id         = data.get('branch_id')  # which branch processed this sale
         is_offline_sync = bool(data.get('is_offline_sync', False))  # True when this sale was made during a connection outage and is only now reaching the server
 
         if not cart_items or not payment_method:
             return jsonify({'error': 'Cart items and payment method are required.'}), 400
 
-        if payment_method == 'gcash' and not ref_no:
-            return jsonify({'error': 'GCash reference number is required.'}), 400
+        if payment_method == 'gcash' and not is_offline_sync:
+            # The GCash QR flow is online-only — verify the actual payment
+            # status with PayMongo rather than trusting anything the client
+            # claims. A manually-typed ref_no is only accepted as a legacy
+            # fallback when no payment_intent_id was sent.
+            if payment_intent_id:
+                try:
+                    status = paymongo_get_intent_status(payment_intent_id)
+                except PayMongoError as e:
+                    return jsonify({'error': f'Could not verify GCash payment: {e}'}), 502
+                if status != 'succeeded':
+                    return jsonify({'error': f'GCash payment has not succeeded yet (status: {status}).'}), 400
+                ref_no = ref_no or payment_intent_id
+            elif not ref_no:
+                return jsonify({'error': 'GCash reference number is required.'}), 400
 
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({

@@ -316,6 +316,7 @@
               <tbody id="lowStockBody"><tr><td colspan="4" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
+          <div id="stockAlertPagination" style="padding:0 16px;"></div>
         </div>
       </div>
     </section>
@@ -1430,7 +1431,7 @@
         <textarea id="reviewAdminNote" class="form-input form-textarea" rows="2" placeholder="e.g. Approved — will order next week..."></textarea>
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-cancel" onclick="closeReviewRequestModal()">Cancel</button>
+        <button type="button" class="btn btn-cancel" id="reviewDismissBtn" onclick="closeReviewRequestModal()">Cancel</button>
         <button type="button" class="btn" style="background:#ef4444;color:#fff;" onclick="submitReview('rejected')">Reject</button>
         <button type="button" class="btn btn-solid-green" onclick="submitReview('approved')">Approve</button>
       </div>
@@ -1522,7 +1523,8 @@
     <div id="genericModalContent"></div>
   </div>
 
-  <script src="{{ url_for('static', filename='js/admin.js') }}?v=2"></script>
+  <script src="{{ url_for('static', filename='js/security.js') }}"></script>
+  <script src="{{ url_for('static', filename='js/admin.js') }}?v=6"></script>
 
   <!-- Logout Confirmation Modal -->
   <div id="logoutModalOverlay" onclick="closeLogoutModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;"></div>

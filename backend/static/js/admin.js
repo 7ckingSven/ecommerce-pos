@@ -35,13 +35,13 @@ function skStatIcon(id) {
 }
 // ─── Pagination ──────────────────────────────────────
 const ITEMS_PER_PAGE = 10;
-const PROD_PAGE_SIZE = 12;
+const PROD_PAGE_SIZE = 10;
 let productsPage         = 1;
 let _prodFilteredCache   = [];
-const DISC_PAGE_SIZE = 5;
+const DISC_PAGE_SIZE = 10;
 let discountsPage        = 1;
 let _discFilteredCache   = [];
-const USER_PAGE_SIZE = 12;
+const USER_PAGE_SIZE = 10;
 let usersPage            = 1;
 let _userFilteredCache   = [];
 let invPage              = 1;
@@ -52,6 +52,9 @@ let branchStockPage   = 1;
 let allBranchProducts = [];
 let branchStockSearchVal  = '';
 let branchStockLevelVal   = '';
+const STOCK_ALERT_PAGE_SIZE = 10;
+let stockAlertPage      = 1;
+let _stockAlertCache    = [];
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -765,26 +768,8 @@ async function loadOverview() {
       ...criticalStock.map(p => ({ ...p, _alertLevel: 'critical' })),
       ...lowStock.map(p => ({ ...p, _alertLevel: 'low' })),
     ];
-    document.getElementById('lowStockBody').innerHTML = alertProducts.length
-      ? alertProducts.map(p => {
-          const branchBreakdown = p.branch_stock?.length
-            ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' / ')
-            : `${getTotal(p)}`;
-          const isCritical  = p._alertLevel === 'critical';
-          // Flag it when the trigger is a variant whose branch aggregate still looks fine —
-          // otherwise the admin sees a healthy-looking number and wonders why it's listed.
-          const variantOnly = hasVariantAlert(p, isCritical ? critQ : lowQ) && !(isCritical ? p.branch_stock?.some(bs => critQ(bs.quantity)) : p.branch_stock?.some(bs => lowQ(bs.quantity)));
-          const levelBadge = isCritical
-            ? '<span title="Critical Level" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,0.2);"></span>'
-            : '<span title="Low Stock" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11,0.2);"></span>';
-          return `<tr>
-            <td>${p.product_name}</td>
-            <td>${p.category}</td>
-            <td><span style="color:${isCritical ? '#ef4444' : '#f59e0b'};font-weight:600;">${branchBreakdown}</span>${variantOnly ? ' <span style="font-size:11px;opacity:0.75;">(variant-level)</span>' : ''}</td>
-            <td>${levelBadge}</td>
-          </tr>`;
-        }).join('')
-      : '<tr><td colspan="4" class="table-empty">All products have sufficient stock ✓</td></tr>';
+    stockAlertPage = 1;
+    renderStockAlert(alertProducts);
 
     // ── Top Selling Products table ──────────────────────
     const sorted = [...activeProducts].sort((a, b) => Number(b.total_sold || 0) - Number(a.total_sold || 0));
@@ -828,6 +813,48 @@ async function loadOverview() {
 
   } catch (e) { console.error('Overview error:', e); }
 }
+
+function renderStockAlert(alertProducts) {
+  _stockAlertCache = alertProducts;
+  // Self-contained copies of loadOverview()'s local helpers — this function is
+  // also called from changeStockAlertPage() outside that closure.
+  const getTotal = p => p.branch_stock?.length
+    ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
+    : Number(p.quantity);
+  const critQ = q => Number(q) > 0 && Number(q) <= 5;
+  const lowQ  = q => Number(q) > 0 && Number(q) <= 10;
+  const hasVariantAlert = (p, checkFn) => (p.variant_stock || []).some(vs => checkFn(vs.quantity));
+
+  if (stockAlertPage > Math.ceil(alertProducts.length / STOCK_ALERT_PAGE_SIZE)) stockAlertPage = 1;
+  const start = (stockAlertPage - 1) * STOCK_ALERT_PAGE_SIZE;
+  const paged = alertProducts.slice(start, start + STOCK_ALERT_PAGE_SIZE);
+  document.getElementById('lowStockBody').innerHTML = paged.length
+    ? paged.map(p => {
+        const branchBreakdown = p.branch_stock?.length
+          ? p.branch_stock.map(bs => `${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}`).join(' / ')
+          : `${getTotal(p)}`;
+        const isCritical  = p._alertLevel === 'critical';
+        // Flag it when the trigger is a variant whose branch aggregate still looks fine —
+        // otherwise the admin sees a healthy-looking number and wonders why it's listed.
+        const variantOnly = hasVariantAlert(p, isCritical ? critQ : lowQ) && !(isCritical ? p.branch_stock?.some(bs => critQ(bs.quantity)) : p.branch_stock?.some(bs => lowQ(bs.quantity)));
+        const levelBadge = isCritical
+          ? '<span title="Critical Level" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#ef4444;box-shadow:0 0 0 2px rgba(239,68,68,0.2);"></span>'
+          : '<span title="Low Stock" style="display:inline-block;width:12px;height:12px;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 2px rgba(245,158,11,0.2);"></span>';
+        return `<tr>
+          <td>${p.product_name}</td>
+          <td>${p.category}</td>
+          <td><span style="color:${isCritical ? '#ef4444' : '#f59e0b'};font-weight:600;">${branchBreakdown}</span>${variantOnly ? ' <span style="font-size:11px;opacity:0.75;">(variant-level)</span>' : ''}</td>
+          <td>${levelBadge}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="4" class="table-empty">All products have sufficient stock ✓</td></tr>';
+  renderPagerCustom('stockAlertPagination', alertProducts.length, stockAlertPage, STOCK_ALERT_PAGE_SIZE, 'changeStockAlertPage');
+}
+function changeStockAlertPage(page) {
+  stockAlertPage = page;
+  renderStockAlert(_stockAlertCache);
+}
+window.changeStockAlertPage = changeStockAlertPage;
 
 // ─── PRODUCTS ─────────────────────────────────────────
 async function loadProducts() {
@@ -2866,10 +2893,8 @@ function viewOrderItems(order) {
         ${order.payment?.payment_method === 'gcash' ? `
         <div style="grid-column:1/-1;background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-top:4px;">
           <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCASH PAYMENT DETAILS</div>
-          ${order.payment.ref_no ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);"># Ref No:</span> <strong>${order.payment.ref_no}</strong></div>` : ''}
-          ${order.payment.sender_number ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">📱 Sender No:</span> <strong>${order.payment.sender_number}</strong></div>` : ''}
-          ${order.payment.receipt_image_url ? `<div style="margin-top:8px;"><a href="${order.payment.receipt_image_url}" target="_blank" style="color:#3b82f6;font-size:12px;font-weight:600;">View Receipt Image</a></div>` : ''}
-          ${!order.payment.ref_no && !order.payment.sender_number && !order.payment.receipt_image_url ? '<div style="font-size:12px;color:var(--text-muted);">No GCash details provided</div>' : ''}
+          <div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">Status:</span> ${badge(order.payment.status)}${order.payment.status === 'paid' ? ` <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>` : ''}</div>
+          ${order.payment.ref_no ? `<div style="font-size:12px;margin-bottom:4px;"><span style="color:var(--text-muted);">PayMongo Reference:</span> <strong>${order.payment.ref_no}</strong></div>` : '<div style="font-size:12px;color:var(--text-muted);">No PayMongo reference available</div>'}
         </div>` : ''}
         <div><span style="color:var(--text-muted);">Date</span><br/><strong>${(() => {
             const raw = order.created_at || order.date || null; // prefer created_at (timestamptz) over date (date-only)
@@ -4610,7 +4635,7 @@ let allPOs           = [];
 let poPage           = 1;
 const PO_PAGE_SIZE   = 10;
 let srPage           = 1;
-const SR_PAGE_SIZE   = 6;
+const SR_PAGE_SIZE   = 10;
 let poItems          = []; // items in create PO modal
 let srStatusFilterVal = '';
 let poStatusFilterVal = '';
@@ -4671,9 +4696,17 @@ async function loadPurchaseOrders() {
 
 function renderStockRequests(requests) {
   const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
-  if (srPage > Math.ceil(requests.length / SR_PAGE_SIZE)) srPage = 1;
-  const paged = requests.slice((srPage - 1) * SR_PAGE_SIZE, srPage * SR_PAGE_SIZE);
-  renderPagerCustom('srPagination', requests.length, srPage, SR_PAGE_SIZE, 'changeSRPage');
+  // Hierarchy: Pending first, then Rejected, then Approved — and within each
+  // status group, the oldest request shows at the top.
+  const statusOrder = { pending: 0, rejected: 1, approved: 2 };
+  const sorted = [...requests].sort((a, b) => {
+    const statusDiff = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
+    if (statusDiff !== 0) return statusDiff;
+    return new Date(a.created_at) - new Date(b.created_at); // oldest first
+  });
+  if (srPage > Math.ceil(sorted.length / SR_PAGE_SIZE)) srPage = 1;
+  const paged = sorted.slice((srPage - 1) * SR_PAGE_SIZE, srPage * SR_PAGE_SIZE);
+  renderPagerCustom('srPagination', sorted.length, srPage, SR_PAGE_SIZE, 'changeSRPage');
   document.getElementById('stockRequestsBody').innerHTML = paged.length
     ? paged.map(r => `
         <tr>
@@ -4708,7 +4741,7 @@ function renderStockRequests(requests) {
             return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
           })()}</td>
           <td>
-            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${r.product?.product_name}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
+            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${(r.product?.product_name || '').replace(/'/g, "\\'")}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </td>
@@ -4758,8 +4791,23 @@ function openReviewRequest(requestId, productName, qty, status) {
   // Show/hide buttons based on current status
   const approveBtn = document.querySelector('#reviewRequestModal .btn-solid-green');
   const rejectBtn  = document.querySelector('#reviewRequestModal .btn[style*="#ef4444"]');
-  if (approveBtn) approveBtn.style.display = status === 'approved' ? 'none' : '';
-  if (rejectBtn)  rejectBtn.style.display  = status === 'rejected' ? 'none' : '';
+  const dismissBtn = document.getElementById('reviewDismissBtn');
+  if (status === 'approved') {
+    // Already approved: nothing left to decide, just let them close it.
+    if (approveBtn) approveBtn.style.display = 'none';
+    if (rejectBtn)  rejectBtn.style.display  = 'none';
+    if (dismissBtn) dismissBtn.textContent   = 'Close';
+  } else if (status === 'rejected') {
+    // Already rejected: nothing left to decide, just let them close it.
+    if (approveBtn) approveBtn.style.display = 'none';
+    if (rejectBtn)  rejectBtn.style.display  = 'none';
+    if (dismissBtn) dismissBtn.textContent   = 'Close';
+  } else {
+    // Pending: full choice — Close, Reject, and Approve all available.
+    if (approveBtn) approveBtn.style.display = '';
+    if (rejectBtn)  rejectBtn.style.display  = '';
+    if (dismissBtn) dismissBtn.textContent   = 'Close';
+  }
   document.getElementById('reviewRequestModalOverlay')?.classList.add('open');
   document.getElementById('reviewRequestModal')?.classList.add('open');
 }
@@ -4971,6 +5019,7 @@ function showPOReceipt(po, items, total) {
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);">
         ${i.product?.product_name || i.product_name || '—'}
         ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}</div>` : ''}
+        ${i.branch_note ? `<div style="font-size:10px;color:var(--text-muted);">→ ${i.branch_note}</div>` : ''}
       </td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
@@ -5294,8 +5343,32 @@ async function submitPOReceive(poId) {
       // 'partially_received' with the shortfall still outstanding.
       showToast(body.message || 'Receipt saved!');
       closePODetailModal();
-      invalidateSection('purchase_orders'); loadPurchaseOrders();
+      invalidateSection('purchase_orders'); await loadPurchaseOrders();
       invalidateSection('inventory'); loadInventory();
+
+      // Issue a receipt for THIS batch regardless of whether it completed
+      // the PO or only partially filled it — a receipt should be given
+      // either way, not just on a full receive.
+      const receiptItems = itemsPayload
+        .filter(function(e) { return e.received_quantity > 0; })
+        .map(function(e) {
+          const srcItem  = items.find(function(it) { return it.po_item_id === e.po_item_id; }) || {};
+          const noteText = (e.branches || [])
+            .map(function(b) {
+              const br = allBranches.find(function(x) { return x.branch_id === b.branch_id; });
+              return (br ? br.branch_name : b.branch_id) + ': ' + b.quantity;
+            })
+            .join(', ');
+          return {
+            product_name:    srcItem.product?.product_name,
+            variant_options: srcItem.variant_options,
+            quantity:        e.received_quantity,
+            unit_cost:       srcItem.unit_cost,
+            branch_note:     noteText,
+          };
+        });
+      const receiptTotal = receiptItems.reduce(function(s, i) { return s + Number(i.unit_cost || 0) * Number(i.quantity || 0); }, 0);
+      showPOReceipt({ ...po, status: body.status || po.status }, receiptItems, receiptTotal);
     } else {
       showToast(body.error || 'Failed to receive PO.', 'error');
       setButtonLoading(btn, false);
@@ -5323,7 +5396,7 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
     if (res.ok) {
       showToast(`PO marked as ${status}!`);
       closePODetailModal();
-      invalidateSection('purchase_orders'); loadPurchaseOrders();
+      invalidateSection('purchase_orders'); await loadPurchaseOrders();
       if (status === 'received') { invalidateSection('inventory'); loadInventory(); }
       // Show receipt when marked as ordered or received
       if (status === 'ordered' || status === 'received') {

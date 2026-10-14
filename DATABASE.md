@@ -20,6 +20,7 @@ branch ────────────────────────�
 
 user ──< staff
 user ──< customer (via separate auth)
+user ──< mfa_device
 
 customer ──< cart >── product
 customer ──< order >──< order_item >── product
@@ -87,6 +88,7 @@ Stores customer accounts registered via the mobile app.
 | `email` | VARCHAR | NOT NULL, UNIQUE | Customer email |
 | `phone_number` | VARCHAR | UNIQUE | Mobile number (11 digits, starts with 09) |
 | `address` | TEXT | | PSGC address (pipe-separated: Street\|Barangay\|City\|Province\|Region\|Zip) |
+| `fcm_token` | TEXT | | Firebase Cloud Messaging device token, used to push order-status notifications to the mobile app |
 | `created_at` | TIMESTAMP | DEFAULT now() | Date registered |
 
 ---
@@ -210,7 +212,9 @@ Stores payment records for each order.
 | `payment_method` | VARCHAR | NOT NULL | `gcash` or `walk_in_cash` |
 | `total` | DECIMAL(10,2) | | Amount paid |
 | `status` | VARCHAR | DEFAULT 'pending' | `pending`, `paid`, `failed` |
-| `ref_no` | VARCHAR | | GCash reference number (13 digits) |
+| `ref_no` | VARCHAR | | For `gcash`: the server-verified PayMongo Payment Intent ID (e.g. `pi_...`), set only after PayMongo reports the payment `succeeded` |
+| `sender_number` | VARCHAR | | Legacy — GCash sender's mobile number from the old manual-entry flow. Always `null` on new orders (both staff POS and mobile checkout now go through PayMongo verification instead) |
+| `receipt_image_url` | TEXT | | Legacy — uploaded GCash receipt screenshot URL from the old manual-entry flow. Always `null` on new orders |
 | `date` | DATE | | Payment date |
 
 ---
@@ -291,6 +295,22 @@ Stores OTP tokens for mobile password reset.
 
 ---
 
+### 17. `mfa_device`
+Stores trusted browsers for web (admin/staff) login — once a browser passes email OTP verification, it's remembered here so it's not re-challenged on future logins from that same browser.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `user_id` | UUID | **FK** → user.user_id ON DELETE CASCADE | The admin/staff account this trusted browser belongs to |
+| `mfa_token` | TEXT | | Opaque token stored in the `tefc_mfa_token` browser cookie; matched against this table on login to skip the OTP challenge |
+| `user_agent` | TEXT | | Browser user-agent string at time of trust, for reference |
+| `created_at` | TIMESTAMPTZ | DEFAULT now() | When this browser was first trusted |
+| `last_used_at` | TIMESTAMPTZ | DEFAULT now() | Last login from this browser |
+
+> **Note:** Trust is per-browser, not per-device — the same physical device logging in from a different browser (or after clearing cookies) is untrusted and must re-verify via email OTP. Trust persists indefinitely (5-year cookie `max_age`) until cookies are cleared.
+
+---
+
 ## SQL — All Schema Changes Applied
 
 ```sql
@@ -328,6 +348,24 @@ ALTER TABLE discount ADD COLUMN IF NOT EXISTS ends_at   TIMESTAMP;
 -- inventory — make from_branch_id nullable
 ALTER TABLE inventory ALTER COLUMN from_branch_id DROP NOT NULL;
 ALTER TABLE inventory ALTER COLUMN to_branch_id   DROP NOT NULL;
+
+-- customer — FCM push notification token
+ALTER TABLE customer ADD COLUMN IF NOT EXISTS fcm_token TEXT;
+
+-- payment — legacy manual-GCash-entry columns (now always null; retained
+-- for historical orders placed before the PayMongo-verified flow)
+ALTER TABLE payment ADD COLUMN IF NOT EXISTS sender_number     VARCHAR;
+ALTER TABLE payment ADD COLUMN IF NOT EXISTS receipt_image_url TEXT;
+
+-- mfa_device table (new) — trusted-browser store for web login MFA
+CREATE TABLE IF NOT EXISTS mfa_device (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID REFERENCES "user"(user_id) ON DELETE CASCADE,
+  mfa_token     TEXT,
+  user_agent    TEXT,
+  created_at    TIMESTAMPTZ DEFAULT NOW(),
+  last_used_at  TIMESTAMPTZ DEFAULT NOW()
+);
 ```
 
 ---
@@ -339,8 +377,9 @@ ALTER TABLE inventory ALTER COLUMN to_branch_id   DROP NOT NULL;
 | **Branch visibility** | Products only show on mobile if `branch_stock.quantity > 0` for that branch |
 | **VAT** | 12% VAT Inclusive applied on POS walk-in receipts |
 | **Shipping tiers** | Koronadal (FREE if ≥₱500 or ≤3kg) → South Cotabato (₱50 base) → Region XII (₱120 base) → Outside (₱200 base) + weight surcharge |
-| **GCash ref** | Must be exactly 13 digits |
+| **GCash verification** | No manually-typed reference numbers. GCash payments (staff POS and mobile checkout) go through a PayMongo Payment Intent; `payment.ref_no` is only set after PayMongo confirms the intent status is `succeeded`, and `payment.status` is set to `paid` at that point |
 | **Order status flow** | pending → processing → out_for_delivery → completed (customer marks received) or cancelled |
 | **OTP expiry** | Mobile: 5 minutes, Web: 15 minutes |
+| **Web login MFA** | An unrecognized browser (no matching `mfa_device` row) must verify a 6-digit email code before login completes; once verified, that specific browser is trusted indefinitely via the `tefc_mfa_token` cookie |
 | **Stock deduction** | Deducted from `branch_stock` of the branch the order was placed from |
 | **PO stock received** | Admin selects which branch receives the stock; updates `branch_stock` |

@@ -3,6 +3,7 @@ import {
   View, Image, Text, StyleSheet, Animated,
 } from 'react-native';
 import { COLORS, APP_NAME, APP_SUBTITLE } from '../utils/constants';
+import { version as APP_VERSION } from '../../package.json';
 
 export default function SplashScreen({ navigation }) {
   const fadeAnim  = new Animated.Value(0);
@@ -50,6 +51,7 @@ export default function SplashScreen({ navigation }) {
         <Text style={styles.footerText}>
           © 2026 Triple E & Fiel Collins General Merchandise
         </Text>
+        <Text style={styles.versionText}>v{APP_VERSION}</Text>
       </Animated.View>
     </View>
   );
@@ -96,5 +98,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color:    COLORS.grayLight,
     opacity:  0.6,
+  },
+  versionText: {
+    fontSize:  10,
+    color:     COLORS.grayLight,
+    opacity:   0.5,
+    marginTop: 4,
+    textAlign: 'center',
   },
 });
