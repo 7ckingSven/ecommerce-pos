@@ -63,7 +63,9 @@ html, body {
   font-family: 'Sora', sans-serif;
   background-color: var(--surface);
   color: var(--text-primary);
-  overflow-x: hidden;
+  /* Scrolling is handled by .page-scroll below, not by html/body —
+     see the PAGE SCROLL WRAPPER section for why. */
+  overflow: hidden;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -1054,8 +1056,40 @@ html {
   scroll-padding-top: 66px;
 }
 
-body {
+/* ============================================================
+   PAGE SCROLL WRAPPER
+   ------------------------------------------------------------
+   .navbar is position:fixed, but the browser's own scrollbar is
+   drawn against whatever element actually scrolls (html/body by
+   default), spanning the FULL viewport height — that's why it
+   used to look like it ran straight through the navbar instead
+   of stopping below it.
+
+   Fix: html/body no longer scroll (overflow:hidden above). This
+   wrapper owns scrolling instead, and it's positioned to start
+   right under the navbar, so its scrollbar is also confined to
+   that area and never overlaps the navbar.
+
+   Wrap the hero + footer (everything below the navbar) in
+   <div class="page-scroll">...</div> on any page that uses the
+   fixed .navbar — currently login.html and landing.html.
+   ============================================================ */
+.page-scroll {
+  position: fixed;
+  top: 66px;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  overflow-y: auto;
   overflow-x: hidden;
+}
+
+/* .hero already reserved 66px of top padding to clear the navbar
+   when the whole document scrolled; now .page-scroll does that
+   job, so inside it .hero starts at the wrapper's own top. */
+.page-scroll .hero {
+  padding-top: 0;
+  min-height: calc(100vh - 66px);
 }
 /* ─── Footer Legal Buttons ─── */
 .footer-legal-btn {
