@@ -199,6 +199,7 @@ Stores individual items within each order.
 | `qty` | INT | NOT NULL | Quantity ordered |
 | `price` | DECIMAL(10,2) | NOT NULL | Price at time of order |
 | `selected_options` | JSONB | DEFAULT '{}' | Customer's selected variants: `{"Size":"M","Color":"Blue"}` |
+| `returned_qty` | INT | NOT NULL, DEFAULT 0 | How many units of this line item have been returned so far (via the admin/staff "Process Return" action on a `completed` order). Capped at `qty` — the return endpoint rejects any request that would push it past `qty`. |
 
 ---
 
@@ -385,6 +386,11 @@ ALTER TABLE inventory ALTER COLUMN date SET DEFAULT now();
 -- Rows inserted before this migration only ever stored a bare date, so they
 -- display as midnight (00:00:00) once shown with time — the actual time of
 -- those older movements was never recorded and can't be recovered.
+
+-- order_item — track returns per line item (inventory-logging audit found
+-- "Return" was missing as a movement type: only pre-fulfillment Cancel
+-- existed before)
+ALTER TABLE order_item ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DEFAULT 0;
 ```
 
 ---
@@ -404,3 +410,5 @@ ALTER TABLE inventory ALTER COLUMN date SET DEFAULT now();
 | **PO stock received** | Admin selects which branch(es) receive the stock per item (`po_item.received_quantity` tracks the cumulative total across batches); updates `branch_stock`, `variant_stock`, and logs an `inventory` row per branch distributed to |
 | **Partial PO receiving** | A receive batch can arrive short of what was ordered. Each item's write is isolated, so one item failing to save can't roll back a sibling item that already succeeded. `purchase_order.status` is computed from the actual `received_quantity` totals after the batch (`received` only once every item's running total meets its ordered quantity, otherwise `partially_received`) — never just set blindly to `received`. A receipt is issued for the batch either way, not only on a full receive |
 | **Stock request batching** | Multiple items submitted together in one "Generate Stock Request" action share a `batch_id`; admin reviews and approves/rejects the whole batch as one action unless some items in it were already decided (e.g. a dropped connection left some approved and some pending), in which case only the still-pending ones remain actionable |
+| **Returns (post-completion)** | Separate from Cancel, which only applies before an order ships/completes. Admin/staff can process a return only on a `completed` order, per item, up to `qty - returned_qty` remaining. Restores `branch_stock`/`variant_stock`/`product.quantity` and logs an `inventory` row tagged `Return — Order #...` so Stock Movement History can tell it apart from a Sale or Cancellation. Each item's write is isolated (same per-item pattern as partial PO receiving) |
+| **product.quantity sync** | This aggregate field is kept in sync with the real `branch_stock` total on every stock-changing action — sale, cancel, return, and manual restock/transfer/adjustment (transfers are net-zero across branches, so `product.quantity` isn't touched for those) |

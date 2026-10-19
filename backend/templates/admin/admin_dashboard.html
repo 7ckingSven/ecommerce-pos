@@ -598,6 +598,14 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
           Create PO
         </button>
+        <button class="btn btn-outline-green" onclick="printPOList()" title="Print the currently-filtered Purchase Orders list">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Print
+        </button>
+        <button class="btn btn-outline-green" onclick="exportPOListExcel()" title="Export the currently-filtered Purchase Orders list">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Export
+        </button>
       </div>
       <div class="card">
         <div class="table-wrap">
@@ -781,6 +789,42 @@
             </div>
           </div>
         </div>
+      </div>
+
+      <!-- Stock Movement History — Feature #5: surfaced here so the Sales
+           Report shows not just revenue but every stock-changing movement
+           (sales, cancellations, returns, PO receiving, transfers, manual
+           adjustments), filterable by the same date/branch filters above. -->
+      <div class="card" style="margin-top:16px;">
+        <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;">
+          <h3 class="card-title">Stock Movement History</h3>
+          <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+            <select class="filter-select" id="stockMovementTypeFilter" onchange="filterStockMovementType(this.value)" style="font-size:12px;">
+              <option value="all">All Movement Types</option>
+              <option value="sale">Sales</option>
+              <option value="cancellation">Cancellations</option>
+              <option value="return">Returns</option>
+              <option value="po_receiving">PO Receiving</option>
+              <option value="transfer">Transfers</option>
+              <option value="manual_adjustment">Manual Adjustments</option>
+            </select>
+            <button class="btn btn-outline-green" onclick="printStockMovementHistory()" style="font-size:12px;padding:6px 12px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+              Print
+            </button>
+            <button class="btn btn-outline-green" onclick="exportStockMovementExcel()" style="font-size:12px;padding:6px 12px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+              Export
+            </button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead><tr><th>Date/Time</th><th>Product</th><th>Type</th><th>Branch</th><th>Qty</th><th>Before → After</th><th>Note</th></tr></thead>
+            <tbody id="stockMovementReportBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+        <div id="stockMovementReportPagination" style="padding:0 1rem;"></div>
       </div>
     </section>
 

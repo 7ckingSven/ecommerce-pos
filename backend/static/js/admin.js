@@ -3017,10 +3017,105 @@ function renderOrders(orders) {
             <button class="btn-icon" onclick="viewOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
+            ${o.status === 'completed' ? `
+            <button class="btn-icon" onclick="openProcessReturn(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Process Return">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
+            </button>` : ''}
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
   renderPager('ordersPagination', orders.length, ordersPage, 'changeOrdersPage');
+}
+
+// ─── Process Return (completed orders only) ───────────
+// Panelist-requested movement type, separate from Cancel: a return after the
+// order already completed. Lets admin pick a qty per item (capped to what's
+// left after any earlier partial return) + a reason, then posts to the
+// dedicated /return endpoint, which restores stock and tags the inventory
+// log 'Return' so Stock Movement History can tell it apart from a Sale.
+function openProcessReturn(order) {
+  const items = (order.order_item || []).filter(i => (i.qty - (i.returned_qty || 0)) > 0);
+
+  if (!items.length) {
+    showToast('All items on this order have already been fully returned.', 'error');
+    return;
+  }
+
+  const rowsHtml = items.map(i => {
+    const remaining = i.qty - (i.returned_qty || 0);
+    const opts = i.selected_options && Object.keys(i.selected_options).length
+      ? Object.entries(i.selected_options).map(([k, v]) => `${k}: ${v}`).join(', ')
+      : '';
+    return `
+      <div style="display:grid;grid-template-columns:1fr 90px;gap:10px;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);"
+           data-return-row data-order-item-id="${i.order_item_id}" data-max="${remaining}">
+        <div>
+          <div style="font-size:13px;font-weight:600;">${i.product?.product_name || '—'}</div>
+          <div style="font-size:11px;color:var(--text-muted);">${opts ? opts + ' · ' : ''}Ordered ${i.qty}${i.returned_qty ? `, already returned ${i.returned_qty}` : ''} · ${remaining} returnable</div>
+        </div>
+        <input type="number" class="form-input" min="0" max="${remaining}" value="0"
+               style="text-align:center;" data-return-qty
+               oninput="this.value = Math.max(0, Math.min(${remaining}, Number(this.value) || 0))"/>
+      </div>`;
+  }).join('');
+
+  showModal(`
+    <div style="padding:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Process Return</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">Order #${shortId(order.order_id)}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">SELECT QUANTITY TO RETURN</div>
+      <div id="returnItemsWrap">${rowsHtml}</div>
+      <div style="margin-top:12px;">
+        <label class="form-label">Reason (optional)</label>
+        <textarea id="returnReasonInput" class="form-input" rows="2" placeholder="e.g. defective item, wrong size exchanged"></textarea>
+      </div>
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1.25rem;">
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-solid-green" onclick="submitProcessReturn('${order.order_id}')">Confirm Return</button>
+      </div>
+    </div>
+  `);
+}
+
+async function submitProcessReturn(orderId) {
+  const rows = document.querySelectorAll('#returnItemsWrap [data-return-row]');
+  const items = [];
+  rows.forEach(row => {
+    const qty = Number(row.querySelector('[data-return-qty]').value || 0);
+    if (qty > 0) {
+      items.push({ order_item_id: row.getAttribute('data-order-item-id'), qty });
+    }
+  });
+
+  if (!items.length) {
+    showToast('Enter a quantity for at least one item.', 'error');
+    return;
+  }
+
+  const reason = (document.getElementById('returnReasonInput')?.value || '').trim();
+
+  try {
+    const res = await fetch(`/api/admin/orders/${orderId}/return`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items, reason }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(res.status === 207 ? 'Return partially processed — check items for errors.' : 'Return processed.');
+      closeModal();
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to process return.', 'error');
+    }
+  } catch (e) {
+    showToast('Error processing return.', 'error');
+  }
 }
 
 async function updateOrderStatus(id, status) {
@@ -3265,7 +3360,10 @@ function applySalesQuickFilter(val) {
     label = new Date(now.getFullYear(), now.getMonth() - 1, 1).toLocaleString('en-PH', { month: 'long', year: 'numeric' });
   } else {
     document.getElementById('salesFilterLabel').textContent = '';
+    currentSalesDateFrom = null;
+    currentSalesDateTo   = null;
     filterSalesOrders(allSalesOrders);
+    refreshStockMovementTable();
     return;
   }
 
@@ -3274,7 +3372,10 @@ function applySalesQuickFilter(val) {
     const d = toUtcDate(o.date || o.created_at) || new Date(0);
     return d >= from && d <= to;
   });
+  currentSalesDateFrom = from;
+  currentSalesDateTo   = to;
   filterSalesOrders(filtered);
+  refreshStockMovementTable();
 }
 
 function applySalesMonthFilter(month) {
@@ -3283,7 +3384,14 @@ function applySalesMonthFilter(month) {
   document.getElementById('salesDateFrom').value    = '';
   document.getElementById('salesDateTo').value      = '';
 
-  if (!month) { document.getElementById('salesFilterLabel').textContent = ''; filterSalesOrders(allSalesOrders); return; }
+  if (!month) {
+    document.getElementById('salesFilterLabel').textContent = '';
+    currentSalesDateFrom = null;
+    currentSalesDateTo   = null;
+    filterSalesOrders(allSalesOrders);
+    refreshStockMovementTable();
+    return;
+  }
 
   const now      = new Date();
   const filtered = allSalesOrders.filter(o => {
@@ -3293,7 +3401,13 @@ function applySalesMonthFilter(month) {
   const monthName = new Date(now.getFullYear(), parseInt(month) - 1, 1)
     .toLocaleString('en-PH', { month: 'long' });
   document.getElementById('salesFilterLabel').textContent = `Showing: ${monthName}`;
+  // Stock Movement History doesn't ignore year the way the order filter
+  // above does — bound it to this month within the current year so a "May"
+  // filter doesn't pull in every May ever logged.
+  currentSalesDateFrom = new Date(now.getFullYear(), parseInt(month) - 1, 1);
+  currentSalesDateTo   = new Date(now.getFullYear(), parseInt(month), 0, 23, 59, 59, 999);
   filterSalesOrders(filtered);
+  refreshStockMovementTable();
 }
 
 function applySalesDateRange() {
@@ -3314,7 +3428,10 @@ function applySalesDateRange() {
   });
   document.getElementById('salesFilterLabel').textContent =
     `Showing: ${from || '—'} to ${to || '—'}`;
+  currentSalesDateFrom = fromDate;
+  currentSalesDateTo   = toDate;
   filterSalesOrders(filtered);
+  refreshStockMovementTable();
 }
 
 let currentSalesBranchFilter = 'all';
@@ -3322,6 +3439,7 @@ let currentSalesBranchFilter = 'all';
 function applySalesBranchFilter(val) {
   currentSalesBranchFilter = val;
   filterSalesOrders(allSalesOrders);
+  refreshStockMovementTable();
 }
 
 function resetSalesFilter() {
@@ -3332,7 +3450,13 @@ function resetSalesFilter() {
   document.getElementById('salesBranchFilter').value  = 'all';
   document.getElementById('salesFilterLabel').textContent = '';
   currentSalesBranchFilter = 'all';
+  currentSalesDateFrom     = null;
+  currentSalesDateTo       = null;
+  currentStockMovementType = 'all';
+  const typeSel = document.getElementById('stockMovementTypeFilter');
+  if (typeSel) typeSel.value = 'all';
   filterSalesOrders(allSalesOrders);
+  refreshStockMovementTable();
 }
 
 
@@ -3773,6 +3897,251 @@ function exportSalesExcel() {
 }
 window.exportSalesExcel = exportSalesExcel;
 
+// ─── Stock Movement History (inside Sales Report) ─────
+// Feature #5: surfaces every stock-changing inventory movement — sales,
+// cancellations, returns, PO receiving, transfers, manual adjustments —
+// below the Sales Report charts, filtered by the same date-range/branch
+// controls used above for the Sales Report itself, plus its own
+// movement-type filter.
+let allStockMovements           = [];
+let _stockMovementFilteredCache = [];
+let stockMovementPage           = 1;
+const STOCK_MOVEMENT_PAGE_SIZE  = 10;
+let currentStockMovementType    = 'all';
+// Kept in sync by whichever Sales Report date filter ran last (quick filter,
+// month filter, date range, or reset), so Stock Movement History always
+// matches the Sales Report's active date range above it.
+let currentSalesDateFrom = null; // Date or null
+let currentSalesDateTo   = null;
+
+const STOCK_MOVEMENT_TYPE_LABELS = {
+  sale:              'Sale',
+  cancellation:      'Cancellation',
+  return:            'Return',
+  po_receiving:      'PO Receiving',
+  transfer:          'Transfer',
+  manual_adjustment: 'Manual Adjustment',
+};
+// Inline colors (not a shared CSS class — admin.css isn't guaranteed to
+// have a matching modifier for these report-only labels).
+const STOCK_MOVEMENT_TYPE_COLORS = {
+  sale:              '#16a34a',
+  cancellation:      '#ef4444',
+  return:            '#f59e0b',
+  po_receiving:      '#3b82f6',
+  transfer:          '#8b5cf6',
+  manual_adjustment: '#6b7280',
+};
+
+// The inventory table doesn't persist a "type" column — every insert site
+// already writes a distinctive note prefix (see DATABASE.md business
+// rules), so classify from that, falling back to from/to branch presence
+// to tell a transfer apart from a plain restock/adjustment.
+function classifyStockMovement(m) {
+  const note = (m.note || '').toLowerCase();
+  if (note.startsWith('sale'))        return 'sale';
+  if (note.includes('cancel'))        return 'cancellation';
+  if (note.startsWith('return'))      return 'return';
+  if (note.startsWith('po received')) return 'po_receiving';
+  if (m.from_branch_id && m.to_branch_id) return 'transfer';
+  return 'manual_adjustment';
+}
+
+function movementDateStr(raw) {
+  if (!raw) return '—';
+  const d = new Date(raw);
+  if (isNaN(d.getTime())) return '—';
+  const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+  let h = d.getHours();
+  const ampm = h >= 12 ? 'PM' : 'AM';
+  h = h % 12 || 12;
+  const mins = String(d.getMinutes()).padStart(2, '0');
+  return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} · ${h}:${mins} ${ampm}`;
+}
+
+function movementRowCells(m) {
+  const type      = classifyStockMovement(m);
+  const label     = STOCK_MOVEMENT_TYPE_LABELS[type] || type;
+  const typeColor = STOCK_MOVEMENT_TYPE_COLORS[type] || '#6b7280';
+  const qty       = Number(m.quantity_added || 0);
+  const branchObj = Array.isArray(m.to_branch) ? m.to_branch[0]
+    : (m.to_branch || (Array.isArray(m.from_branch) ? m.from_branch[0] : m.from_branch));
+  const branchName = branchObj?.branch_name
+    || allBranches.find(b => b.branch_id === (m.to_branch_id || m.from_branch_id))?.branch_name
+    || '—';
+  return {
+    date:      movementDateStr(m.date),
+    product:   m.product?.product_name || '—',
+    type:      label,
+    typeColor,
+    branch:    branchName,
+    qty,
+    before:    m.quantity_before ?? '—',
+    after:     m.quantity_after  ?? '—',
+    note:      m.note || '—',
+  };
+}
+
+function filterStockMovementType(val) {
+  currentStockMovementType = val;
+  stockMovementPage = 1;
+  refreshStockMovementTable();
+}
+window.filterStockMovementType = filterStockMovementType;
+
+function refreshStockMovementTable() {
+  let movements = allStockMovements;
+
+  if (currentSalesDateFrom || currentSalesDateTo) {
+    movements = movements.filter(m => {
+      const d = toUtcDate(m.date) || new Date(0);
+      if (currentSalesDateFrom && d < currentSalesDateFrom) return false;
+      if (currentSalesDateTo   && d > currentSalesDateTo)   return false;
+      return true;
+    });
+  }
+  if (currentSalesBranchFilter && currentSalesBranchFilter !== 'all') {
+    movements = movements.filter(m => m.to_branch_id === currentSalesBranchFilter || m.from_branch_id === currentSalesBranchFilter);
+  }
+  if (currentStockMovementType !== 'all') {
+    movements = movements.filter(m => classifyStockMovement(m) === currentStockMovementType);
+  }
+
+  movements = [...movements].sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+  _stockMovementFilteredCache = movements;
+  stockMovementPage = 1;
+  renderStockMovementTable(movements);
+}
+
+function changeStockMovementPage(p) {
+  stockMovementPage = p;
+  renderStockMovementTable(_stockMovementFilteredCache);
+}
+window.changeStockMovementPage = changeStockMovementPage;
+
+function renderStockMovementTable(movements) {
+  const tbody = document.getElementById('stockMovementReportBody');
+  if (!tbody) return;
+
+  const start = (stockMovementPage - 1) * STOCK_MOVEMENT_PAGE_SIZE;
+  const paged = movements.slice(start, start + STOCK_MOVEMENT_PAGE_SIZE);
+
+  tbody.innerHTML = paged.length ? paged.map(m => {
+    const r = movementRowCells(m);
+    const qtyColor = r.qty > 0 ? '#16a34a' : (r.qty < 0 ? '#ef4444' : 'var(--text-muted)');
+    return `
+      <tr>
+        <td style="font-size:12px;">${r.date}</td>
+        <td>${r.product}</td>
+        <td><span style="background:${r.typeColor}1a;color:${r.typeColor};border-radius:4px;padding:2px 8px;font-size:11px;font-weight:600;">${r.type}</span></td>
+        <td style="font-size:12px;">${r.branch}</td>
+        <td style="font-weight:700;color:${qtyColor};">${r.qty > 0 ? '+' : ''}${r.qty}</td>
+        <td style="font-size:12px;color:var(--text-muted);">${r.before} → ${r.after}</td>
+        <td style="font-size:12px;color:var(--text-muted);max-width:260px;">${r.note}</td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="7" class="table-empty">No stock movements for this filter</td></tr>';
+
+  renderPagerCustom('stockMovementReportPagination', movements.length, stockMovementPage, STOCK_MOVEMENT_PAGE_SIZE, 'changeStockMovementPage');
+}
+
+function exportStockMovementExcel() {
+  if (typeof XLSX === 'undefined') {
+    alert('Excel library not loaded. Please refresh and try again.'); return;
+  }
+  // Exports the full currently-filtered set (not just the visible page) —
+  // read from the cache refreshStockMovementTable() just built, same
+  // filters as what's on screen.
+  const rows = [['Date/Time', 'Product', 'Type', 'Branch', 'Qty', 'Before', 'After', 'Note']];
+  _stockMovementFilteredCache.forEach(m => {
+    const r = movementRowCells(m);
+    rows.push([r.date, r.product, r.type, r.branch, r.qty, r.before, r.after, r.note]);
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Stock Movements');
+  XLSX.writeFile(wb, `TEFC_Stock_Movements_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+window.exportStockMovementExcel = exportStockMovementExcel;
+
+// Print version of the Stock Movement History table — same pattern as
+// printSalesReport()/printPOList(), reading the full currently-filtered set
+// (date range + branch + movement type) from the cache
+// refreshStockMovementTable() just built, not just the visible page.
+function printStockMovementHistory() {
+  const filterLabel = document.getElementById('salesFilterLabel')?.textContent || 'All Time';
+  const branchSel   = document.getElementById('salesBranchFilter');
+  const branchLabel = branchSel?.selectedOptions[0]?.text || 'All Branches';
+  const typeSel     = document.getElementById('stockMovementTypeFilter');
+  const typeLabel   = typeSel?.selectedOptions[0]?.text || 'All Movement Types';
+  const now = new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  const rowsHtml = _stockMovementFilteredCache.length ? _stockMovementFilteredCache.map(m => {
+    const r = movementRowCells(m);
+    return `
+      <tr>
+        <td>${r.date}</td>
+        <td>${r.product}</td>
+        <td>${r.type}</td>
+        <td>${r.branch}</td>
+        <td>${r.qty > 0 ? '+' : ''}${r.qty}</td>
+        <td>${r.before} → ${r.after}</td>
+        <td>${r.note}</td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="7" style="text-align:center;color:#9ca3af;">No stock movements for this filter</td></tr>';
+
+  const printWin = window.open('', '_blank', 'width=1000,height=700');
+  printWin.document.write(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Stock Movement History — TEFC E-Commerce</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; padding: 32px; background: #fff; }
+    .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #16a34a; padding-bottom: 16px; }
+    .header h1 { font-size: 22px; font-weight: 800; color: #14532d; }
+    .header h2 { font-size: 14px; font-weight: 600; color: #166534; margin-top: 4px; }
+    .header p  { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .badge-green { background: #dcfce7; color: #14532d; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700; margin: 0 3px; }
+    table { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+    th { background: #14532d; color: #fff; padding: 7px 10px; text-align: left; font-size: 11px; }
+    td { padding: 6px 10px; border-bottom: 1px solid #f0fdf4; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    .footer { margin-top: 24px; text-align: center; font-size: 11px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+    @media print { body { padding: 16px; } button { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>TEFC E-Commerce</h1>
+    <h2>Triple E &amp; Fiel Collince General Merchandise</h2>
+    <p>STOCK MOVEMENT HISTORY &nbsp;
+      <span class="badge-green">${filterLabel}</span>
+      <span class="badge-green">${branchLabel}</span>
+      <span class="badge-green">${typeLabel}</span>
+    </p>
+    <p style="margin-top:6px;">Generated: ${now}</p>
+  </div>
+  <table>
+    <thead><tr><th>Date/Time</th><th>Product</th><th>Type</th><th>Branch</th><th>Qty</th><th>Before → After</th><th>Note</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="footer">
+    <p>Triple E &amp; Fiel Collince General Merchandise &mdash; TEFC E-Commerce &amp; POS System</p>
+    <p style="margin-top:8px;">
+      <button onclick="window.print()" style="background:#16a34a;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;">🖨️ Print</button>
+      <button onclick="window.close()" style="background:#f3f4f6;color:#111;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;">✕ Close</button>
+    </p>
+  </div>
+</body>
+</html>
+  `);
+  printWin.document.close();
+  printWin.focus();
+  setTimeout(() => printWin.print(), 500);
+}
+window.printStockMovementHistory = printStockMovementHistory;
+
 async function loadSales() {
   // ── Skeleton ──
   skStats(['salesTotal','salesOnline','salesWalkin','salesCustomers']);
@@ -3782,13 +4151,16 @@ async function loadSales() {
   skTable('topProductsBody',      ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
   skTable('leastProductsBody',    ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
   // ─────────────
+  skTable('stockMovementReportBody', ['sk-cell-md','sk-cell-full','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-full'], 5);
   try {
-    const [orders, customers] = await Promise.all([
+    const [orders, customers, movements] = await Promise.all([
       fetch('/api/admin/orders?limit=500').then(r => r.json()),
       fetch('/api/admin/customers').then(r => r.json()),
+      fetch('/api/admin/inventory').then(r => r.json()),
     ]);
 
-    allSalesOrders = orders;
+    allSalesOrders    = orders;
+    allStockMovements = Array.isArray(movements) ? movements : [];
     document.getElementById('salesCustomers').textContent = customers.length;
 
     // Populate branch filter dropdown from allBranches
@@ -3799,8 +4171,15 @@ async function loadSales() {
       branchSel.value = currentSalesBranchFilter;
     }
 
-    // Default: show all completed orders
+    // Default: show all completed orders / all movement types, no date range
+    currentSalesDateFrom     = null;
+    currentSalesDateTo       = null;
+    currentStockMovementType = 'all';
+    const typeSel = document.getElementById('stockMovementTypeFilter');
+    if (typeSel) typeSel.value = 'all';
+
     filterSalesOrders(allSalesOrders);
+    refreshStockMovementTable();
 
   } catch (e) { console.error('Sales error:', e); }
 }
@@ -4866,6 +5245,108 @@ function renderPOs(pos) {
     : '<tr><td colspan="7" class="table-empty">No purchase orders yet</td></tr>';
 }
 
+// Feature #5 — "PO Orders report": a Print/Export for the Purchase Orders
+// list itself (the linked-inventory-entries half of that same feature is
+// in openPODetail()/loadPOLinkedInventory() above). Exports the full
+// currently-filtered list (by poStatusFilterVal), not just the visible page.
+function exportPOListExcel() {
+  if (typeof XLSX === 'undefined') {
+    alert('Excel library not loaded. Please refresh and try again.'); return;
+  }
+  const pos  = applyPOStatusFilter(allPOs);
+  const rows = [['PO Number', 'Supplier', 'Items', 'Total Cost', 'Status', 'Created']];
+  pos.forEach(po => {
+    const items = po.po_item || [];
+    const total = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
+    rows.push([
+      po.po_number || '—',
+      po.supplier || '—',
+      items.length,
+      Number(total).toFixed(2),
+      (po.status || '').replace(/_/g, ' '),
+      po.created_at ? toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—',
+    ]);
+  });
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.aoa_to_sheet(rows), 'Purchase Orders');
+  XLSX.writeFile(wb, `TEFC_Purchase_Orders_${new Date().toISOString().slice(0,10)}.xlsx`);
+}
+window.exportPOListExcel = exportPOListExcel;
+
+// Print version of the Purchase Orders list — same new-window/print-button
+// pattern as printSalesReport(), same full currently-filtered set (by
+// poStatusFilterVal) that exportPOListExcel() uses, not just the visible page.
+function printPOList() {
+  const pos        = applyPOStatusFilter(allPOs);
+  const statusLabel = poStatusFilterVal
+    ? (poStatusFilterVal.replace(/_/g, ' '))
+    : 'All Status';
+  const now = new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  const rowsHtml = pos.length ? pos.map(po => {
+    const items = po.po_item || [];
+    const total = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
+    return `
+      <tr>
+        <td>${po.po_number || '—'}</td>
+        <td>${po.supplier || '—'}</td>
+        <td>${items.length}</td>
+        <td>${peso(total)}</td>
+        <td>${(po.status || '').replace(/_/g, ' ')}</td>
+        <td>${po.created_at ? toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
+      </tr>`;
+  }).join('') : '<tr><td colspan="6" style="text-align:center;color:#9ca3af;">No purchase orders</td></tr>';
+
+  const printWin = window.open('', '_blank', 'width=900,height=700');
+  printWin.document.write(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Purchase Orders — TEFC E-Commerce</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 13px; color: #111; padding: 32px; background: #fff; }
+    .header { text-align: center; margin-bottom: 24px; border-bottom: 2px solid #16a34a; padding-bottom: 16px; }
+    .header h1 { font-size: 22px; font-weight: 800; color: #14532d; }
+    .header h2 { font-size: 14px; font-weight: 600; color: #166534; margin-top: 4px; }
+    .header p  { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .badge-green { background: #dcfce7; color: #14532d; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th { background: #14532d; color: #fff; padding: 7px 10px; text-align: left; font-size: 11px; text-transform: capitalize; }
+    td { padding: 6px 10px; border-bottom: 1px solid #f0fdf4; text-transform: capitalize; }
+    tr:nth-child(even) td { background: #f9fafb; }
+    .footer { margin-top: 24px; text-align: center; font-size: 11px; color: #9ca3af; border-top: 1px solid #e5e7eb; padding-top: 12px; }
+    @media print { body { padding: 16px; } button { display: none; } }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>TEFC E-Commerce</h1>
+    <h2>Triple E &amp; Fiel Collince General Merchandise</h2>
+    <p>PURCHASE ORDERS &nbsp;|&nbsp; <span class="badge-green">${statusLabel}</span></p>
+    <p style="margin-top:6px;">Generated: ${now}</p>
+  </div>
+  <table>
+    <thead><tr><th>PO Number</th><th>Supplier</th><th>Items</th><th>Total Cost</th><th>Status</th><th>Created</th></tr></thead>
+    <tbody>${rowsHtml}</tbody>
+  </table>
+  <div class="footer">
+    <p>Triple E &amp; Fiel Collince General Merchandise &mdash; TEFC E-Commerce &amp; POS System</p>
+    <p style="margin-top:8px;">
+      <button onclick="window.print()" style="background:#16a34a;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;">🖨️ Print</button>
+      <button onclick="window.close()" style="background:#f3f4f6;color:#111;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;">✕ Close</button>
+    </p>
+  </div>
+</body>
+</html>
+  `);
+  printWin.document.close();
+  printWin.focus();
+  setTimeout(() => printWin.print(), 500);
+}
+window.printPOList = printPOList;
+
 // ─── Review Stock Request ─────────────────────────────
 
 // request_ids covered by the currently-open review modal — one id for a
@@ -5486,6 +5967,49 @@ function printPOReceipt() {
 
 // ─── PO Detail Modal ──────────────────────────────────
 
+// Linked inventory entries for one PO (Feature #5 — "PO Orders report"
+// should show the inventory log entries tied to that PO). Reuses the
+// Sales Report's stock-movement cache when it's already loaded, otherwise
+// fetches fresh — either way, matched by po_number appearing in the note.
+async function loadPOLinkedInventory(po) {
+  const wrap = document.getElementById('poLinkedInventoryWrap');
+  if (!wrap) return;
+  try {
+    const movements = allStockMovements.length
+      ? allStockMovements
+      : await fetch('/api/admin/inventory').then(r => r.json());
+    const linked = (movements || [])
+      .filter(m => (m.note || '').includes(po.po_number))
+      .sort((a, b) => new Date(b.date || 0) - new Date(a.date || 0));
+
+    if (!linked.length) {
+      wrap.innerHTML = `<div style="font-size:12px;color:var(--text-muted);padding:4px 0;">No stock movements logged for this PO yet.</div>`;
+      return;
+    }
+
+    wrap.innerHTML = `
+      <table class="data-table" style="font-size:12px;">
+        <thead><tr><th>Date/Time</th><th>Product</th><th>Branch</th><th>Qty Received</th><th>Before → After</th></tr></thead>
+        <tbody>
+          ${linked.map(m => {
+            const r = movementRowCells(m);
+            return `
+              <tr>
+                <td>${r.date}</td>
+                <td>${r.product}</td>
+                <td>${r.branch}</td>
+                <td style="color:#16a34a;font-weight:600;">+${r.qty}</td>
+                <td style="color:var(--text-muted);">${r.before} → ${r.after}</td>
+              </tr>`;
+          }).join('')}
+        </tbody>
+      </table>`;
+  } catch (e) {
+    console.error('PO linked inventory error:', e);
+    wrap.innerHTML = `<div style="font-size:12px;color:#ef4444;padding:4px 0;">Could not load linked inventory entries.</div>`;
+  }
+}
+
 function openPODetail(poId) {
   const po = allPOs.find(p => p.po_id === poId);
   if (!po) return;
@@ -5526,7 +6050,18 @@ function openPODetail(poId) {
           <td>${peso(total)}</td>
         </tr>
       </tbody>
-    </table>`;
+    </table>
+    <div>
+      <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Linked Inventory Entries</div>
+      <div id="poLinkedInventoryWrap" style="font-size:12px;color:var(--text-muted);padding:4px 0;">Loading...</div>
+    </div>`;
+
+  // Fetched separately (not part of the PO payload itself) — these are the
+  // actual inventory rows this PO's receiving wrote, matched by po_number
+  // appearing in each row's note (see _po_add_branch_stock's 'PO received —
+  // {po_number}' tag). Lets the admin see exactly what stock moved from
+  // this PO without switching to Inventory or the Sales Report.
+  loadPOLinkedInventory(po);
 
   // Action buttons based on status
   const footer = document.getElementById('poDetailFooter');
