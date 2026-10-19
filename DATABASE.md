@@ -150,20 +150,21 @@ Stores discount records with optional date ranges.
 ---
 
 ### 8. `inventory`
-Logs all stock movement history (restocks, transfers, adjustments).
+Logs all stock movement history (restocks, transfers, adjustments, PO receives, sales deductions, cancellations).
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | **PK**, DEFAULT uuid_generate_v4() | Unique record identifier |
 | `product_id` | UUID | **FK** → product.product_id | Product |
-| `staff_id` | UUID | **FK** → staff.staff_id | Staff who made the movement |
+| `staff_id` | UUID | **FK** → staff.staff_id, NULLABLE | Staff who made the movement (null for system-driven entries, e.g. a cancelled online order) |
 | `from_branch_id` | UUID | **FK** → branch.branch_id, NULLABLE | Source branch (for transfers) |
 | `to_branch_id` | UUID | **FK** → branch.branch_id, NULLABLE | Destination branch |
 | `quantity_added` | INT | | Units added (positive) or deducted (negative) |
 | `quantity_before` | INT | | Stock before the movement |
 | `quantity_after` | INT | | Stock after the movement |
-| `date` | DATE | | Date of movement |
-| `note` | TEXT | | Reason (e.g. "loss", "stolen", "PO received") |
+| `variant_options` | JSONB | NULLABLE | Which variant this movement affected, e.g. `{"Size":"M","Color":"Blue"}` — null for a non-variant product |
+| `date` | **TIMESTAMPTZ** | DEFAULT now() | **Changed from `DATE` to `TIMESTAMPTZ`** so the Stock Movement History table can show both the date and time of a movement, not just the date (per panelist feedback). Rows logged before this migration only ever stored a bare date and display as midnight (`12:00 AM`) — there's no way to recover their real time since it was never captured |
+| `note` | TEXT | | Reason (e.g. "loss", "stolen", "PO received — PO-202608-001", "Sale — Order #ABC123", "[CANCELLED] Order #ABC123 — Cancelled by customer") |
 | `created_at` | TIMESTAMP | DEFAULT now() | Timestamp |
 
 ---
@@ -236,7 +237,7 @@ Stores active cart items for customers.
 ---
 
 ### 13. `stock_request`
-Staff submits stock requests to admin when inventory is low.
+Staff submits stock requests to admin when inventory is low (per-variant, auto-filled from critical/out-of-stock levels in the Inventory module).
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -244,9 +245,13 @@ Staff submits stock requests to admin when inventory is low.
 | `product_id` | UUID | **FK** → product.product_id | Requested product |
 | `staff_id` | UUID | **FK** → staff.staff_id | Staff who submitted |
 | `branch_id` | UUID | **FK** → branch.branch_id | Branch requesting stock |
-| `quantity_requested` | INT | NOT NULL | Units requested |
+| `quantity_needed` | INT | NOT NULL | Units requested |
+| `variant_options` | JSONB | NULLABLE | Which variant is low, e.g. `{"Color":"Black","Size":"42"}` — null for a non-variant product |
+| `batch_id` | UUID | NULLABLE | Shared by every item a staff member submits together in one "Generate Stock Request" batch (one id generated client-side per submission, attached to each item's row). Lets admin's Stock Requests table group them into a single row with one "Review" action that batch-approves/rejects the whole submission at once. Null for requests submitted before this column existed, or a genuine single-item request — those just render as a group of one, same as before |
 | `status` | VARCHAR | DEFAULT 'pending' | `pending`, `approved`, `rejected` |
-| `note` | TEXT | | Additional notes |
+| `note` | TEXT | | Staff's note on the request |
+| `admin_note` | TEXT | NULLABLE | Admin's note when approving/rejecting |
+| `converted_to_po` | BOOLEAN | DEFAULT false | Set true (best-effort) once an approved request has been pulled into a Create PO draft via "Use Approved Requests", so it isn't shown as available to pull in again |
 | `created_at` | TIMESTAMP | DEFAULT now() | Date submitted |
 
 ---
@@ -366,6 +371,20 @@ CREATE TABLE IF NOT EXISTS mfa_device (
   created_at    TIMESTAMPTZ DEFAULT NOW(),
   last_used_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- stock_request — batch grouping for multi-item "Generate Stock Request"
+-- submissions (Inventory → auto-fill stock requests revision)
+ALTER TABLE stock_request ADD COLUMN IF NOT EXISTS batch_id UUID;
+-- Nullable, no default: existing rows stay NULL and render as their own
+-- single-item group, identical to prior behavior.
+
+-- inventory — date column widened to capture time, not just date
+-- (panelist-requested revision: Stock Movement History must show both)
+ALTER TABLE inventory ALTER COLUMN date TYPE TIMESTAMPTZ USING date::timestamptz;
+ALTER TABLE inventory ALTER COLUMN date SET DEFAULT now();
+-- Rows inserted before this migration only ever stored a bare date, so they
+-- display as midnight (00:00:00) once shown with time — the actual time of
+-- those older movements was never recorded and can't be recovered.
 ```
 
 ---
@@ -382,4 +401,6 @@ CREATE TABLE IF NOT EXISTS mfa_device (
 | **OTP expiry** | Mobile: 5 minutes, Web: 15 minutes |
 | **Web login MFA** | An unrecognized browser (no matching `mfa_device` row) must verify a 6-digit email code before login completes; once verified, that specific browser is trusted indefinitely via the `tefc_mfa_token` cookie |
 | **Stock deduction** | Deducted from `branch_stock` of the branch the order was placed from |
-| **PO stock received** | Admin selects which branch receives the stock; updates `branch_stock` |
+| **PO stock received** | Admin selects which branch(es) receive the stock per item (`po_item.received_quantity` tracks the cumulative total across batches); updates `branch_stock`, `variant_stock`, and logs an `inventory` row per branch distributed to |
+| **Partial PO receiving** | A receive batch can arrive short of what was ordered. Each item's write is isolated, so one item failing to save can't roll back a sibling item that already succeeded. `purchase_order.status` is computed from the actual `received_quantity` totals after the batch (`received` only once every item's running total meets its ordered quantity, otherwise `partially_received`) — never just set blindly to `received`. A receipt is issued for the batch either way, not only on a full receive |
+| **Stock request batching** | Multiple items submitted together in one "Generate Stock Request" action share a `batch_id`; admin reviews and approves/rejects the whole batch as one action unless some items in it were already decided (e.g. a dropped connection left some approved and some pending), in which case only the still-pending ones remain actionable |

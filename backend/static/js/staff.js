@@ -360,6 +360,20 @@ var _loadedSections = new Set();
 function invalidateSection(name) { _loadedSections.delete(name); }
 function invalidateAll() { _loadedSections.clear(); }
 
+// Client-side id used to tag several stock-request items as one submitted
+// batch (see submitRequest()). Prefers crypto.randomUUID(); falls back to a
+// plain v4-shaped generator since randomUUID is only guaranteed in secure
+// contexts (https or localhost) and this may run over plain http on a LAN.
+function genUUID() {
+  if (window.crypto && typeof crypto.randomUUID === 'function') {
+    try { return crypto.randomUUID(); } catch (e) { /* fall through */ }
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    const r = Math.random() * 16 | 0;
+    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+}
 
 // ─── Button Loading Helper ────────────────────────────
 function setButtonLoading(btn, loading) {
@@ -2167,6 +2181,11 @@ function renderInvProducts(products) {
             <button class="btn-icon" onclick="event.stopPropagation();viewStaffProductDetails('${p.product_id}')" title="View Product Details">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
+            ${(level === 'critical' || level === 'out')
+              ? `<button class="btn-icon" onclick="event.stopPropagation();openRequestModalForProduct('${p.product_id}')" title="Generate Stock Request" style="color:#ef4444;">
+                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+                 </button>`
+              : ''}
           </td>
         </tr>
         <tr id="staffVarRow_${p.product_id}" style="display:none;background:var(--surface);">
@@ -3015,6 +3034,21 @@ function renderRequestsPage() {
     ? paged.map(r => {
         const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
         const statusColor  = statusColors[r.status] || 'gray';
+        // Current Stock: when this request was for a specific variant, show
+        // THAT variant's quantity at the branch requested, not the product's
+        // bare (non-variant) quantity — a variant can be critical while the
+        // product's other variants, and its overall total, still look fine.
+        const stockCell = (() => {
+          if (r.variant_options && Object.keys(r.variant_options).length) {
+            const vs = (r.product?.variant_stock || []).find(v =>
+              v.branch_id === r.branch_id && JSON.stringify(v.options) === JSON.stringify(r.variant_options)
+            );
+            if (vs) return `${vs.quantity} units`;
+          }
+          const bs = (r.product?.branch_stock || []).find(b => b.branch_id === r.branch_id);
+          if (bs) return `${bs.quantity} units`;
+          return `${r.product?.quantity ?? '—'} units`;
+        })();
         return `
         <tr>
           <td>
@@ -3023,7 +3057,7 @@ function renderRequestsPage() {
               ? '<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
               : ''}
           </td>
-          <td>${r.product?.quantity ?? '—'} units</td>
+          <td>${stockCell}</td>
           <td>${r.quantity_needed} units</td>
           <td><span class="badge badge--${statusColor}">${r.status}</span></td>
           <td style="font-size:12px;">${r.note || '—'}</td>
@@ -3072,6 +3106,92 @@ async function openRequestModal(btn) {
     setButtonLoading(btn, false);
   }
 }
+
+// Opens the Stock Request modal already filled in for one specific product —
+// the "Generate Stock Request" shortcut from a critical/out-of-stock
+// inventory row, so staff don't have to search for the product again.
+//
+// A product with variants (e.g. Color/Size) can have MANY variant
+// combinations, and several of them can independently be at critical/out
+// level even while others on the same product are fine — the row's overall
+// badge just shows the worst case. So this doesn't stop at one row: it
+// fills in ONE row per critical-or-out variant of this product at the
+// staff's branch, each with its own variant options and current stock
+// already set, so staff only has to type the quantity needed per row.
+// Falls back to a single non-variant row for a product with no variant
+// stock data (or none of its variants currently critical/out).
+async function openRequestModalForProduct(productId) {
+  await openRequestModal();
+  const p = invProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+
+  const levelOf = q => {
+    q = Number(q);
+    if (q === 0) return 'out';
+    if (q > 0 && q <= 5) return 'critical';
+    return 'ok';
+  };
+
+  const criticalVariants = (p.variant_stock || [])
+    .filter(v => (!staffBranchId || v.branch_id === staffBranchId) && levelOf(v.quantity) !== 'ok');
+
+  // openRequestModal() already added one blank row — clear it so we start fresh.
+  document.getElementById('reqItems').innerHTML = '';
+  reqRowCount = 0;
+
+  if (criticalVariants.length) {
+    criticalVariants.forEach(v => fillReqRowForProduct(p, v));
+  } else {
+    fillReqRowForProduct(p, null);
+  }
+
+  _reqUpdateBtn();
+  document.querySelector('#reqItems .req-qty')?.focus();
+}
+window.openRequestModalForProduct = openRequestModalForProduct;
+
+// Adds one new request row and fills it in for `product`, optionally locked
+// to one specific variant (`variantRow`, an entry from product.variant_stock
+// with its own .options and .quantity). Used by openRequestModalForProduct()
+// to pre-fill rows the same way picking a product from the search box would.
+function fillReqRowForProduct(product, variantRow) {
+  addReqItemRow();
+  const rowId = 'reqRow_' + reqRowCount;
+  const row   = document.getElementById(rowId);
+  if (!row) return;
+
+  const hidden   = row.querySelector('input[type="hidden"]');
+  const input    = row.querySelector('input[type="text"]');
+  const clearBtn = row.querySelector('.ac-clear');
+  if (hidden) hidden.value = product.product_id;
+  if (input) {
+    input.value = product.product_name;
+    input.readOnly = true;
+    input.style.background = 'var(--surface)';
+  }
+  if (clearBtn) clearBtn.style.display = 'inline-flex';
+
+  loadReqRowVariantsByProduct(product, rowId);
+
+  if (variantRow && variantRow.options) {
+    row.querySelectorAll('.req-variant-opt').forEach(sel => {
+      const label = sel.dataset.label;
+      if (label && variantRow.options[label] != null) sel.value = variantRow.options[label];
+    });
+  }
+
+  const stockEl = row.querySelector('.req-current-stock');
+  if (stockEl) {
+    if (variantRow) {
+      stockEl.value = `${variantRow.quantity} units`;
+    } else {
+      const branchStock = product.branch_stock?.find(bs => bs.branch_id === staffBranchId);
+      const stock = branchStock ? branchStock.quantity : product.quantity || 0;
+      stockEl.value = `${stock} units`;
+    }
+  }
+}
+window.fillReqRowForProduct = fillReqRowForProduct;
 
 function closeRequestModal() {
   document.getElementById('requestModalOverlay')?.classList.remove('open');
@@ -3322,6 +3442,11 @@ async function submitRequest(e) {
   }
 
   try {
+    // One id shared by every item in this submission — lets admin's Stock
+    // Requests table group them back into a single row/review instead of
+    // treating each product/variant as an unrelated request. Harmless for a
+    // single-item submission (a "batch" of one renders exactly as before).
+    const batchId = genUUID();
     let allOk = true;
     for (const item of items) {
       const res = await fetch('/api/staff/stock-requests', {
@@ -3333,6 +3458,7 @@ async function submitRequest(e) {
           note:            note,
           branch_id:       staffBranchId,
           variant_options: item.variant_options,
+          batch_id:        batchId,
         }),
       });
       if (!res.ok) allOk = false;

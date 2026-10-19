@@ -2195,8 +2195,15 @@ def update_profile():
 def staff_get_stock_requests():
     try:
         staff_id = session.get('staff_id')
+        # variant_stock + branch_stock are pulled in so the request history
+        # can show the CURRENT stock of the actual variant/branch the staff
+        # member requested, instead of the product's bare (non-variant,
+        # non-branch) quantity field.
         res = supabase.table('stock_request').select(
-            '*, product(product_name, quantity), branch(branch_name)'
+            '*, product(product_name, quantity, '
+            'variant_stock(branch_id, options, quantity), '
+            'branch_stock(branch_id, quantity)), '
+            'branch(branch_name)'
         ).eq('staff_id', staff_id).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -2213,6 +2220,12 @@ def staff_create_stock_request():
         note            = data.get('note', '')
         branch_id       = data.get('branch_id')
         variant_options = data.get('variant_options') or None
+        # Shared by every item a staff member submits together in one
+        # "Generate Stock Request" batch (the frontend generates one id and
+        # sends it with each item) — lets admin's Stock Requests table group
+        # them into a single row and approve/reject the whole batch at once.
+        # Absent/None for an older client or a genuine single-item request.
+        batch_id        = data.get('batch_id') or None
 
         if not product_id or quantity_needed <= 0:
             return jsonify({'error': 'Product and quantity are required.'}), 400
@@ -2225,6 +2238,7 @@ def staff_create_stock_request():
             'note':            note,
             'status':          'pending',
             'variant_options': variant_options,
+            'batch_id':        batch_id,
         }).execute()
         return jsonify(res.data[0]), 201
     except Exception as e:
@@ -2235,8 +2249,14 @@ def staff_create_stock_request():
 @admin_required
 def admin_get_stock_requests():
     try:
+        # variant_stock is pulled in alongside branch_stock so the Stock
+        # Requests table/review modal can show the CURRENT stock of the
+        # actual variant requested, not just the branch's aggregate total.
         res = supabase.table('stock_request').select(
-            '*, product(product_name, quantity, branch_stock(branch_id, quantity, branch(branch_name))), staff(fname, lname), branch(branch_name)'
+            '*, product(product_name, quantity, '
+            'branch_stock(branch_id, quantity, branch(branch_name)), '
+            'variant_stock(branch_id, options, quantity)), '
+            'staff(fname, lname), branch(branch_name)'
         ).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -2278,11 +2298,16 @@ def admin_get_purchase_orders():
 @admin_required
 def admin_create_purchase_order():
     try:
-        data     = request.get_json()
-        supplier = data.get('supplier', '').strip()
-        note     = data.get('note', '')
-        items    = data.get('items', [])  # [{product_id, quantity, unit_cost}]
-        staff_id = session.get('staff_id')
+        data              = request.get_json()
+        supplier          = data.get('supplier', '').strip()
+        note              = data.get('note', '')
+        items             = data.get('items', [])  # [{product_id, quantity, unit_cost}]
+        # Approved stock requests this PO was built from (via the admin's
+        # "Use Approved Requests" picker) — best-effort marked converted_to_po
+        # below so they drop off that list and don't get pulled into a
+        # second PO by mistake. Empty/absent for a normally-typed PO.
+        stock_request_ids = data.get('stock_request_ids', []) or []
+        staff_id          = session.get('staff_id')
 
         if not supplier or not items:
             return jsonify({'error': 'Supplier and items are required.'}), 400
@@ -2311,6 +2336,18 @@ def admin_create_purchase_order():
                 'variant_options':   item.get('variant_options') or None,
                 'received_quantity': 0,
             }).execute()
+
+        # Mark any approved stock requests pulled into this PO so they drop
+        # out of the "Use Approved Requests" picker and aren't ordered twice.
+        # Best-effort — a failure here shouldn't undo the PO already created.
+        if stock_request_ids:
+            try:
+                for req_id in stock_request_ids:
+                    supabase.table('stock_request').update(
+                        {'converted_to_po': True}
+                    ).eq('request_id', req_id).execute()
+            except Exception as mark_err:
+                print(f'Stock request conversion-mark warning: {mark_err}')
 
         return jsonify({'message': 'Purchase order created.', 'po_id': po_id, 'po_number': po_num}), 201
     except Exception as e:

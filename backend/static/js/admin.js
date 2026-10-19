@@ -1804,6 +1804,15 @@ function updateBranchStockSummary(products) {
       var expandBtn   = hasVariants
         ? '<span class="inv-expand-btn" style="margin-left:6px;font-size:10px;color:var(--text-muted);cursor:pointer;" onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this)">▶</span>'
         : '';
+      // Critical/out rows get a "Generate PO" shortcut — admin already has
+      // PO-creation authority, so this skips the staff request/approval step
+      // and opens a pre-filled Create PO draft for this product at this
+      // branch directly (one row per critical/out variant, if any).
+      var poActionBtn = (bqLevel === 'critical' || bqLevel === 'out')
+        ? '<button class="btn-icon" onclick="event.stopPropagation();quickCreatePOForBranchProduct(\'' + i.product_id + '\',\'' + branchId + '\');" title="Generate PO">'
+          + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
+          + '</button>'
+        : '';
       return '<tr style="cursor:' + (hasVariants ? 'pointer' : 'default') + ';" '
         + (hasVariants ? 'onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this.querySelector(\'.inv-expand-btn\'))"' : '')
         + '>'
@@ -1812,9 +1821,10 @@ function updateBranchStockSummary(products) {
         + expandBtn + '</div></td>'
         + '<td style="text-align:center;"><span class="branch-stock-qty ' + qtyClass + '">' + i.quantity + '</span>' + variantNote + '</td>'
         + '<td>' + badge + '</td>'
+        + '<td>' + poActionBtn + '</td>'
         + '</tr>'
         + '<tr id="invVarRow_' + i.product_id + '_' + branchId + '" style="display:none;background:var(--surface);">'
-        + '<td colspan="3" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>'
+        + '<td colspan="4" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>'
         + '</tr>';
     }).join('');
 
@@ -1823,7 +1833,7 @@ function updateBranchStockSummary(products) {
       + '<span class="branch-stock-name">' + branch + '</span>'
       + '<span class="branch-stock-count">' + allItems.length + ' products</span></div>'
       + '<table class="data-table" style="margin:0;">'
-      + '<thead><tr><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th></tr></thead>'
+      + '<thead><tr><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th><th>Action</th></tr></thead>'
       + '<tbody>' + rows + '</tbody>'
       + '</table></div>';
   });
@@ -2104,10 +2114,18 @@ function renderInventory(data) {
           <td>${(() => {
             const raw = i.date || null;
             if (!raw) return '—';
-            // i.date is a date-only field (no time) — parse as local date to avoid timezone shift
-            const [y, mo, day] = raw.toString().split('T')[0].split('-').map(Number);
+            // i.date is now a timestamptz — show both date and time (local).
+            // Rows inserted before the DB migration only ever stored a bare
+            // date, so they'll display as midnight — that's expected, the
+            // time was never recorded for those.
+            const d = new Date(raw);
+            if (isNaN(d.getTime())) return '—';
             const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            return `${months[mo - 1]} ${day}, ${y}`;
+            let hours = d.getHours();
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            hours = hours % 12 || 12;
+            const mins = String(d.getMinutes()).padStart(2, '0');
+            return `${months[d.getMonth()]} ${d.getDate()}, ${d.getFullYear()} · ${hours}:${mins} ${ampm}`;
           })()}</td>
           <td style="max-width:200px;font-size:12px;">${i.note || '—'}</td>
         </tr>`;
@@ -2813,12 +2831,17 @@ function updateAdminOrdersBadge(orders) {
 // ─── View Order Items Modal ───────────────────────────
 
 // ─── Generic Modal ────────────────────────────────────
-function showModal(html) {
+function showModal(html, maxWidth) {
   const overlay = document.getElementById('genericModalOverlay');
   const modal   = document.getElementById('genericModal');
   const content = document.getElementById('genericModalContent');
   if (!overlay || !modal || !content) return;
   content.innerHTML  = html;
+  // genericModal is shared by several unrelated popups (Product Details,
+  // the PO Receipt, etc.) — reset to its default 600px each time unless a
+  // caller asks for something wider, so one caller's width doesn't leak
+  // into the next modal that reuses this same element.
+  modal.style.maxWidth = maxWidth || '600px';
   overlay.style.display = 'block';
   modal.style.display   = 'block';
   document.body.style.overflow = 'hidden';
@@ -4689,47 +4712,98 @@ async function loadPurchaseOrders() {
       poBadge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
+    updateApprovedReqBadge();
+
     renderStockRequests(applySRStatusFilter(allStockRequests));
     renderPOs(applyPOStatusFilter(allPOs));
   } catch (e) { console.error('PO error:', e); }
 }
 
+// Current stock for one stock_request row: the SPECIFIC variant's quantity
+// at the requested branch when the request was for a variant, falling back
+// to the branch's aggregate, then the product's bare quantity — a variant
+// can be critical while the product's overall total still looks fine.
+function srCurrentStock(r) {
+  if (r.variant_options && Object.keys(r.variant_options).length) {
+    const vs = (r.product?.variant_stock || []).find(v =>
+      v.branch_id === r.branch_id && JSON.stringify(v.options) === JSON.stringify(r.variant_options)
+    );
+    if (vs) return `${vs.quantity} units`;
+  }
+  const bs = r.product?.branch_stock || [];
+  const branchBs = bs.find(b => b.branch_id === r.branch_id);
+  if (branchBs) return `${branchBs.quantity} units`;
+  const total = bs.reduce((s, b) => s + Number(b.quantity), 0);
+  return total > 0 ? `${total} units` : `${r.product?.quantity ?? 0} units`;
+}
+
 function renderStockRequests(requests) {
   const statusColors = { pending:'yellow', approved:'green', rejected:'red' };
-  // Hierarchy: Pending first, then Rejected, then Approved — and within each
-  // status group, the oldest request shows at the top.
-  const statusOrder = { pending: 0, rejected: 1, approved: 2 };
-  const sorted = [...requests].sort((a, b) => {
-    const statusDiff = (statusOrder[a.status] ?? 99) - (statusOrder[b.status] ?? 99);
-    if (statusDiff !== 0) return statusDiff;
-    return new Date(a.created_at) - new Date(b.created_at); // oldest first
+
+  // Group requests submitted together in one "Generate Stock Request" batch
+  // (shared batch_id) into a single row — mirrors how staff's own request
+  // modal lets them submit several product/variant lines in one action.
+  // A request with no batch_id (older data, or a genuine single-item
+  // request) is simply its own group of one and renders exactly as before.
+  const groupsMap = new Map();
+  requests.forEach(r => {
+    const key = r.batch_id || r.request_id;
+    if (!groupsMap.has(key)) groupsMap.set(key, []);
+    groupsMap.get(key).push(r);
   });
+  const groups = Array.from(groupsMap.values());
+
+  // Hierarchy: Pending first, then Rejected, then Approved — and within each
+  // status group, the oldest request shows at the top. A group's status is
+  // its first item's — every item in a group moves together on approve/reject.
+  const statusOrder = { pending: 0, rejected: 1, approved: 2 };
+  const sorted = groups.sort((a, b) => {
+    const statusDiff = (statusOrder[a[0].status] ?? 99) - (statusOrder[b[0].status] ?? 99);
+    if (statusDiff !== 0) return statusDiff;
+    return new Date(a[0].created_at) - new Date(b[0].created_at); // oldest first
+  });
+
   if (srPage > Math.ceil(sorted.length / SR_PAGE_SIZE)) srPage = 1;
   const paged = sorted.slice((srPage - 1) * SR_PAGE_SIZE, srPage * SR_PAGE_SIZE);
   renderPagerCustom('srPagination', sorted.length, srPage, SR_PAGE_SIZE, 'changeSRPage');
+
   document.getElementById('stockRequestsBody').innerHTML = paged.length
-    ? paged.map(r => `
-        <tr>
-          <td>
-            <strong>${r.product?.product_name || '—'}</strong>
-            ${r.variant_options && Object.keys(r.variant_options).length > 0
-              ? '<div style="font-size:11px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
-              : ''}
-          </td>
+    ? paged.map(group => {
+        const first    = group[0];
+        const groupKey = first.batch_id || first.request_id;
+        const multi    = group.length > 1;
+
+        const productCell = multi
+          ? `<span class="inv-expand-btn" style="margin-right:6px;font-size:11px;color:var(--text-muted);cursor:pointer;" onclick="toggleSRGroupRow('${groupKey}', this)">▶</span><strong>${group.length} items</strong>`
+          : `<strong>${first.product?.product_name || '—'}</strong>
+             ${first.variant_options && Object.keys(first.variant_options).length > 0
+               ? '<div style="font-size:11px;color:var(--text-muted);">' + Object.entries(first.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+               : ''}`;
+
+        const stockCell = multi ? '—' : srCurrentStock(first);
+
+        const qtyCell = multi
+          ? `${group.reduce((s, r) => s + Number(r.quantity_needed || 0), 0)} units total`
+          : `${first.quantity_needed} units`;
+
+        const itemsExpandHtml = multi
+          ? group.map(r => `
+              <div style="display:flex;justify-content:space-between;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;">
+                <span><strong>${r.product?.product_name || '—'}</strong>${r.variant_options && Object.keys(r.variant_options).length ? ' — ' + Object.entries(r.variant_options).map(([k,v]) => `${k}: ${v}`).join(', ') : ''}<div style="font-size:11px;color:var(--text-muted);">Current stock: ${srCurrentStock(r)}</div></span>
+                <span>${r.quantity_needed} units</span>
+              </div>`).join('')
+          : '';
+
+        return `<tr>
+          <td>${productCell}</td>
+          <td>${stockCell}</td>
+          <td>${qtyCell}</td>
+          <td>${first.staff ? `${first.staff.fname} ${first.staff.lname}` : '—'}</td>
+          <td>${first.branch?.branch_name || '—'}</td>
+          <td>${badge(first.status)}</td>
+          <td style="font-size:12px;">${first.note || '—'}</td>
           <td>${(() => {
-            const bs = r.product?.branch_stock || [];
-            const branchBs = bs.find(b => b.branch_id === r.branch_id);
-            if (branchBs) return `${branchBs.quantity} units`;
-            const total = bs.reduce((s, b) => s + Number(b.quantity), 0);
-            return total > 0 ? `${total} units` : `${r.product?.quantity ?? 0} units`;
-          })()}</td>
-          <td>${r.quantity_needed} units</td>
-          <td>${r.staff ? `${r.staff.fname} ${r.staff.lname}` : '—'}</td>
-          <td>${r.branch?.branch_name || '—'}</td>
-          <td>${badge(r.status)}</td>
-          <td style="font-size:12px;">${r.note || '—'}</td>
-          <td>${(() => {
-            const raw = r.created_at;
+            const raw = first.created_at;
             if (!raw) return '—';
             const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
             const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
@@ -4741,13 +4815,28 @@ function renderStockRequests(requests) {
             return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
           })()}</td>
           <td>
-            <button class="btn-icon" onclick="openReviewRequest('${r.request_id}', '${(r.product?.product_name || '').replace(/'/g, "\\'")}', ${r.quantity_needed}, '${r.status}')" title="Review / Change Decision">
+            <button class="btn-icon" onclick="openReviewRequest('${groupKey}')" title="${multi ? 'Review / Batch Approve' : 'Review / Change Decision'}">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
           </td>
-        </tr>`).join('')
+        </tr>
+        <tr id="srGroupRow_${groupKey}" style="display:none;background:var(--surface);">
+          <td colspan="9" style="padding:0;">
+            <div style="padding:8px 16px;display:flex;flex-direction:column;gap:6px;">${itemsExpandHtml}</div>
+          </td>
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="9" class="table-empty">No stock requests yet</td></tr>';
 }
+
+function toggleSRGroupRow(groupKey, btnEl) {
+  const row = document.getElementById('srGroupRow_' + groupKey);
+  if (!row) return;
+  const show = row.style.display === 'none';
+  row.style.display = show ? '' : 'none';
+  if (btnEl) btnEl.textContent = show ? '▼' : '▶';
+}
+window.toggleSRGroupRow = toggleSRGroupRow;
 
 function renderPOs(pos) {
   const statusColors = { draft:'gray', ordered:'blue', received:'green', cancelled:'red' };
@@ -4779,18 +4868,85 @@ function renderPOs(pos) {
 
 // ─── Review Stock Request ─────────────────────────────
 
-function openReviewRequest(requestId, productName, qty, status) {
-  document.getElementById('reviewRequestId').value    = requestId;
-  document.getElementById('reviewRequestTitle').textContent = `Review Request — ${productName}`;
+// request_ids covered by the currently-open review modal — one id for a
+// plain single-item request, several for a batch. submitReview() updates
+// every id in here together so a whole batch is approved/rejected as one.
+let _reviewGroupIds = [];
+
+function openReviewRequest(groupKey) {
+  // Looked up from allStockRequests (already in memory) instead of being
+  // passed in as separate onclick params — that avoids having to escape a
+  // variant_options object into an inline onclick string, and lets one id
+  // (groupKey — a batch_id, or a lone request_id) pull in every item that
+  // was submitted together as one "Generate Stock Request" batch.
+  const group = (allStockRequests || []).filter(req => (req.batch_id || req.request_id) === groupKey);
+  if (!group.length) return;
+
+  const first  = group[0];
+  const multi  = group.length > 1;
+  // A batch can end up with MIXED statuses — e.g. a slow connection let some
+  // of a multi-item "Approve All" PUT requests succeed while others timed
+  // out, leaving some items approved and some still pending. Treat that as
+  // "pending" (so Approve/Reject stay available) rather than going by
+  // group[0] alone, which would otherwise lock out the whole batch — including
+  // the genuinely-still-pending items — the moment the first item happened
+  // to already be settled.
+  const distinctStatuses = new Set(group.map(r => r.status));
+  const mixed  = distinctStatuses.size > 1;
+  const status = mixed ? 'pending' : first.status;
+  const actionable = mixed ? group.filter(r => r.status === 'pending') : group;
+  _reviewGroupIds = actionable.map(r => r.request_id);
+
+  const statusBadge = r => {
+    if (r.status === 'approved') return ' <span style="color:#16a34a;font-weight:600;">(approved)</span>';
+    if (r.status === 'rejected') return ' <span style="color:#ef4444;font-weight:600;">(rejected)</span>';
+    return '';
+  };
+
+  const itemsHtml = multi
+    ? group.map(r => `
+        <div style="display:flex;justify-content:space-between;gap:10px;padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;">
+          <span><strong>${r.product?.product_name || '—'}</strong>${r.variant_options && Object.keys(r.variant_options).length ? ' — ' + Object.entries(r.variant_options).map(([k,v]) => `${k}: ${v}`).join(', ') : ''}${statusBadge(r)}<div style="font-size:11px;color:var(--text-muted);">Current stock: ${srCurrentStock(r)}</div></span>
+          <span>${r.quantity_needed} units</span>
+        </div>`).join('')
+    : '';
+
+  const variantHtml = (!multi && first.variant_options && Object.keys(first.variant_options).length)
+    ? `<div><strong>Variant:</strong> ${Object.entries(first.variant_options).map(([k, v]) => `${k}: ${v}`).join(', ')}</div>`
+    : '';
+
+  const currentStockHtml = !multi
+    ? `<div><strong>Current Stock:</strong> ${srCurrentStock(first)}</div>`
+    : '';
+
+  const mixedNoticeHtml = mixed
+    ? `<div style="background:rgba(245,158,11,0.1);border:1px solid rgba(245,158,11,0.3);color:#b45309;border-radius:6px;padding:8px 10px;font-size:11.5px;">
+         ${group.length - actionable.length} of ${group.length} items in this batch were already decided (likely from a connection drop mid-approval) —
+         only the ${actionable.length} still-pending item${actionable.length === 1 ? '' : 's'} below will be affected by Approve/Reject.
+       </div>`
+    : '';
+
+  document.getElementById('reviewRequestId').value    = groupKey;
+  document.getElementById('reviewRequestTitle').textContent = multi
+    ? `Review Request — ${group.length} items`
+    : `Review Request — ${first.product?.product_name || '—'}`;
   document.getElementById('reviewRequestInfo').innerHTML = `
     <div style="display:flex;flex-direction:column;gap:6px;">
-      <div><strong>Product:</strong> ${productName}</div>
-      <div><strong>Quantity Requested:</strong> ${qty} units</div>
+      ${mixedNoticeHtml}
+      ${multi
+        ? `<div style="display:flex;flex-direction:column;gap:6px;">${itemsHtml}</div>`
+        : `<div><strong>Product:</strong> ${first.product?.product_name || '—'}</div>
+           ${variantHtml}
+           ${currentStockHtml}
+           <div><strong>Quantity Requested:</strong> ${first.quantity_needed} units</div>`}
+      <div><strong>Branch:</strong> ${first.branch?.branch_name || '—'}</div>
+      <div><strong>Requested by:</strong> ${first.staff ? `${first.staff.fname} ${first.staff.lname}` : '—'}</div>
+      ${first.note ? `<div><strong>Note:</strong> ${first.note}</div>` : ''}
     </div>`;
   document.getElementById('reviewAdminNote').value = '';
   // Show/hide buttons based on current status
-  const approveBtn = document.querySelector('#reviewRequestModal .btn-solid-green');
-  const rejectBtn  = document.querySelector('#reviewRequestModal .btn[style*="#ef4444"]');
+  const approveBtn = document.getElementById('reviewApproveBtn');
+  const rejectBtn  = document.getElementById('reviewRejectBtn');
   const dismissBtn = document.getElementById('reviewDismissBtn');
   if (status === 'approved') {
     // Already approved: nothing left to decide, just let them close it.
@@ -4803,9 +4959,11 @@ function openReviewRequest(requestId, productName, qty, status) {
     if (rejectBtn)  rejectBtn.style.display  = 'none';
     if (dismissBtn) dismissBtn.textContent   = 'Close';
   } else {
-    // Pending: full choice — Close, Reject, and Approve all available.
-    if (approveBtn) approveBtn.style.display = '';
-    if (rejectBtn)  rejectBtn.style.display  = '';
+    // Pending (or mixed, with some leftover pending items): Close, Reject,
+    // and Approve all available, scoped to just the actionable items.
+    const label = multi ? (mixed ? 'Remaining' : 'All') : '';
+    if (approveBtn) { approveBtn.style.display = ''; approveBtn.textContent = multi ? `Approve ${label} (${actionable.length})` : 'Approve'; }
+    if (rejectBtn)  { rejectBtn.style.display  = ''; rejectBtn.textContent  = multi ? `Reject ${label} (${actionable.length})`  : 'Reject';  }
     if (dismissBtn) dismissBtn.textContent   = 'Close';
   }
   document.getElementById('reviewRequestModalOverlay')?.classList.add('open');
@@ -4818,27 +4976,34 @@ function closeReviewRequestModal() {
 }
 
 async function submitReview(status) {
-  const requestId = document.getElementById('reviewRequestId').value;
+  // Falls back to the single id in reviewRequestId if _reviewGroupIds is
+  // somehow empty (shouldn't happen via openReviewRequest, but keeps this
+  // safe if something else ever calls submitReview directly).
+  const ids = _reviewGroupIds.length ? _reviewGroupIds : [document.getElementById('reviewRequestId').value];
   const adminNote = document.getElementById('reviewAdminNote').value;
-  const approveBtn = document.querySelector('#reviewRequestModal .btn-solid-green');
-  const rejectBtn  = document.querySelector('#reviewRequestModal .btn[style*="#ef4444"]');
+  const approveBtn = document.getElementById('reviewApproveBtn');
+  const rejectBtn  = document.getElementById('reviewRejectBtn');
   const clickedBtn = status === 'approved' ? approveBtn : rejectBtn;
   const otherBtn    = status === 'approved' ? rejectBtn : approveBtn;
   setButtonLoading(clickedBtn, true);
   if (otherBtn) otherBtn.disabled = true;
   try {
-    const res = await fetch(`/api/admin/stock-requests/${requestId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, admin_note: adminNote }),
-    });
-    if (res.ok) {
-      showToast(`Request ${status}!`);
+    // Every request in the batch gets the same status/note in parallel —
+    // they were submitted together, so they're decided together.
+    const results = await Promise.all(ids.map(id =>
+      fetch(`/api/admin/stock-requests/${id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status, admin_note: adminNote }),
+      })
+    ));
+    const allOk = results.every(res => res.ok);
+    if (allOk) {
+      showToast(ids.length > 1 ? `${ids.length} requests ${status}!` : `Request ${status}!`);
       closeReviewRequestModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
     } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed.', 'error');
+      showToast('Some requests failed to update. Please check.', 'error');
     }
   } catch (e) { showToast('Error.', 'error'); }
   finally {
@@ -4892,7 +5057,7 @@ function addPOItemRow() {
   const wrap = document.getElementById('poItemsWrap');
   const idx  = wrap.children.length;
   const row  = document.createElement('div');
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 80px 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
+  row.style.cssText = 'display:grid;grid-template-columns:0.8fr 80px 160px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;">
       <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);">
@@ -4915,6 +5080,216 @@ function addPOItemRow() {
   wrap.appendChild(row);
 }
 
+// Admin's own shortcut from a critical/out-of-stock row in the Branch Stock
+// Summary table: skip the stock-request/approval step entirely (admin
+// already has PO-creation authority) and go straight into a pre-filled
+// Create PO draft — one row per variant of this product that's currently
+// critical/out AT THIS SPECIFIC BRANCH (a product can look fine overall
+// while one branch's one variant is nearly out, so we only prefill what's
+// actually low at the branch that was clicked). Unit cost is left blank,
+// same as a manually-added row — that's still typed in by hand.
+function quickCreatePOForBranchProduct(productId, branchId) {
+  const p = allProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+
+  const levelOf = q => {
+    q = Number(q);
+    if (q === 0) return 'out';
+    if (q > 0 && q <= 5) return 'critical';
+    return 'ok';
+  };
+  const criticalVariants = (p.variant_stock || [])
+    .filter(v => v.branch_id === branchId && levelOf(v.quantity) !== 'ok');
+
+  openCreatePOModal();
+  document.getElementById('poItemsWrap').innerHTML = '';
+
+  if (criticalVariants.length) {
+    criticalVariants.forEach(v => fillPORowForProduct(p, v));
+  } else {
+    fillPORowForProduct(p, null);
+  }
+
+  updatePOTotal();
+}
+window.quickCreatePOForBranchProduct = quickCreatePOForBranchProduct;
+
+// Adds one Create-PO item row and fills it in for `product`, optionally
+// locked to one specific variant (`variantRow`, an entry from
+// product.variant_stock — or a plain {options} object — with its own
+// .options and optional .quantity). `requestId`/`qty` are used by the
+// "Use Approved Requests" picker below: requestId is stamped onto the row
+// (so submitCreatePO() can tell the backend which stock_request this came
+// from) and qty pre-fills the quantity the staff member actually asked for.
+function fillPORowForProduct(product, variantRow, requestId, qty) {
+  addPOItemRow();
+  const wrap = document.getElementById('poItemsWrap');
+  const row  = wrap.lastElementChild;
+  if (!row) return;
+
+  if (requestId) row.dataset.requestId = requestId;
+
+  const sel = row.querySelector('.po-product');
+  if (sel) {
+    sel.value = product.product_id;
+    updatePORowStock(sel);
+    loadPORowVariants(sel);
+  }
+
+  if (variantRow && variantRow.options) {
+    row.querySelectorAll('.po-variant-opt').forEach(vs => {
+      const label = vs.dataset.label;
+      if (label && variantRow.options[label] != null) vs.value = variantRow.options[label];
+    });
+  }
+
+  if (qty) {
+    const qtyEl = row.querySelector('.po-qty');
+    if (qtyEl) qtyEl.value = qty;
+  }
+
+  row.querySelector('.po-cost')?.focus();
+}
+window.fillPORowForProduct = fillPORowForProduct;
+
+// ─── Approved Stock Requests → Create PO ──────────────────────────────
+// Lets admin pull one or more APPROVED staff stock requests straight into a
+// new PO draft (product/variant/quantity pre-filled from the request; unit
+// cost is still typed in manually) instead of retyping what staff already
+// asked for. Builds its own button+badge next to "Create PO" and its own
+// modal on first use, so no admin_dashboard.html changes are needed.
+function ensureApprovedRequestsUI() {
+  if (document.getElementById('approvedReqBadge')) return; // already set up
+
+  const createPOBtn = document.querySelector('[onclick="openCreatePOModal()"]');
+  if (createPOBtn && createPOBtn.parentElement) {
+    const btn = document.createElement('button');
+    btn.type      = 'button';
+    btn.className = 'btn btn-outline-green';
+    btn.style.position = 'relative';
+    btn.style.marginRight = '8px';
+    btn.innerHTML = `
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+      Use Approved Requests
+      <span id="approvedReqBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:6px;font-weight:700;"></span>
+    `;
+    btn.onclick = openApprovedRequestsModal;
+    createPOBtn.parentElement.insertBefore(btn, createPOBtn);
+  }
+
+  if (!document.getElementById('approvedRequestsModalOverlay')) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="modal-overlay" id="approvedRequestsModalOverlay" onclick="closeApprovedRequestsModal()"></div>
+      <div class="modal" id="approvedRequestsModal" style="max-width:720px;">
+        <div class="modal-header">
+          <h3 class="modal-title">Approved Stock Requests</h3>
+          <button class="modal-close" onclick="closeApprovedRequestsModal()">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+          </button>
+        </div>
+        <div class="modal-body">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Select one or more approved requests to pre-fill into a new PO. Unit price still needs to be entered manually.</p>
+          <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;">
+            <input type="checkbox" id="approvedReqSelectAll" onchange="toggleSelectAllApprovedReq(this.checked)"/>
+            <span style="font-size:12px;font-weight:600;">Select All</span>
+          </label>
+          <div id="approvedRequestsList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeApprovedRequestsModal()">Cancel</button>
+            <button type="button" id="useApprovedReqBtn" class="btn btn-solid-green" onclick="useSelectedApprovedRequests()" disabled>Add Selected to PO</button>
+          </div>
+        </div>
+      </div>
+    `);
+  }
+}
+
+function updateApprovedReqBadge() {
+  ensureApprovedRequestsUI();
+  const available = (allStockRequests || []).filter(r => r.status === 'approved' && !r.converted_to_po).length;
+  const reqBadge = document.getElementById('approvedReqBadge');
+  if (reqBadge) {
+    reqBadge.textContent   = available;
+    reqBadge.style.display = available > 0 ? 'inline' : 'none';
+  }
+}
+
+function openApprovedRequestsModal() {
+  const available = (allStockRequests || []).filter(r => r.status === 'approved' && !r.converted_to_po);
+  const list = document.getElementById('approvedRequestsList');
+  list.innerHTML = available.length
+    ? available.map(r => `
+      <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+        <input type="checkbox" class="approved-req-check" value="${r.request_id}" style="margin-top:2px;" onchange="updateApprovedReqBtn()"/>
+        <span style="flex:1;">
+          <strong>${r.product?.product_name || '—'}</strong>
+          ${r.variant_options && Object.keys(r.variant_options).length
+            ? '<div style="font-size:11px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+            : ''}
+          <div style="font-size:12px;color:var(--text-muted);">Qty: ${r.quantity_needed} · Branch: ${r.branch?.branch_name || '—'} · Requested by: ${r.staff ? r.staff.fname + ' ' + r.staff.lname : '—'}</div>
+        </span>
+      </label>`).join('')
+    : '<div class="table-empty" style="padding:1rem;">No approved requests waiting to be ordered.</div>';
+  const selectAll = document.getElementById('approvedReqSelectAll');
+  if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; selectAll.disabled = !available.length; }
+  updateApprovedReqBtn();
+  document.getElementById('approvedRequestsModalOverlay')?.classList.add('open');
+  document.getElementById('approvedRequestsModal')?.classList.add('open');
+}
+
+// Checks/unchecks every request row at once from the "Select All" checkbox.
+function toggleSelectAllApprovedReq(checked) {
+  document.querySelectorAll('.approved-req-check').forEach(cb => { cb.checked = checked; });
+  updateApprovedReqBtn();
+}
+window.toggleSelectAllApprovedReq = toggleSelectAllApprovedReq;
+window.openApprovedRequestsModal = openApprovedRequestsModal;
+
+function closeApprovedRequestsModal() {
+  document.getElementById('approvedRequestsModalOverlay')?.classList.remove('open');
+  document.getElementById('approvedRequestsModal')?.classList.remove('open');
+}
+window.closeApprovedRequestsModal = closeApprovedRequestsModal;
+
+function updateApprovedReqBtn() {
+  const all     = document.querySelectorAll('.approved-req-check');
+  const checked = document.querySelectorAll('.approved-req-check:checked').length;
+  const btn = document.getElementById('useApprovedReqBtn');
+  if (btn) btn.disabled = checked === 0;
+
+  // Keep "Select All" in sync with whatever individual rows the admin
+  // (un)checked by hand — fully checked, fully unchecked, or indeterminate.
+  const selectAll = document.getElementById('approvedReqSelectAll');
+  if (selectAll) {
+    selectAll.checked       = all.length > 0 && checked === all.length;
+    selectAll.indeterminate = checked > 0 && checked < all.length;
+  }
+}
+window.updateApprovedReqBtn = updateApprovedReqBtn;
+
+// Pulls the checked requests into a fresh Create PO draft — one row per
+// request, each carrying its request_id so submitCreatePO() can tell the
+// backend which requests to mark converted_to_po (only rows that survive
+// into the final submitted PO get marked; a deleted row's request stays
+// available next time, since it was never actually ordered).
+function useSelectedApprovedRequests() {
+  const ids = Array.from(document.querySelectorAll('.approved-req-check:checked')).map(c => c.value);
+  const requests = (allStockRequests || []).filter(r => ids.includes(r.request_id));
+  closeApprovedRequestsModal();
+
+  openCreatePOModal();
+  document.getElementById('poItemsWrap').innerHTML = '';
+  requests.forEach(r => {
+    const p = allProducts.find(pr => pr.product_id === r.product_id);
+    if (!p) return;
+    const variantRow = (r.variant_options && Object.keys(r.variant_options).length)
+      ? { options: r.variant_options }
+      : null;
+    fillPORowForProduct(p, variantRow, r.request_id, r.quantity_needed);
+  });
+  updatePOTotal();
+}
+window.useSelectedApprovedRequests = useSelectedApprovedRequests;
 
 function updatePORowStock(sel) {
   const opt  = sel.options[sel.selectedIndex];
@@ -4961,6 +5336,10 @@ async function submitCreatePO() {
 
   const rows  = document.getElementById('poItemsWrap').children;
   const items = [];
+  // Stock requests behind the rows that actually made it into this PO —
+  // only these get marked converted_to_po; a row the admin deleted before
+  // submitting never ends up here, so its request stays available.
+  const stockRequestIds = [];
   for (const row of rows) {
     const productId = row.querySelector('.po-product')?.value;
     const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
@@ -4973,6 +5352,7 @@ async function submitCreatePO() {
         if (vs.value) variantOpts[vs.dataset.label] = vs.value;
       });
       items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost, variant_options: Object.keys(variantOpts).length ? variantOpts : null });
+      if (row.dataset.requestId) stockRequestIds.push(row.dataset.requestId);
     }
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
@@ -4984,7 +5364,7 @@ async function submitCreatePO() {
     const res = await fetch('/api/admin/purchase-orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ supplier, note, items }),
+      body: JSON.stringify({ supplier, note, items, stock_request_ids: stockRequestIds }),
     });
     if (res.ok) {
       const data = await res.json();
@@ -5079,7 +5459,7 @@ function showPOReceipt(po, items, total) {
         <button onclick="closeModal()" class="btn btn-solid-green" style="flex:1;">Done</button>
       </div>
     </div>
-  `);
+  `, '760px');
 }
 
 function printPOReceipt() {
@@ -5210,11 +5590,17 @@ function openPODetail(poId) {
         </div>`;
     }).join('');
 
-    footer.innerHTML += `
+    // The items/distribution list goes into the CONTENT area, not the
+    // footer — the footer is a flex row shared with the Close/Save Receipt
+    // buttons, and a tall sibling in that same row stretches those buttons
+    // to match its height (flex default align-items:stretch). Keeping the
+    // footer to just the two buttons keeps them a normal size.
+    document.getElementById('poDetailContent').innerHTML += `
       <div style="width:100%;max-height:380px;overflow-y:auto;padding-right:2px;">
         <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
         ${itemRows}
-      </div>
+      </div>`;
+    footer.innerHTML += `
       <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Save Receipt ✓</button>`;
 
     // Run initial validation to set counter labels
@@ -5238,10 +5624,13 @@ function closePODetailModal() {
 // branch distribution add up exactly, and at least one line in the batch
 // must be > 0 (otherwise there's nothing to submit).
 function validatePODistribution() {
-  var footer   = document.getElementById('poDetailFooter');
+  // The receive/distribute rows live in poDetailContent, not the footer —
+  // the footer only holds the Close/Save Receipt buttons (moved out so a
+  // tall sibling in the same flex row can't stretch those buttons).
+  var content  = document.getElementById('poDetailContent');
   var btn      = document.getElementById('markReceivedBtn');
-  if (!footer) return;
-  var itemDivs = footer.querySelectorAll('[data-item-idx]');
+  if (!content) return;
+  var itemDivs = content.querySelectorAll('[data-item-idx]');
   if (!itemDivs.length) {
     // Every item on this PO was already fully received in an earlier batch.
     if (btn) btn.disabled = true;
@@ -5306,8 +5695,8 @@ function validatePODistribution() {
 }
 
 async function submitPOReceive(poId) {
-  var footer   = document.getElementById('poDetailFooter');
-  var itemDivs = footer ? footer.querySelectorAll('[data-item-idx]') : [];
+  var content  = document.getElementById('poDetailContent');
+  var itemDivs = content ? content.querySelectorAll('[data-item-idx]') : [];
   var po       = allPOs.find(function(p) { return p.po_id === poId; });
   if (!po) return;
 
