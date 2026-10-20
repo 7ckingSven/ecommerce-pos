@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <meta name="description" content="Shop Triple E &amp; Fiel Collince General Merchandise online — school supplies, beauty, and personal care. Cash on Delivery or GCash, with real-time order tracking and a mobile app."/>
   <title>TEFC E-Commerce — Triple E &amp; Fiel Collince General Merchandise</title>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,600;0,700;1,600;1,700&family=Sora:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
@@ -347,6 +348,13 @@
             <span class="feature-label">Wide selection — school supplies, beauty, and more</span>
           </div>
 
+          <div class="feature-row">
+            <div class="feature-box">
+              <svg viewBox="0 0 24 24"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+            </div>
+            <span class="feature-label">Also available as a mobile app — shop and track orders on the go</span>
+          </div>
+
         </div>
 
       </div>
@@ -371,7 +379,7 @@
         <address>
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/><polyline points="22,6 12,13 2,6"/></svg>
-            tripleefielcollins@gmail.com
+            tripleefielcollince@gmail.com
           </div>
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z"/><circle cx="12" cy="10" r="3"/></svg>
@@ -384,6 +392,11 @@
           <div class="footer-contact-row">
             <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
             STI College of Koronadal
+          </div>
+          <div class="footer-contact-row">
+            <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <!-- TODO: confirm actual store hours — placeholder below -->
+            Mon–Sat, 8:00 AM – 7:00 PM
           </div>
         </address>
       </div>
@@ -527,6 +540,13 @@
       clearInterval(autoTimer);
       startAuto();
     }
+
+    // Pause auto-advance while the visitor is reading a slide (mouse over
+    // the slideshow), resume once they move away — stops a slide changing
+    // mid-read.
+    const slideshowEl = document.getElementById('slideshow');
+    slideshowEl.addEventListener('mouseenter', () => clearInterval(autoTimer));
+    slideshowEl.addEventListener('mouseleave', startAuto);
 
     startAuto();
   </script>
