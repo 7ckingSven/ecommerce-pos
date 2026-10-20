@@ -122,6 +122,19 @@
             </button>
           </div>
 
+          <!-- Barcode Scanner Input — a USB scanner acts as a keyboard: it types
+               the scanned code into whatever field is focused, then sends Enter.
+               This field auto-focuses whenever the POS tab is active so a scan
+               works immediately without clicking first; it refocuses itself after
+               every scan and whenever the product grid area is clicked (unless
+               another input/modal is actively being used). Matches against each
+               product's Product ID for now — see onkeydown handler for why. -->
+          <div class="pos-search-wrap pos-barcode-wrap" id="posBarcodeWrap" title="Scan a product barcode, or type its Product ID and press Enter">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;color:var(--g-400);"><path d="M3 5v14M8 5v14M11 5v14M15 5v14M18 5v14M21 5v14"/></svg>
+            <input type="text" class="search-input" id="posBarcodeInput" placeholder="Scan barcode or enter Product ID, then Enter..." autocomplete="off" onkeydown="if(event.key==='Enter'){ event.preventDefault(); handleBarcodeScan(this.value); this.value=''; }"/>
+            <span id="posBarcodeStatus" style="font-size:11px;color:var(--text-muted);white-space:nowrap;"></span>
+          </div>
+
           <!-- Category Chips — populated by populateCategories() in staff.js -->
           <div class="pos-cats" id="posCats"></div>
 

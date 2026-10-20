@@ -35,6 +35,20 @@
 }
 .pos-search-wrap:focus-within { border-color: var(--g-600); }
 
+/* ─── Barcode Scanner Input ───
+   Visually distinct (dashed border) from the regular search box so staff can
+   tell at a glance which field a USB scanner is feeding into. Gets a brief
+   green flash via .pos-barcode-wrap--hit / red via --miss after each scan
+   (see handleBarcodeScan in staff.js), then settles back to this resting style. */
+.pos-barcode-wrap {
+  border-style: dashed;
+  border-color: var(--g-600);
+  background: rgba(22,163,74,0.05);
+  transition: background 0.15s, border-color 0.15s;
+}
+.pos-barcode-wrap--hit  { background: rgba(22,163,74,0.18) !important; }
+.pos-barcode-wrap--miss { background: rgba(239,68,68,0.14) !important; border-color: #ef4444 !important; }
+
 /* ─── Category Tabs ───
    Redesigned from pill chips to a tab bar: a continuous bottom border runs
    under the whole row, and the active tab's own bottom border overlaps it
@@ -298,6 +312,24 @@
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
 }
+/* Directly-typed quantity — replaces the plain qty number display so a large
+   quantity (e.g. 50) doesn't need 50 taps of "+". Kept alongside the +/-
+   buttons rather than instead of them, for quick single-unit adjustments. */
+.pos-qty-input {
+  width: 38px;
+  min-width: 38px;
+  height: 22px;
+  padding: 0 2px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: var(--card-bg);
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: center;
+  font-family: 'JetBrains Mono', monospace;
+}
+.pos-qty-input:focus { border-color: var(--g-600); outline: none; }
 .pos-remove-btn {
   background: none;
   border: none;

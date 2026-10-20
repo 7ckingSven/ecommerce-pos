@@ -344,6 +344,10 @@ function showSection(name, el) {
     _loadedSections.add(name);
     loaders[name]();
   }
+  // Auto-focus the barcode scanner field whenever POS becomes the active tab.
+  if (name === 'pos' && typeof focusBarcodeInput === 'function') {
+    setTimeout(focusBarcodeInput, 50);
+  }
 }
 
 var loaders = {
@@ -838,6 +842,7 @@ async function loadPosProducts() {
     });
     renderPosProducts(posProducts);
     populateCategories(posProducts);
+    focusBarcodeInput();
   } catch (e) { console.error('POS products error:', e); }
 }
 
@@ -1116,6 +1121,31 @@ function updateQty(productId, delta) {
   updateTotal();
 }
 
+// Directly-typed quantity (replaces repeated "+" tapping for large quantities).
+// Validates/clamps to [1, item.max] the same way updateQty does, so the two
+// controls can never disagree on what counts as a valid quantity.
+function setQty(productId, rawValue, inputEl) {
+  const item = orderItems.find(i => i.product_id === productId);
+  if (!item) return;
+  let qty = parseInt(rawValue, 10);
+  if (isNaN(qty) || qty < 1) {
+    // Empty, non-numeric, zero or negative — treat as "remove this item"
+    // rather than silently snapping back to 1, since that's what the field
+    // being cleared out usually means.
+    orderItems = orderItems.filter(i => i.product_id !== productId);
+    renderOrderItems();
+    updateTotal();
+    return;
+  }
+  if (qty > item.max) {
+    qty = item.max;
+    showToast(`Maximum stock is ${item.max}.`, 'error');
+  }
+  item.quantity = qty;
+  renderOrderItems();
+  updateTotal();
+}
+
 function removeFromOrder(productId) {
   orderItems = orderItems.filter(i => i.product_id !== productId);
   renderOrderItems();
@@ -1139,7 +1169,10 @@ function renderOrderItems() {
       <div class="pos-order-item-name" title="${item.name}">${item.name}</div>
       <div class="pos-qty-ctrl">
         <button class="pos-qty-btn" onclick="updateQty('${item.product_id}', -1)">−</button>
-        <span class="pos-qty-val">${item.quantity}</span>
+        <input type="text" inputmode="numeric" pattern="[0-9]*" class="pos-qty-input" value="${item.quantity}"
+               onchange="setQty('${item.product_id}', this.value, this)"
+               onkeydown="if(event.key==='Enter') this.blur()"
+               onclick="this.select()"/>
         <button class="pos-qty-btn" onclick="updateQty('${item.product_id}', 1)">+</button>
       </div>
       <div class="pos-order-item-price">${peso(item.price * item.quantity)}</div>
@@ -1232,6 +1265,20 @@ function _posVarUpdateBtn() {
   btn.disabled = Object.keys(posSelectedVariants).length < groups.length;
 }
 
+// Reads variant stock out of the already-fetched posProducts data (each
+// product carries its own variant_stock array — see /api/products in
+// app.py). This is the offline fallback for the variant-stock live check
+// below, and it's exact: applyOfflineStockDeduction keeps these numbers
+// decremented locally as offline sales go through, so it reflects reality
+// even several offline sales into an outage, not just the last online sync.
+function getLocalVariantStock(product, branchId, options) {
+  if (!product) return 0;
+  const match = (product.variant_stock || []).find(v =>
+    v.branch_id === branchId && JSON.stringify(v.options || {}) === JSON.stringify(options || {})
+  );
+  return match ? Number(match.quantity) || 0 : 0;
+}
+
 async function checkPosVariantStock() {
   if (!posCurrentProduct) return;
   const groups = posCurrentProduct.option_groups || [];
@@ -1239,31 +1286,42 @@ async function checkPosVariantStock() {
 
   const stockEl = document.getElementById('posVarStock');
   if (!stockEl) return;
-  stockEl.textContent = 'Checking stock...';
 
-  try {
-    const res  = await fetch('/api/variant-stock/check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        product_id: posCurrentProduct.product_id,
-        branch_id:  staffBranchId,
-        options:    posSelectedVariants,
-      }),
-    });
-    const data = await res.json();
-    const qty  = data.quantity || 0;
-    // CRITICAL_STOCK_LEVEL (5) — same reserve-buffer threshold as the main
-    // product grid: a critically-low variant is treated as unsellable here
-    // too, not just a literal zero.
-    const isCritical = qty > 0 && qty <= 5;
-    stockEl.textContent = qty > 5 ? `✅ ${qty} units available` : (isCritical ? `⚠️ Only ${qty} left — below reserve level, not sellable` : '❌ Out of stock for this variant');
-    stockEl.style.color = qty > 5 ? 'var(--g-400)' : '#ef4444';
-    const addBtn = document.getElementById('posVarAddBtn');
-    if (addBtn) addBtn.disabled = qty <= 5;
-  } catch (e) {
-    stockEl.textContent = '';
+  let qty;
+  if (posIsOnline) {
+    stockEl.textContent = 'Checking stock...';
+    try {
+      const res  = await fetch('/api/variant-stock/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: posCurrentProduct.product_id,
+          branch_id:  staffBranchId,
+          options:    posSelectedVariants,
+        }),
+      });
+      const data = await res.json();
+      qty = data.quantity || 0;
+    } catch (e) {
+      // Connection dropped mid-check — fall back to the locally cached
+      // figure instead of leaving the field stuck on "Checking stock...".
+      qty = getLocalVariantStock(posCurrentProduct, staffBranchId, posSelectedVariants);
+    }
+  } else {
+    // Already confirmed offline — skip the network round-trip entirely
+    // (it would just time out) and read the cached stock straight away,
+    // same as a walk-in sale of a non-variant product already does.
+    qty = getLocalVariantStock(posCurrentProduct, staffBranchId, posSelectedVariants);
   }
+
+  // CRITICAL_STOCK_LEVEL (5) — same reserve-buffer threshold as the main
+  // product grid: a critically-low variant is treated as unsellable here
+  // too, not just a literal zero.
+  const isCritical = qty > 0 && qty <= 5;
+  stockEl.textContent = qty > 5 ? `✅ ${qty} units available` : (isCritical ? `⚠️ Only ${qty} left — below reserve level, not sellable` : '❌ Out of stock for this variant');
+  stockEl.style.color = qty > 5 ? 'var(--g-400)' : '#ef4444';
+  const addBtn = document.getElementById('posVarAddBtn');
+  if (addBtn) addBtn.disabled = qty <= 5;
 }
 
 async function confirmPosVariant(btn) {
@@ -1278,26 +1336,34 @@ async function confirmPosVariant(btn) {
   }
 
   setButtonLoading(btn, true);
-  // Check available variant stock
+  // Check available variant stock — same online/offline split as
+  // checkPosVariantStock, so a scan or a click behaves identically whether
+  // or not the connection is up.
   let availableStock = 0;
-  try {
-    const res  = await fetch('/api/variant-stock/check', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        product_id: posCurrentProduct.product_id,
-        branch_id:  staffBranchId,
-        options:    posSelectedVariants,
-      }),
-    });
-    const data = await res.json();
-    availableStock = data.quantity || 0;
-    if (availableStock <= 5) {
-      showToast(availableStock <= 0 ? 'This variant is out of stock!' : 'This variant is below its reserve stock level and cannot be sold right now.', 'error');
-      setButtonLoading(btn, false);
-      return;
+  if (posIsOnline) {
+    try {
+      const res  = await fetch('/api/variant-stock/check', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: posCurrentProduct.product_id,
+          branch_id:  staffBranchId,
+          options:    posSelectedVariants,
+        }),
+      });
+      const data = await res.json();
+      availableStock = data.quantity || 0;
+    } catch (e) {
+      availableStock = getLocalVariantStock(posCurrentProduct, staffBranchId, posSelectedVariants);
     }
-  } catch (e) {}
+  } else {
+    availableStock = getLocalVariantStock(posCurrentProduct, staffBranchId, posSelectedVariants);
+  }
+  if (availableStock <= 5) {
+    showToast(availableStock <= 0 ? 'This variant is out of stock!' : 'This variant is below its reserve stock level and cannot be sold right now.', 'error');
+    setButtonLoading(btn, false);
+    return;
+  }
 
   const variantLabel = Object.entries(posSelectedVariants).map(([k,v]) => `${k}: ${v}`).join(', ');
   const disc2 = posCurrentProduct.discount;
@@ -1315,11 +1381,88 @@ async function confirmPosVariant(btn) {
   );
   posSelectedVariants = {};
   closeGenericModal(); // modal closes on success — no need to reset btn loading
+  focusBarcodeInput();
 }
 
 window.selectPosProduct      = selectPosProduct;
 window.selectPosVariantOpt   = selectPosVariantOpt;
 window.confirmPosVariant     = confirmPosVariant;
+
+// ─── Barcode Scanner ───────────────────────────────────
+// A USB barcode scanner is keyboard-emulation only (no camera) — it just
+// types the scanned code's characters into whatever field is focused, then
+// sends Enter. #posBarcodeInput's onkeydown (in staff_dashboard.html) calls
+// this on Enter.
+//
+// NOTE — matching key: the `product` table has no dedicated barcode/SKU
+// column yet (checked DATABASE.md), so for now this matches the scanned
+// code against each product's Product ID (exact, case-insensitive). That
+// means a printed barcode label needs to encode the product's ID string,
+// not an arbitrary SKU. If/when a real `barcode` column gets added to the
+// product table and returned by /api/products, swap the match below to
+// check that field first (falling back to product_id) — no other change
+// needed here.
+function handleBarcodeScan(rawCode) {
+  const code = (rawCode || '').trim();
+  const wrap = document.getElementById('posBarcodeWrap');
+  const statusEl = document.getElementById('posBarcodeStatus');
+  if (!code) return;
+
+  const match = posProducts.find(p => (p.barcode || p.product_id || '').toLowerCase() === code.toLowerCase());
+
+  if (!match) {
+    flashBarcodeWrap(wrap, 'miss');
+    if (statusEl) statusEl.textContent = 'Not found';
+    showToast(`No product matches "${code}".`, 'error');
+    focusBarcodeInput();
+    return;
+  }
+
+  const branchStock = (match.branch_stock || []).find(b => b.branch_id === staffBranchId);
+  const stockQty     = branchStock ? branchStock.quantity : match.quantity || 0;
+  if (stockQty <= 0) {
+    flashBarcodeWrap(wrap, 'miss');
+    if (statusEl) statusEl.textContent = 'Out of stock';
+    showToast(`${match.product_name} is out of stock.`, 'error');
+    focusBarcodeInput();
+    return;
+  }
+
+  flashBarcodeWrap(wrap, 'hit');
+  if (statusEl) statusEl.textContent = `Added: ${match.product_name}`;
+  // Reuses the same path as clicking the product card — handles the
+  // variant-picker modal automatically when the product has option groups.
+  selectPosProduct(match.product_id);
+  focusBarcodeInput();
+}
+
+function flashBarcodeWrap(wrap, kind) {
+  if (!wrap) return;
+  wrap.classList.remove('pos-barcode-wrap--hit', 'pos-barcode-wrap--miss');
+  // Force reflow so re-triggering the same class restarts the flash.
+  void wrap.offsetWidth;
+  wrap.classList.add(kind === 'hit' ? 'pos-barcode-wrap--hit' : 'pos-barcode-wrap--miss');
+  setTimeout(() => wrap.classList.remove('pos-barcode-wrap--hit', 'pos-barcode-wrap--miss'), 600);
+}
+
+// Keeps the scanner field focused whenever the POS tab is the active section,
+// so a scan works the instant staff walk up to the register without first
+// clicking into the box. Never steals focus away from a field the staff
+// member is actively typing into (search, customer name, qty, cash, a modal).
+function focusBarcodeInput() {
+  const posSection = document.getElementById('section-pos');
+  if (!posSection || !posSection.classList.contains('active')) return;
+  const active = document.activeElement;
+  const isTypingElsewhere = active && active.id !== 'posBarcodeInput' &&
+    (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT');
+  if (isTypingElsewhere) return;
+  const modalOpen = document.getElementById('genericModal')?.style.display === 'block' ||
+    document.getElementById('gcashModal')?.style.display === 'block';
+  if (modalOpen) return;
+  const input = document.getElementById('posBarcodeInput');
+  if (input) input.focus();
+}
+window.handleBarcodeScan = handleBarcodeScan;
 
 function updateTotal() {
   // Subtotal = sum of discounted item prices
