@@ -13,6 +13,13 @@ import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetworkBanner from '../components/NetworkBanner';
 
+// Same critical-stock reserve threshold used on the Home screen and
+// backend-side (app.py's CRITICAL_STOCK_LEVEL) — at or below this many
+// units, a branch/variant is treated as unavailable here too, so a
+// customer can't land on a product (e.g. via a stale card or deep link)
+// and still push stock down past the shop's reserve buffer.
+const CRITICAL_STOCK_LEVEL = 5;
+
 // ─── Discount Helper ──────────────────────────────────
 function getDiscountedPrice(product) {
   const disc = Array.isArray(product.discount) ? product.discount[0] : product.discount;
@@ -60,11 +67,12 @@ export default function ProductDetailScreen({ route, navigation }) {
   const effectivePrice  = hasDiscount ? discountedPrice : product.price;
   const disc            = product.discount;
   // Branch-specific stock (branchQty, computed above) — not product.quantity,
-  // which is the aggregate across all branches.
-  const inStock          = branchQty > 0;
+  // which is the aggregate across all branches. Treated as unavailable at
+  // or below the critical reserve level, not just literal zero.
+  const inStock          = branchQty > CRITICAL_STOCK_LEVEL;
   const hasVariants      = (product.option_groups || []).length > 0;
   const allOptsSelected  = hasVariants && Object.keys(selectedOptions).length === (product.option_groups || []).length;
-  const variantOutOfStock = allOptsSelected && variantStock === 0;
+  const variantOutOfStock = allOptsSelected && variantStock !== null && variantStock <= CRITICAL_STOCK_LEVEL;
 
   // The stepper previously only ever checked branchQty (the branch's total
   // stock across every variant combo), so a product with variants let you
@@ -325,7 +333,7 @@ export default function ProductDetailScreen({ route, navigation }) {
               : null
             }
             {(() => {
-              const bs = (product.branch_stock || []).find(b => b.quantity > 0);
+              const bs = (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL);
               const branchName = bs?.branch?.branch_name;
               return branchName ? (
                 <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
@@ -478,9 +486,11 @@ export default function ProductDetailScreen({ route, navigation }) {
       {/* Variant Stock Indicator */}
       {allOptsSelected && variantStock !== null && (
         <View style={{ flexDirection:'row', alignItems:'center', gap:6, paddingHorizontal:SPACING.md, paddingBottom:8 }}>
-          <Feather name={variantStock > 0 ? 'check-circle' : 'x-circle'} size={14} color={variantStock > 0 ? COLORS.primary : COLORS.error}/>
-          <Text style={{ fontSize:12, fontWeight:'600', color: variantStock > 0 ? COLORS.primary : COLORS.error }}>
-            {variantStock > 0 ? `${variantStock} units available for this variant` : 'Out of stock for this variant'}
+          <Feather name={variantStock > CRITICAL_STOCK_LEVEL ? 'check-circle' : 'x-circle'} size={14} color={variantStock > CRITICAL_STOCK_LEVEL ? COLORS.primary : COLORS.error}/>
+          <Text style={{ fontSize:12, fontWeight:'600', color: variantStock > CRITICAL_STOCK_LEVEL ? COLORS.primary : COLORS.error }}>
+            {variantStock > CRITICAL_STOCK_LEVEL
+              ? `${variantStock} units available for this variant`
+              : (variantStock > 0 ? 'Below reserve stock — not available for this variant' : 'Out of stock for this variant')}
           </Text>
         </View>
       )}

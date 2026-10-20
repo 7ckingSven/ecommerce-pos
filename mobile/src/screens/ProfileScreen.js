@@ -149,17 +149,19 @@ export default function ProfileScreen({ navigation }) {
         gender: customer?.gender || '',
       });
     } else if (type === 'contact') {
-      // Only pre-fill street, zip_code, notes (PSGC dropdowns need codes)
+      // Pre-fill every parsed part, including the region/province/city/
+      // barangay NAMES — PSGCAddressPicker now resolves a saved name back
+      // into its PSGC code itself, so these no longer need to be blanked out.
       const parts = addressStringToParts(customer?.address || '');
       setEditForm({
         email:        customer?.email        || '',
         phone_number: customer?.phone_number || '',
         username:     customer?.username     || '',
         street:       parts.street           || '',
-        barangay:     '',
-        city:         '',
-        province:     '',
-        region:       '',
+        barangay:     parts.barangayName     || '',
+        city:         parts.cityName         || '',
+        province:     parts.provinceName     || '',
+        region:       parts.regionName       || '',
         zip_code:     parts.zip_code         || '',
         address_note: customer?.address_note || '',
       });
@@ -284,7 +286,14 @@ export default function ProfileScreen({ navigation }) {
         payload  = {
           email:        editForm.email.trim(),
           phone_number: editForm.phone_number.trim(),
-          address:      addressParts.join(', '),
+          // Pipe-delimited, NOT comma-joined — addressStringToParts (and
+          // every '|'-split address.read on the web dashboards) expects
+          // this exact separator. Joining with ', ' here was the actual bug:
+          // the very first contact-info save would re-store the whole
+          // address with no pipes at all, so the next Edit's
+          // addressStringToParts() found nothing to split on and dumped the
+          // entire string into parts[0] (the street field).
+          address:      addressParts.join('|'),
           address_note: editForm.address_note?.trim() || '',
           username:     editForm.username.trim(),
         };
@@ -650,8 +659,12 @@ export default function ProfileScreen({ navigation }) {
                   <Text style={[styles.fieldLabel, { marginTop: 4 }]}>Address</Text>
                   <PSGCAddressPicker
                     value={{
-                      street:   editForm.street   || '',
-                      zip_code: editForm.zip_code || '',
+                      street:       editForm.street   || '',
+                      zip_code:     editForm.zip_code || '',
+                      regionName:   editForm.region   || '',
+                      provinceName: editForm.province || '',
+                      cityName:     editForm.city     || '',
+                      barangayName: editForm.barangay || '',
                     }}
                     onChange={addr => {
                       setPsgcAddress(addr);

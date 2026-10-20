@@ -515,6 +515,7 @@
           <option value="out_for_delivery">Out for Delivery</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
+          <option value="returned_failed">Returned / Failed</option>
         </select>
         <select class="filter-select" id="adminOrderYearFilter" onchange="filterOrderYear(this.value)">
           <option value="">All Years</option>
@@ -538,6 +539,9 @@
           <option value="">All Days</option>
         </select>
         <button id="adminClearFiltersBtn" class="btn btn-cancel" onclick="clearAdminOrderFilters()" disabled style="font-size:12px;padding:6px 12px;opacity:0.5;cursor:not-allowed;">Clear Filters</button>
+        <button id="moveToProcessingBtn" class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;margin-left:auto;" onclick="runBatchProcessOrders()">
+          Move to Processing <span id="processingCapIndicator" style="opacity:0.85;font-weight:600;">(0/30 today)</span>
+        </button>
       </div>
       <div class="card">
         <div class="table-wrap">
@@ -549,6 +553,47 @@
           </table>
         </div>
         <div id="ordersPagination" style="padding:0 1rem;"></div>
+      </div>
+
+      <!-- ─── Deliveries for Today ───────────────────────── -->
+      <div class="card" style="margin-top:16px;">
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 1rem 0;">
+          <h3 class="card-title" style="margin:0;">Deliveries for Today</h3>
+          <div style="display:flex;gap:6px;">
+            <button id="deliveriesTabAvailableBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('available')">Available</button>
+            <button id="deliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('today')">Today's Batch</button>
+          </div>
+        </div>
+        <div style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;">
+          Cash Remitted Today: <span id="cashRemittedTodaySummary">₱0.00 (0 orders)</span>
+        </div>
+
+        <!-- Available: out_for_delivery, not yet picked for a run -->
+        <div id="deliveriesAvailablePanel" style="padding:1rem;">
+          <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
+            <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="dispatchSelectedOrders()">Dispatch Selected</button>
+          </div>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th style="width:30px;"><input type="checkbox" id="deliveriesAvailableSelectAll" onchange="toggleAllDeliverySelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Total</th></tr>
+              </thead>
+              <tbody id="deliveriesAvailableBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Today's Batch: dispatched for today, awaiting Delivered/Not Delivered -->
+        <div id="deliveriesTodayPanel" style="padding:1rem;display:none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="deliveriesTodayBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
       </div>
     </section>
 

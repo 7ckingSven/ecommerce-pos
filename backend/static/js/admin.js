@@ -535,13 +535,14 @@ function badge(text, type) {
     active: 'green', inactive: 'gray',
     pending: 'yellow', processing: 'blue',
     completed: 'green', cancelled: 'red',
+    out_for_delivery: 'blue', returned_failed: 'red',
     online: 'blue', walk_in: 'green',
     paid: 'green', failed: 'red',
     admin: 'blue', staff: 'green', customer: 'gray',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
     draft: 'gray', ordered: 'blue', partially_received: 'yellow', received: 'green',
   };
-  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text.replace(/_/g, ' ');
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text.replace(/_/g, ' ');
   return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 
@@ -2862,7 +2863,182 @@ async function loadOrders() {
     populateOrderDayOptions();
     applyAdminOrderFilters();
     updateAdminOrdersBadge(allOrders);
+    updateProcessingCapIndicator(allOrders);
+    renderDeliveriesForToday(allOrders);
   } catch (e) { console.error('Orders error:', e); }
+}
+
+// ─── Pending → Processing (capped batch) ──────────────
+function updateProcessingCapIndicator(orders) {
+  const el = document.getElementById('processingCapIndicator');
+  if (!el) return;
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const usedToday = orders.filter(o => o.processing_started_at && o.processing_started_at.slice(0, 10) === todayUTC).length;
+  el.textContent = `(${usedToday}/30 today)`;
+  const btn = document.getElementById('moveToProcessingBtn');
+  if (btn) btn.disabled = usedToday >= 30;
+}
+
+async function runBatchProcessOrders() {
+  try {
+    const res  = await fetch('/api/admin/orders/batch-process', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const skippedCount = (body.skipped || []).length;
+      const skippedNote  = skippedCount > 0 ? ` (${skippedCount} skipped — out of stock)` : '';
+      showToast(body.moved > 0 ? `Moved ${body.moved} order(s) to Processing.${skippedNote}` : (body.message || 'Nothing to move.'), skippedCount > 0 && body.moved === 0 ? 'error' : undefined);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to move orders to processing.', 'error');
+    }
+  } catch (e) { showToast('Error moving orders to processing.', 'error'); }
+}
+
+// ─── Deliveries for Today ──────────────────────────────
+let deliveriesActiveTab = 'available';
+
+function switchDeliveriesTab(tab) {
+  deliveriesActiveTab = tab;
+  const availBtn = document.getElementById('deliveriesTabAvailableBtn');
+  const todayBtn = document.getElementById('deliveriesTabTodayBtn');
+  document.getElementById('deliveriesAvailablePanel').style.display = tab === 'available' ? '' : 'none';
+  document.getElementById('deliveriesTodayPanel').style.display     = tab === 'today' ? '' : 'none';
+  if (availBtn) availBtn.className = `btn ${tab === 'available' ? 'btn-solid-green' : 'btn-cancel'}`;
+  if (todayBtn) todayBtn.className = `btn ${tab === 'today' ? 'btn-solid-green' : 'btn-cancel'}`;
+}
+
+function fullDeliveryAddress(order) {
+  // Same address-parsing convention used in viewOrderItems: '|'-delimited
+  // parts joined into one readable line.
+  const parts = (order.address || '').split('|');
+  const addr = parts.length > 1
+    ? [parts[0], parts[1], parts[2], parts[3]].filter(Boolean).join(', ')
+    : (order.address || '').trim() || '—';
+  const note = order.address_note || '';
+  return note
+    ? `${addr}<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">📍 ${note}</div>`
+    : addr;
+}
+
+function renderDeliveriesForToday(orders) {
+  if (!document.getElementById('deliveriesAvailableBody')) return; // card not on this page
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const ofd = orders.filter(o => o.status === 'out_for_delivery');
+  const available = ofd.filter(o => !o.dispatch_date);
+  const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
+
+  // Cash Remitted Today — COD orders dispatched today that have since been
+  // confirmed Delivered (remittance-confirmed). dispatch_date is cleared on
+  // a failed attempt and re-set on the next dispatch, so "dispatch_date ===
+  // today" still correctly means "delivered on today's run" even for an
+  // order that failed an earlier attempt on a previous day.
+  const remittedToday = orders.filter(o =>
+    o.status === 'completed' &&
+    o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC &&
+    (o.payment?.payment_method === 'cash_on_delivery' || (Array.isArray(o.payment) && o.payment[0]?.payment_method === 'cash_on_delivery'))
+  );
+  const remittedSummaryEl = document.getElementById('cashRemittedTodaySummary');
+  if (remittedSummaryEl) {
+    const total = remittedToday.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    remittedSummaryEl.textContent = `${peso(total)} (${remittedToday.length} order${remittedToday.length !== 1 ? 's' : ''})`;
+  }
+
+  document.getElementById('deliveriesAvailableBody').innerHTML = available.length
+    ? available.map(o => `
+        <tr>
+          <td><input type="checkbox" class="delivery-select-cb" value="${o.order_id}"/></td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+          <td>${fullDeliveryAddress(o)}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
+          <td>${peso(o.total)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
+
+  document.getElementById('deliveriesTodayBody').innerHTML = today.length
+    ? today.map(o => `
+        <tr>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+          <td>${fullDeliveryAddress(o)}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
+          <td>${o.delivery_attempts || 0}/3</td>
+          <td style="display:flex;gap:6px;">
+            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="markOrderDelivered('${o.order_id}')">Delivered</button>
+            <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="markOrderNotDelivered('${o.order_id}')">Not Delivered</button>
+          </td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
+}
+
+function toggleAllDeliverySelections(cb) {
+  document.querySelectorAll('.delivery-select-cb').forEach(el => { el.checked = cb.checked; });
+}
+
+async function dispatchSelectedOrders() {
+  const ids = Array.from(document.querySelectorAll('.delivery-select-cb:checked')).map(el => el.value);
+  if (!ids.length) {
+    showToast('Select at least one order to dispatch.', 'error');
+    return;
+  }
+  try {
+    const res  = await fetch('/api/admin/orders/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Dispatched ${body.dispatched} order(s) for today.`);
+      switchDeliveriesTab('today');
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to dispatch orders.', 'error');
+    }
+  } catch (e) { showToast('Error dispatching orders.', 'error'); }
+}
+
+async function markOrderDelivered(orderId, confirmRemittance) {
+  try {
+    const res = await fetch(`/api/admin/orders/${orderId}/delivered`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(confirmRemittance ? { confirm_remittance: true } : {}),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast('Order marked delivered.');
+      loadOrders();
+      return;
+    }
+    if (res.status === 409 && body.requires_remittance_confirmation) {
+      showModal(`
+        <div style="padding:1.5rem;">
+          <h3 style="margin:0 0 8px;font-size:16px;">Confirm Cash Remittance</h3>
+          <p style="font-size:13px;color:var(--text-muted);margin:0 0 1rem;">This is a Cash on Delivery order. Confirm that the cash has been collected and remitted before marking it delivered.</p>
+          <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+            <button class="btn btn-solid-green" onclick="closeModal(); markOrderDelivered('${orderId}', true)">Confirm & Mark Delivered</button>
+          </div>
+        </div>`);
+      return;
+    }
+    showToast(body.error || 'Failed to mark delivered.', 'error');
+  } catch (e) { showToast('Error marking order delivered.', 'error'); }
+}
+
+async function markOrderNotDelivered(orderId) {
+  if (!confirm('Record a failed delivery attempt for this order?')) return;
+  try {
+    const res  = await fetch(`/api/admin/orders/${orderId}/not-delivered`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(body.message || 'Delivery attempt recorded.');
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to record delivery attempt.', 'error');
+    }
+  } catch (e) { showToast('Error recording delivery attempt.', 'error'); }
 }
 
 function updateAdminOrdersBadge(orders) {
@@ -2908,6 +3084,7 @@ function closeModal() {
 function viewOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const customerPhone = order.customer?.phone_number || '';
   const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
   const branch   = branchObj?.branch_name || order.branch_name || '—';
 
@@ -2958,6 +3135,7 @@ function viewOrderItems(order) {
       <!-- Order Info -->
       <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
         <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
+        <div><span style="color:var(--text-muted);">Phone Number</span><br/><strong>${customerPhone || '—'}</strong></div>
         <div><span style="color:var(--text-muted);">Branch</span><br/><strong>${branch}</strong></div>
         <div><span style="color:var(--text-muted);">Served By</span><br/><strong>${(() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</strong></div>
         <div><span style="color:var(--text-muted);">Type</span><br/>${badge(order.order_type)}</div>
@@ -3007,14 +3185,18 @@ function viewOrderItems(order) {
 
 // Orders only move forward one step at a time: pending -> processing -> out_for_delivery -> completed.
 // Completed/cancelled orders are terminal and the dropdown locks.
-const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery', out_for_delivery: 'completed' };
-const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled' };
+// out_for_delivery -> completed is intentionally NOT in this flow map anymore:
+// that transition now only happens through the Deliveries for Today "Delivered"
+// action, which enforces the COD remittance-confirmation step. The row dropdown
+// still locks once an order reaches out_for_delivery (no 'next' option to offer).
+const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
 
 // Orders list hierarchy — active orders (pending/processing/out for delivery)
 // always float above Completed/Cancelled, and within the same tier the
 // order that's been waiting longest (oldest created_at) shows first (FIFO),
 // so staff/admin naturally work the oldest pending order first.
-const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4 };
+const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4, returned_failed: 4 };
 const ORDER_DONE_TIER = 4; // completed/cancelled
 function sortOrdersHierarchy(orders) {
   return [...orders].sort((a, b) => {
@@ -3030,7 +3212,7 @@ function sortOrdersHierarchy(orders) {
 }
 
 function orderStatusSelectHtml(orderId, status, updateFnName) {
-  const locked = status === 'completed' || status === 'cancelled';
+  const locked = status === 'completed' || status === 'cancelled' || status === 'returned_failed';
   const next   = ORDER_STATUS_FLOW[status];
   const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
     + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
@@ -3170,13 +3352,14 @@ async function submitProcessReturn(orderId) {
 
 async function updateOrderStatus(id, status) {
   try {
-    const res = await fetch(`/api/admin/orders/${id}`, {
+    const res  = await fetch(`/api/admin/orders/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
+    const body = await res.json().catch(() => ({}));
     if (res.ok) { showToast('Order status updated!'); loadOrders(); }
-    else showToast('Failed to update status.', 'error');
+    else showToast(body.error || 'Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
 }
 
@@ -6438,6 +6621,7 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
 document.addEventListener('DOMContentLoaded', async function () {
   await loadBranches();
   _loadedSections.add('products'); loadProducts();
+  switchDeliveriesTab('available');
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');

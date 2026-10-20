@@ -114,6 +114,13 @@ const ProductCard = React.memo(function ProductCard({ product, onPress, onAddToC
   );
 });
 
+// Same critical-stock reserve threshold now used backend-side (app.py's
+// CRITICAL_STOCK_LEVEL) and in the POS screen — a product/branch at or
+// below this many units is treated as unavailable here too, not just
+// literal zero, so the shop keeps a small buffer instead of selling a
+// branch all the way down to its last unit.
+const CRITICAL_STOCK_LEVEL = 5;
+
 // ─── Sort Options (M4) ────────────────────────────────
 const SORT_OPTIONS = [
   { id: 'relevance',    name: 'Relevance' },
@@ -276,23 +283,23 @@ export default function HomeScreen({ navigation }) {
       setError(false);
       // Always fetch ALL products — filter client-side to preserve chip list
       const data = await getProducts('');
-      // Expand products by branch — one card per branch with stock
+      // Expand products by branch — one card per branch with stock above
+      // the critical reserve level. A branch at or below that level is
+      // skipped entirely (no card at all), not just shown as "Out of
+      // Stock" — if a product has no qualifying branch, it doesn't appear
+      // in the list at all.
       const expanded = [];
       data.forEach(p => {
-        const branches = (p.branch_stock || []).filter(bs => bs.quantity > 0);
-        if (branches.length === 0) {
-          expanded.push({ ...p, _branchId: null, _branchName: null, _branchQty: 0 });
-        } else {
-          branches.forEach(bs => {
-            expanded.push({
-              ...p,
-              _branchId:   bs.branch_id,
-              _branchName: bs.branch?.branch_name || null,
-              _branchQty:  bs.quantity,
-              quantity:    bs.quantity,
-            });
+        const branches = (p.branch_stock || []).filter(bs => bs.quantity > CRITICAL_STOCK_LEVEL);
+        branches.forEach(bs => {
+          expanded.push({
+            ...p,
+            _branchId:   bs.branch_id,
+            _branchName: bs.branch?.branch_name || null,
+            _branchQty:  bs.quantity,
+            quantity:    bs.quantity,
           });
-        }
+        });
       });
       setAllProducts(expanded);
       setProducts(expanded);
@@ -319,20 +326,16 @@ export default function HomeScreen({ navigation }) {
       const data = res.data || [];
       const expanded = [];
       data.forEach(p => {
-        const branches = (p.branch_stock || []).filter(bs => bs.quantity > 0);
-        if (branches.length === 0) {
-          expanded.push({ ...p, _branchId: null, _branchName: null, _branchQty: 0 });
-        } else {
-          branches.forEach(bs => {
-            expanded.push({
-              ...p,
-              _branchId:   bs.branch_id,
-              _branchName: bs.branch?.branch_name || null,
-              _branchQty:  bs.quantity,
-              quantity:    bs.quantity,
-            });
+        const branches = (p.branch_stock || []).filter(bs => bs.quantity > CRITICAL_STOCK_LEVEL);
+        branches.forEach(bs => {
+          expanded.push({
+            ...p,
+            _branchId:   bs.branch_id,
+            _branchName: bs.branch?.branch_name || null,
+            _branchQty:  bs.quantity,
+            quantity:    bs.quantity,
           });
-        }
+        });
       });
       setAllProducts(expanded);
       // Re-apply current filters silently — read from the ref (always live),
@@ -448,7 +451,7 @@ export default function HomeScreen({ navigation }) {
     // Keep searchFocused=true so back button returns to search
     navigation.navigate('ProductDetail', {
       product: prod,
-      branchId:       (prod.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null,
+      branchId:       (prod.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null,
       fromSearch:     true,
     });
   }
@@ -467,7 +470,7 @@ export default function HomeScreen({ navigation }) {
 
   // ─── Add to Cart (requires login) ────────────────────
   async function handleAddToCart(product) {
-    const branchId = (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null;
+    const branchId = (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
     // Pass the full product (not just its id) + branchId so LoginScreen can
     // resume straight into ProductDetail for this exact product after login.
     const ok = await requireLogin('addToCart', { product, branchId });
@@ -478,7 +481,7 @@ export default function HomeScreen({ navigation }) {
 
   // ─── Buy Now (requires login → ProductDetail) ────────
   async function handleBuyNow(product) {
-    const branchId = (product.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null;
+    const branchId = (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
     const ok = await requireLogin('buyNow', { product, branchId });
     if (!ok) return;
     // Navigate to ProductDetail — customer selects options then buys
@@ -497,7 +500,7 @@ export default function HomeScreen({ navigation }) {
   function handleProductPress(p) {
     navigation.navigate('ProductDetail', {
       product:  p,
-      branchId: p._branchId || (p.branch_stock || []).find(b => b.quantity > 0)?.branch_id || null
+      branchId: p._branchId || (p.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null
     });
   }
 

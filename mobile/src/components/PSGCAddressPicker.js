@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Modal, FlatList,
   TextInput, StyleSheet, ActivityIndicator,
@@ -112,10 +112,35 @@ export default function PSGCAddressPicker({ value = {}, onChange }) {
     zip_code:     value.zip_code     || '',
   });
 
+  // A saved address only ever stores human-readable NAMES (customer.address
+  // is plain text, pipe-separated — no PSGC code column exists), so editing
+  // an existing address only ever gives us e.g. regionName, never
+  // regionCode. These remember the names we still need to resolve into
+  // codes, captured ONCE on mount via a ref — `value` is a fresh object
+  // literal from the parent on every render, so without a ref this would
+  // re-fire the resolution cascade on every keystroke elsewhere in the form.
+  const pendingNames = useRef({
+    regionName:   value.regionName   || '',
+    provinceName: value.provinceName || '',
+    cityName:     value.cityName     || '',
+    barangayName: value.barangayName || '',
+  });
+
   // Load regions on mount
   useEffect(() => {
     loadRegions();
   }, []);
+
+  // Once regions load, resolve a pending saved region NAME into its code —
+  // this is what makes editing a saved address restore the dropdown instead
+  // of showing "Select Region".
+  useEffect(() => {
+    const name = pendingNames.current.regionName;
+    if (name && !selected.regionCode && regions.length) {
+      const match = regions.find(r => r.name.toLowerCase() === name.toLowerCase());
+      if (match) update({ regionCode: match.code, regionName: match.name });
+    }
+  }, [regions]);
 
   // Load provinces when region changes
   useEffect(() => {
@@ -123,17 +148,44 @@ export default function PSGCAddressPicker({ value = {}, onChange }) {
     else { setProvinces([]); setCities([]); setBarangays([]); }
   }, [selected.regionCode]);
 
+  // Resolve pending province name once the resolved region's provinces load
+  useEffect(() => {
+    const name = pendingNames.current.provinceName;
+    if (name && !selected.provinceCode && provinces.length) {
+      const match = provinces.find(p => p.name.toLowerCase() === name.toLowerCase());
+      if (match) update({ provinceCode: match.code, provinceName: match.name });
+    }
+  }, [provinces]);
+
   // Load cities when province changes
   useEffect(() => {
     if (selected.provinceCode) loadCities(selected.provinceCode);
     else { setCities([]); setBarangays([]); }
   }, [selected.provinceCode]);
 
+  // Resolve pending city name once the resolved province's cities load
+  useEffect(() => {
+    const name = pendingNames.current.cityName;
+    if (name && !selected.cityCode && cities.length) {
+      const match = cities.find(c => c.name.toLowerCase() === name.toLowerCase());
+      if (match) update({ cityCode: match.code, cityName: match.name });
+    }
+  }, [cities]);
+
   // Load barangays when city changes
   useEffect(() => {
     if (selected.cityCode) loadBarangays(selected.cityCode);
     else setBarangays([]);
   }, [selected.cityCode]);
+
+  // Resolve pending barangay name once the resolved city's barangays load
+  useEffect(() => {
+    const name = pendingNames.current.barangayName;
+    if (name && !selected.barangayCode && barangays.length) {
+      const match = barangays.find(b => b.name.toLowerCase() === name.toLowerCase());
+      if (match) update({ barangayCode: match.code, barangayName: match.name });
+    }
+  }, [barangays]);
 
   async function loadRegions() {
     setLoadingRegions(true);

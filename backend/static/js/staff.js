@@ -493,10 +493,12 @@ function badge(text) {
   const map = {
     active: 'green', inactive: 'gray', pending: 'yellow',
     processing: 'blue', completed: 'green', cancelled: 'red',
+    out_for_delivery: 'blue', returned_failed: 'red',
     online: 'blue', walk_in: 'green', paid: 'green', failed: 'red',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
   };
-  return `<span class="badge badge--${map[text] || 'gray'}">${text.replace(/_/g, ' ')}</span>`;
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text.replace(/_/g, ' ');
+  return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 
 function peso(val) {
@@ -822,7 +824,10 @@ async function loadPosProducts() {
   }
   // ─────────────
   try {
-    const res   = await fetch('/api/products');
+    // branch_id scopes the result to this branch's shelf AND tells the
+    // backend to drop anything at or below its critical stock level (≤5) —
+    // keeps a reserve buffer instead of selling all the way to zero.
+    const res   = await fetch(`/api/products${staffBranchId ? `?branch_id=${staffBranchId}` : ''}`);
     const rawAll = await res.json();
     const all    = Array.isArray(rawAll) ? rawAll : [];
     // Filter to only show products for this branch
@@ -1248,8 +1253,14 @@ async function checkPosVariantStock() {
     });
     const data = await res.json();
     const qty  = data.quantity || 0;
-    stockEl.textContent = qty > 0 ? `✅ ${qty} units available` : '❌ Out of stock for this variant';
-    stockEl.style.color = qty > 0 ? 'var(--g-400)' : '#ef4444';
+    // CRITICAL_STOCK_LEVEL (5) — same reserve-buffer threshold as the main
+    // product grid: a critically-low variant is treated as unsellable here
+    // too, not just a literal zero.
+    const isCritical = qty > 0 && qty <= 5;
+    stockEl.textContent = qty > 5 ? `✅ ${qty} units available` : (isCritical ? `⚠️ Only ${qty} left — below reserve level, not sellable` : '❌ Out of stock for this variant');
+    stockEl.style.color = qty > 5 ? 'var(--g-400)' : '#ef4444';
+    const addBtn = document.getElementById('posVarAddBtn');
+    if (addBtn) addBtn.disabled = qty <= 5;
   } catch (e) {
     stockEl.textContent = '';
   }
@@ -1281,8 +1292,8 @@ async function confirmPosVariant(btn) {
     });
     const data = await res.json();
     availableStock = data.quantity || 0;
-    if (availableStock <= 0) {
-      showToast('This variant is out of stock!', 'error');
+    if (availableStock <= 5) {
+      showToast(availableStock <= 0 ? 'This variant is out of stock!' : 'This variant is below its reserve stock level and cannot be sold right now.', 'error');
       setButtonLoading(btn, false);
       return;
     }
@@ -2433,16 +2444,19 @@ function updateOrdersBadge(orders) {
   }
 }
 
-// Orders only move forward one step at a time: pending -> processing -> out_for_delivery -> completed.
-// Completed/cancelled orders are terminal and the dropdown locks.
-const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery', out_for_delivery: 'completed' };
-const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled' };
+// Orders only move forward one step at a time: pending -> processing -> out_for_delivery.
+// out_for_delivery -> completed is intentionally NOT in this flow map: that
+// transition now only happens through the Deliveries for Today "Delivered"
+// action, which enforces the COD remittance-confirmation step.
+// Completed/cancelled/returned_failed orders are terminal and the dropdown locks.
+const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
 
 // Orders list hierarchy — active orders (pending/processing/out for delivery)
 // always float above Completed/Cancelled, and within the same tier the
 // order that's been waiting longest (oldest created_at) shows first (FIFO),
 // so staff/admin naturally work the oldest pending order first.
-const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4 };
+const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4, returned_failed: 4 };
 const ORDER_DONE_TIER = 4; // completed/cancelled
 function sortOrdersHierarchy(orders) {
   return [...orders].sort((a, b) => {
@@ -2458,7 +2472,7 @@ function sortOrdersHierarchy(orders) {
 }
 
 function orderStatusSelectHtml(orderId, status, updateFnName) {
-  const locked = status === 'completed' || status === 'cancelled';
+  const locked = status === 'completed' || status === 'cancelled' || status === 'returned_failed';
   const next   = ORDER_STATUS_FLOW[status];
   const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
     + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
@@ -2527,6 +2541,7 @@ function closeGenericModal() {
 function viewStaffOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const customerPhone = order.customer?.phone_number || '';
   const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
   const branch   = branchObj?.branch_name || order.branch_name || staffBranchName || '—';
 
@@ -2573,6 +2588,7 @@ function viewStaffOrderItems(order) {
     ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
       + '<div style="color:var(--text-muted);margin-bottom:2px;">Delivery Address</div>'
       + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
+      + (addrNote ? '<div style="color:var(--text-muted);margin-top:4px;font-size:11px;">📍 ' + addrNote + '</div>' : '')
       + shippingHtml
       + '</div>'
     : '';
@@ -2586,6 +2602,7 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
     + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Phone Number</span><br/><strong>' + (customerPhone || '—') + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>' + branch + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
@@ -2626,6 +2643,8 @@ async function loadOrders() {
     populateStaffOrderDayOptions();
     applyStaffOrderFilters();
     updateOrdersBadge(staffOrders);
+    updateStaffProcessingCapIndicator(staffOrders);
+    renderStaffDeliveriesForToday(staffOrders);
   } catch (e) { console.error('Orders error:', e); }
 }
 
@@ -2705,6 +2724,7 @@ function closeGenericModal() {
 function viewStaffOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const customerPhone = order.customer?.phone_number || '';
   const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
   const branch   = branchObj?.branch_name || order.branch_name || staffBranchName || '—';
 
@@ -2751,6 +2771,7 @@ function viewStaffOrderItems(order) {
     ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
       + '<div style="color:var(--text-muted);margin-bottom:2px;">Delivery Address</div>'
       + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
+      + (addrNote ? '<div style="color:var(--text-muted);margin-top:4px;font-size:11px;">📍 ' + addrNote + '</div>' : '')
       + shippingHtml
       + '</div>'
     : '';
@@ -2764,6 +2785,7 @@ function viewStaffOrderItems(order) {
     + '</div>'
     + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
     + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
+    + '<div><span style="color:var(--text-muted);">Phone Number</span><br/><strong>' + (customerPhone || '—') + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>' + branch + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
     + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
@@ -2957,14 +2979,183 @@ window.filterStaffOrderType = filterStaffOrderType;
 
 async function updateOrderStatus(id, status) {
   try {
-    const res = await fetch(`/api/staff/orders/${id}`, {
+    const res  = await fetch(`/api/staff/orders/${id}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status }),
     });
+    const body = await res.json().catch(() => ({}));
     if (res.ok) { showToast('Order status updated!'); loadOrders(); }
-    else showToast('Failed to update status.', 'error');
+    else showToast(body.error || 'Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
+}
+
+// ─── Pending → Processing (capped batch) ──────────────
+function updateStaffProcessingCapIndicator(orders) {
+  const el = document.getElementById('staffProcessingCapIndicator');
+  if (!el) return;
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const usedToday = orders.filter(o => o.processing_started_at && o.processing_started_at.slice(0, 10) === todayUTC).length;
+  el.textContent = `(${usedToday}/30 today)`;
+  const btn = document.getElementById('staffMoveToProcessingBtn');
+  if (btn) btn.disabled = usedToday >= 30;
+}
+
+async function staffRunBatchProcessOrders() {
+  try {
+    const res  = await fetch('/api/staff/orders/batch-process', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const skippedCount = (body.skipped || []).length;
+      const skippedNote  = skippedCount > 0 ? ` (${skippedCount} skipped — out of stock)` : '';
+      showToast(body.moved > 0 ? `Moved ${body.moved} order(s) to Processing.${skippedNote}` : (body.message || 'Nothing to move.'), skippedCount > 0 && body.moved === 0 ? 'error' : undefined);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to move orders to processing.', 'error');
+    }
+  } catch (e) { showToast('Error moving orders to processing.', 'error'); }
+}
+
+// ─── Deliveries for Today ──────────────────────────────
+let staffDeliveriesActiveTab = 'available';
+
+function staffSwitchDeliveriesTab(tab) {
+  staffDeliveriesActiveTab = tab;
+  const availBtn = document.getElementById('staffDeliveriesTabAvailableBtn');
+  const todayBtn = document.getElementById('staffDeliveriesTabTodayBtn');
+  document.getElementById('staffDeliveriesAvailablePanel').style.display = tab === 'available' ? '' : 'none';
+  document.getElementById('staffDeliveriesTodayPanel').style.display     = tab === 'today' ? '' : 'none';
+  if (availBtn) availBtn.className = `btn ${tab === 'available' ? 'btn-solid-green' : 'btn-cancel'}`;
+  if (todayBtn) todayBtn.className = `btn ${tab === 'today' ? 'btn-solid-green' : 'btn-cancel'}`;
+}
+
+function staffFullDeliveryAddress(order) {
+  const parts = (order.address || '').split('|');
+  const addr = parts.length > 1
+    ? [parts[0], parts[1], parts[2], parts[3]].filter(Boolean).join(', ')
+    : (order.address || '').trim() || '—';
+  const note = order.address_note || '';
+  return note
+    ? `${addr}<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">📍 ${note}</div>`
+    : addr;
+}
+
+function renderStaffDeliveriesForToday(orders) {
+  if (!document.getElementById('staffDeliveriesAvailableBody')) return; // card not on this page
+  const todayUTC = new Date().toISOString().slice(0, 10);
+  const ofd = orders.filter(o => o.status === 'out_for_delivery');
+  const available = ofd.filter(o => !o.dispatch_date);
+  const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
+
+  // Cash Remitted Today — same logic as admin: COD orders dispatched today
+  // that have since been confirmed Delivered (remittance-confirmed).
+  const remittedToday = orders.filter(o =>
+    o.status === 'completed' &&
+    o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC &&
+    (o.payment?.payment_method === 'cash_on_delivery' || (Array.isArray(o.payment) && o.payment[0]?.payment_method === 'cash_on_delivery'))
+  );
+  const remittedSummaryEl = document.getElementById('staffCashRemittedTodaySummary');
+  if (remittedSummaryEl) {
+    const total = remittedToday.reduce((sum, o) => sum + Number(o.total || 0), 0);
+    remittedSummaryEl.textContent = `${peso(total)} (${remittedToday.length} order${remittedToday.length !== 1 ? 's' : ''})`;
+  }
+
+  document.getElementById('staffDeliveriesAvailableBody').innerHTML = available.length
+    ? available.map(o => `
+        <tr>
+          <td><input type="checkbox" class="staff-delivery-select-cb" value="${o.order_id}"/></td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+          <td>${staffFullDeliveryAddress(o)}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
+          <td>${peso(o.total)}</td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
+
+  document.getElementById('staffDeliveriesTodayBody').innerHTML = today.length
+    ? today.map(o => `
+        <tr>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+          <td>${staffFullDeliveryAddress(o)}</td>
+          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
+          <td>${o.delivery_attempts || 0}/3</td>
+          <td style="display:flex;gap:6px;">
+            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="staffMarkOrderDelivered('${o.order_id}')">Delivered</button>
+            <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="staffMarkOrderNotDelivered('${o.order_id}')">Not Delivered</button>
+          </td>
+        </tr>`).join('')
+    : '<tr><td colspan="6" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
+}
+
+function staffToggleAllDeliverySelections(cb) {
+  document.querySelectorAll('.staff-delivery-select-cb').forEach(el => { el.checked = cb.checked; });
+}
+
+async function staffDispatchSelectedOrders() {
+  const ids = Array.from(document.querySelectorAll('.staff-delivery-select-cb:checked')).map(el => el.value);
+  if (!ids.length) {
+    showToast('Select at least one order to dispatch.', 'error');
+    return;
+  }
+  try {
+    const res  = await fetch('/api/staff/orders/dispatch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Dispatched ${body.dispatched} order(s) for today.`);
+      staffSwitchDeliveriesTab('today');
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to dispatch orders.', 'error');
+    }
+  } catch (e) { showToast('Error dispatching orders.', 'error'); }
+}
+
+async function staffMarkOrderDelivered(orderId, confirmRemittance) {
+  try {
+    const res = await fetch(`/api/staff/orders/${orderId}/delivered`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(confirmRemittance ? { confirm_remittance: true } : {}),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast('Order marked delivered.');
+      loadOrders();
+      return;
+    }
+    if (res.status === 409 && body.requires_remittance_confirmation) {
+      showGenericModal(`
+        <div style="padding:1.5rem;">
+          <h3 style="margin:0 0 8px;font-size:16px;">Confirm Cash Remittance</h3>
+          <p style="font-size:13px;color:var(--text-muted);margin:0 0 1rem;">This is a Cash on Delivery order. Confirm that the cash has been collected and remitted before marking it delivered.</p>
+          <div style="display:flex;justify-content:flex-end;gap:8px;">
+            <button class="btn btn-cancel" onclick="closeGenericModal()">Cancel</button>
+            <button class="btn btn-solid-green" onclick="closeGenericModal(); staffMarkOrderDelivered('${orderId}', true)">Confirm & Mark Delivered</button>
+          </div>
+        </div>`);
+      return;
+    }
+    showToast(body.error || 'Failed to mark delivered.', 'error');
+  } catch (e) { showToast('Error marking order delivered.', 'error'); }
+}
+
+async function staffMarkOrderNotDelivered(orderId) {
+  if (!confirm('Record a failed delivery attempt for this order?')) return;
+  try {
+    const res  = await fetch(`/api/staff/orders/${orderId}/not-delivered`, { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(body.message || 'Delivery attempt recorded.');
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to record delivery attempt.', 'error');
+    }
+  } catch (e) { showToast('Error recording delivery attempt.', 'error'); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -3551,6 +3742,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   _loadedSections.add('pos'); await loadPosProducts();
   await loadPosDiscounts();
   startConnectivityWatch();
+  staffSwitchDeliveriesTab('available');
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');

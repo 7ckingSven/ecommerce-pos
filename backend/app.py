@@ -432,7 +432,37 @@ ORDER_STATUS_MESSAGES = {
     'out_for_delivery': ('On the Way! 🚚',   'Your order is out for delivery!'),
     'completed':        ('Order Delivered ✅','Your order has been delivered. Thank you!'),
     'cancelled':        ('Order Cancelled',   'Your order has been cancelled.'),
+    'returned_failed':  ('Delivery Unsuccessful', 'We were unable to deliver your order after multiple attempts. It has been returned.'),
 }
+
+# Daily cap on how many pending orders can be moved into processing in one
+# day (shop's hard delivery capacity limit per the mock-defense revision).
+DAILY_PROCESSING_CAP = 30
+
+# Same "critical stock" threshold already used everywhere in the admin/staff
+# Inventory dashboards (≤5 units — see hasAnyBranchCritical / staffStockInfo
+# in admin.js/staff.js) — reused here as the cutoff below which a product or
+# variant stops being offered for sale (mobile app + POS), so the shop keeps
+# a small reserve buffer instead of selling all the way down to zero.
+CRITICAL_STOCK_LEVEL = 5
+
+def _auto_advance_processing_orders():
+    """Lazy/opportunistic check for the automatic Processing -> Out for
+    Delivery transition. No background scheduler exists anywhere in this
+    app, so this runs inline whenever admin or staff orders are fetched:
+    any order that has been 'processing' for >=24h gets flipped to
+    'out_for_delivery' right here, before the caller's query runs. Cheap
+    (one UPDATE, no-op when nothing qualifies) and keeps the lists callers
+    already fetch (admin_get_orders / staff_get_orders) self-correcting
+    without a separate endpoint or cron job."""
+    try:
+        cutoff = (datetime.utcnow() - timedelta(days=1)).isoformat()
+        stale = supabase.table('order').select('order_id').eq('status', 'processing').lte('processing_started_at', cutoff).execute()
+        ids = [o['order_id'] for o in (stale.data or [])]
+        if ids:
+            supabase.table('order').update({'status': 'out_for_delivery'}).in_('order_id', ids).execute()
+    except Exception as e:
+        print(f'Auto-advance (processing -> out_for_delivery) warning: {e}')
 
 
 @app.route('/')
@@ -1312,7 +1342,8 @@ def api_verify_otp():
 @app.route('/api/products', methods=['GET'])
 def api_products():
     try:
-        category = request.args.get('category', '')
+        category  = request.args.get('category', '')
+        branch_id = request.args.get('branch_id', '')  # optional — scopes "Sold" to this branch
         query    = supabase.table('product').select(
             '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), option_groups, net_weight'
         ).eq('status', 'active')
@@ -1326,8 +1357,15 @@ def api_products():
         # uses this helper; this one just hadn't been updated to match.
         res = supabase_retry(lambda: query.order('created_at', desc=True).execute())
 
-        # Get total sold per product from completed orders
-        completed_orders    = supabase_retry(lambda: supabase.table('order').select('order_id').eq('status', 'completed').execute())
+        # Get total sold per product from completed orders — scoped to the
+        # customer's selected branch when one is passed (?branch_id=...), so
+        # the "Sold" badge reflects what actually sold at that branch rather
+        # than a store-wide total that reads identical no matter which
+        # branch's catalog is being browsed.
+        completed_query = supabase.table('order').select('order_id').eq('status', 'completed')
+        if branch_id:
+            completed_query = completed_query.eq('branch_id', branch_id)
+        completed_orders    = supabase_retry(lambda: completed_query.execute())
         completed_order_ids = [o['order_id'] for o in (completed_orders.data or [])]
         sold_map = {}
         if completed_order_ids:
@@ -1347,6 +1385,30 @@ def api_products():
             # 500 "Failed to fetch products." with no indication of why).
             branch_stocks = p.get('branch_stock') or []
             entry['quantity'] = sum(int(bs.get('quantity') or 0) for bs in branch_stocks)
+
+            # Hide a product from the branch's shelf once it's down to its
+            # critical reserve level — keeps a buffer instead of selling all
+            # the way to zero. Only applied when a specific branch_id was
+            # requested (the customer's selected branch, or the POS screen's
+            # own branch) — a caller that didn't scope to a branch (e.g. the
+            # admin/staff Inventory dashboard, which hits a different
+            # endpoint anyway, or any store-wide listing) sees everything,
+            # critical or not, since that view exists precisely to show low
+            # stock so staff know to restock it.
+            if branch_id:
+                bs_here = next((bs for bs in branch_stocks if str(bs.get('branch_id')) == str(branch_id)), None)
+                base_qty = int(bs_here.get('quantity') or 0) if bs_here else 0
+                variant_stocks = [v for v in (p.get('variant_stock') or []) if str(v.get('branch_id')) == str(branch_id)]
+                if variant_stocks:
+                    # Variant product — available if AT LEAST ONE variant combo
+                    # is still above critical (still sellable via that option),
+                    # even if other variants or the base row are critically low.
+                    best_available = max(int(v.get('quantity') or 0) for v in variant_stocks)
+                else:
+                    best_available = base_qty
+                if best_available <= CRITICAL_STOCK_LEVEL:
+                    continue  # skip — critical or out of stock at this branch
+
             result.append(entry)
 
         return jsonify(result), 200
@@ -1576,54 +1638,11 @@ def api_cancel_order(order_id):
             'cancelled_by':   'customer',
         }).eq('order_id', order_id).execute()
 
-        # Return stock to branch/variant/product totals
-        br_id = order.get('branch_id')
-        for item in order.get('order_item', []):
-            pid  = item.get('product_id')
-            qty  = int(item.get('qty', 0))
-            opts = item.get('selected_options', {})
-            if not pid or not qty:
-                continue
-            bs = None
-            if br_id:
-                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
-                if bs.data:
-                    supabase.table('branch_stock').update({
-                        'quantity': bs.data[0]['quantity'] + qty
-                    }).eq('product_id', pid).eq('branch_id', br_id).execute()
-            if opts and br_id:
-                try:
-                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
-                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                    if match:
-                        supabase.table('variant_stock').update({
-                            'quantity': match[0]['quantity'] + qty
-                        }).eq('id', match[0]['id']).execute()
-                except Exception as vs_err:
-                    print(f'Variant stock restore warning: {vs_err}')
-            pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
-            if pr.data:
-                supabase.table('product').update({
-                    'quantity': pr.data[0]['quantity'] + qty
-                }).eq('product_id', pid).execute()
-            try:
-                # Tagged with [CANCELLED] so the Admin/Staff Stock Movement History
-                # dropdown can reliably classify this row (instead of it being
-                # mistaken for a Sale or a plain Restock), and the reason the
-                # customer gave is included so staff can see why stock came back.
-                reason_text = f' — Reason: {reason}' if reason else ''
-                supabase.table('inventory').insert({
-                    'product_id':      pid,
-                    'staff_id':        None,
-                    'quantity_added':  qty,
-                    'quantity_before': (bs.data[0]['quantity'] if br_id and bs and bs.data else 0),
-                    'quantity_after':  (bs.data[0]['quantity'] + qty if br_id and bs and bs.data else qty),
-                    'to_branch_id':    br_id,
-                    'variant_options': opts if opts else None,
-                    'note':            f'[CANCELLED] Order #{order_id[:8].upper()} — Cancelled by customer{reason_text}',
-                }).execute()
-            except Exception as log_err:
-                print(f'Cancel inventory log warning: {log_err}')
+        # No stock restore here — this endpoint only ever cancels a still-
+        # 'pending' order (enforced above), and stock is no longer deducted
+        # at checkout, only once an order reaches 'processing'. A pending
+        # order never took stock off the shelf, so there's nothing to give
+        # back.
 
         return jsonify({'message': 'Order cancelled.'}), 200
     except Exception as e:
@@ -1807,45 +1826,14 @@ def api_place_order():
             'selected_options': item.get('selected_options', {})
         } for item in cart_items]
 
-        # Deduct variant stock + log stock movement for each item
-        import time as _mt
-        for item in cart_items:
-            pid  = item['product_id']
-            qty  = item['quantity']
-            opts = item.get('selected_options', {})
-
-            # Variant stock deduction
-            if opts and branch_id:
-                try:
-                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
-                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                    if match:
-                        new_vs_qty = max(0, match[0]['quantity'] - qty)
-                        supabase.table('variant_stock').update({'quantity': new_vs_qty, 'updated_at': 'now()'}).eq('id', match[0]['id']).execute()
-                except Exception as vs_err:
-                    print(f'Variant stock deduct warning: {vs_err}')
-
-            # Log stock movement (OUT) for inventory history
-            if branch_id:
-                try:
-                    _mt.sleep(0.05)
-                    bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
-                    qty_after  = bs.data[0]['quantity'] if bs.data else 0
-                    qty_before = qty_after + qty
-                    supabase.table('inventory').insert({
-                        'product_id':      pid,
-                        'quantity_added':  -qty,
-                        'quantity_before': qty_before,
-                        'quantity_after':  qty_after,
-                        'to_branch_id':    branch_id,
-                        'variant_options': opts if opts else None,
-                        'note':            f'Sale — Order #{order_id[:8].upper()}',
-                    }).execute()
-                except Exception as log_err:
-                    print(f'Inventory log warning: {log_err}')
-
-        # Deduct variant stock + log stock movement for each item
-        import time as _mt
+        # Stock is NOT deducted here at checkout anymore — an order only
+        # actually takes stock off the shelf once it's moved into
+        # 'processing' (see _deduct_order_item_stock, called from
+        # admin_update_order / staff_update_order / the batch-process
+        # endpoints). A still-'pending' order is a reservation request only;
+        # this keeps the customer cancel window (pending-only) simple — no
+        # stock to restore — and matches the inventory not being committed
+        # until a staff member actually starts working the order.
         supabase.table('order_item').insert(order_items).execute()
 
         payment_res = supabase.table('payment').insert({
@@ -1872,24 +1860,8 @@ def api_place_order():
                 except Exception:
                     pass  # Non-critical — cart status update failure won't block order
 
-        branch_id = data.get('branch_id')
-
-        for item in cart_items:
-            product_id = item['product_id']
-            qty        = item['quantity']
-
-            if branch_id:
-                # Deduct from branch_stock
-                bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', branch_id).execute()
-                if bs_res.data:
-                    new_qty = max(bs_res.data[0]['quantity'] - qty, 0)
-                    supabase.table('branch_stock').update({'quantity': new_qty}).eq('product_id', product_id).eq('branch_id', branch_id).execute()
-            else:
-                # Fallback — deduct from product quantity
-                product_res = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
-                if product_res.data:
-                    new_qty = max(product_res.data[0]['quantity'] - qty, 0)
-                    supabase.table('product').update({'quantity': max(new_qty, 0)}).eq('product_id', product_id).execute()
+        # (No stock deduction here either — see note above. Stock is taken
+        # off the shelf only when the order enters 'processing'.)
 
         return jsonify({
             'message':  'Order placed successfully.',
@@ -3378,8 +3350,10 @@ def admin_get_orders():
         if limit > 500:
             limit = 500
 
+        _auto_advance_processing_orders()
+
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).execute()
 
         # Get branch lookup
@@ -3397,15 +3371,150 @@ def admin_get_orders():
         print(f'Admin orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/orders/batch-process', methods=['POST'])
+@admin_required
+def admin_batch_process_orders():
+    """Move the oldest pending orders into 'processing', capped at
+    DAILY_PROCESSING_CAP per day (shop's delivery capacity limit). Counts
+    how many orders have already been moved into processing today (by
+    processing_started_at date) and only takes up to the remaining slots."""
+    try:
+        today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
+        today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
+
+        already_today = supabase.table('order').select('order_id') \
+            .gte('processing_started_at', today_start) \
+            .lte('processing_started_at', today_end).execute()
+        used_today = len(already_today.data or [])
+        remaining  = DAILY_PROCESSING_CAP - used_today
+
+        if remaining <= 0:
+            return jsonify({
+                'moved': 0,
+                'used_today': used_today,
+                'cap': DAILY_PROCESSING_CAP,
+                'message': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'
+            }), 200
+
+        # Fetch every pending order (not just `remaining` of them) so a
+        # skip due to insufficient stock doesn't shrink the batch below the
+        # cap — we keep pulling from the oldest-first queue until we've
+        # filled `remaining` slots or run out of candidates.
+        pending_res = supabase.table('order').select(
+            'order_id, branch_id, order_item(product_id, qty, selected_options, product(product_name))'
+        ).eq('status', 'pending').order('created_at', desc=False).execute()
+        pending_orders = pending_res.data or []
+
+        if not pending_orders:
+            return jsonify({
+                'moved': 0,
+                'used_today': used_today,
+                'cap': DAILY_PROCESSING_CAP,
+                'message': 'No pending orders to move.'
+            }), 200
+
+        # Stock is taken off the shelf right here — the moment each order
+        # actually enters 'processing' — not at checkout. An order whose
+        # stock has since run out is skipped (not force-moved), so the
+        # batch never oversells.
+        moved_ids = []
+        skipped   = []
+        for o in pending_orders:
+            if len(moved_ids) >= remaining:
+                break
+            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [])
+            if ok:
+                moved_ids.append(o['order_id'])
+            else:
+                skipped.append({'order_id': o['order_id'], 'reason': err})
+
+        if not moved_ids:
+            return jsonify({
+                'moved': 0,
+                'used_today': used_today,
+                'cap': DAILY_PROCESSING_CAP,
+                'skipped': skipped,
+                'message': 'No pending orders could be moved' + (' — all candidates are out of stock.' if skipped else '.')
+            }), 200
+
+        now_iso = datetime.utcnow().isoformat()
+        supabase.table('order').update({
+            'status': 'processing',
+            'processing_started_at': now_iso
+        }).in_('order_id', moved_ids).execute()
+
+        # Notify affected customers (best-effort, same pattern as admin_update_order)
+        try:
+            notif_res = supabase.table('order').select(
+                'order_id, customer(fcm_token, fname)'
+            ).in_('order_id', moved_ids).execute()
+            notif_title, notif_body = ORDER_STATUS_MESSAGES['processing']
+            for o in (notif_res.data or []):
+                customer = o.get('customer')
+                if isinstance(customer, list): customer = customer[0] if customer else {}
+                fcm_token = customer.get('fcm_token') if customer else None
+                if fcm_token:
+                    send_push_notification(fcm_token, notif_title, notif_body, {'order_id': o['order_id'], 'status': 'processing'})
+        except Exception as notif_err:
+            print(f'Batch-process notification error: {notif_err}')
+
+        return jsonify({
+            'moved': len(moved_ids),
+            'used_today': used_today + len(moved_ids),
+            'cap': DAILY_PROCESSING_CAP,
+            'order_ids': moved_ids,
+            'skipped': skipped
+        }), 200
+    except Exception as e:
+        print(f'Admin batch-process error: {e}')
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/orders/<order_id>', methods=['PUT'])
 @admin_required
 def admin_update_order(order_id):
     try:
         data       = request.get_json()
         status     = data.get('status')
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled']
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled', 'returned_failed']
         if status not in valid_statuses:
             return jsonify({'error': 'Invalid status.'}), 400
+
+        # Fetch the order's current state once — needed to decide whether
+        # this transition actually takes stock off the shelf (pending ->
+        # processing, for the first time) or gives it back (an order that
+        # already reached processing -> cancelled/returned_failed).
+        order_res = supabase.table('order').select(
+            'branch_id, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+        order_row         = order_res.data[0]
+        branch_id         = order_row.get('branch_id')
+        already_processed = bool(order_row.get('processing_started_at'))
+        order_items       = order_row.get('order_item') or []
+
+        # Enforce the same daily processing cap here as the batch action —
+        # this single-order dropdown is still a valid way into 'processing',
+        # so it must respect the 30/day limit too, not just the batch button.
+        if status == 'processing':
+            today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
+            today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
+            used_today_res = supabase.table('order').select('order_id') \
+                .gte('processing_started_at', today_start) \
+                .lte('processing_started_at', today_end).execute()
+            if len(used_today_res.data or []) >= DAILY_PROCESSING_CAP:
+                return jsonify({'error': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'}), 400
+
+            # Stock is reserved only once an order actually enters
+            # 'processing' (not at checkout) — this is the moment it's
+            # actually taken off the shelf. Skip if it already reached
+            # processing before (re-selecting 'Processing' shouldn't deduct
+            # twice), and block the transition entirely if stock has since
+            # run out, rather than silently flooring at zero.
+            if not already_processed:
+                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items)
+                if not ok:
+                    return jsonify({'error': stock_err}), 400
 
         # Update status and assign staff_id if not already set
         update_data = {'status': status}
@@ -3416,6 +3525,12 @@ def admin_update_order(order_id):
             existing = supabase.table('order').select('staff_id').eq('order_id', order_id).execute()
             if existing.data and not existing.data[0].get('staff_id'):
                 update_data['staff_id'] = staff_id
+
+        # Drives the lazy auto-advance to out_for_delivery after 1 day —
+        # start the clock whenever an order (re-)enters processing, whether
+        # via this manual single-order path or the capped batch action below.
+        if status == 'processing':
+            update_data['processing_started_at'] = datetime.utcnow().isoformat()
 
         supabase.table('order').update(update_data).eq('order_id', order_id).execute()
 
@@ -3441,66 +3556,21 @@ def admin_update_order(order_id):
         except Exception as notif_err:
             print(f'Notification error: {notif_err}')
 
-        # If cancelled — return stock to branch
-        if status == 'cancelled':
-            order_res = supabase.table('order').select(
-                'branch_id, order_item(product_id, qty, selected_options)'
-            ).eq('order_id', order_id).execute()
-            if order_res.data:
-                order_data = order_res.data[0]
-                br_id      = order_data.get('branch_id')
-                for item in order_data.get('order_item', []):
-                    pid  = item.get('product_id')
-                    qty  = int(item.get('qty', 0))
-                    opts = item.get('selected_options', {})
-                    if not pid or not qty:
-                        continue
-                    # Return to branch_stock
-                    if br_id:
-                        bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
-                        if bs.data:
-                            supabase.table('branch_stock').update({
-                                'quantity': bs.data[0]['quantity'] + qty
-                            }).eq('product_id', pid).eq('branch_id', br_id).execute()
-                    # Return to variant stock
-                    print(f'Cancel debug - opts: {opts}, br_id: {br_id}, pid: {pid}')
-                    if opts and br_id:
-                        try:
-                            all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
-                            print(f'Cancel debug - all_vs: {all_vs.data}')
-                            match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                            print(f'Cancel debug - match: {match}')
-                            if match:
-                                supabase.table('variant_stock').update({
-                                    'quantity': match[0]['quantity'] + qty
-                                }).eq('id', match[0]['id']).execute()
-                                print(f'Variant stock restored: {match[0]["id"]} +{qty}')
-                            else:
-                                print(f'Cancel debug - NO MATCH found for opts: {opts}')
-                        except Exception as vs_err:
-                            print(f'Variant stock restore warning: {vs_err}')
-                    else:
-                        print(f'Cancel debug - skipped variant restore: opts={opts}, br_id={br_id}')
-                    # Return to product total
-                    pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
-                    if pr.data:
-                        supabase.table('product').update({
-                            'quantity': pr.data[0]['quantity'] + qty
-                        }).eq('product_id', pid).execute()
-                    # Log stock movement (IN) for inventory history
-                    try:
-                        supabase.table('inventory').insert({
-                            'product_id':      pid,
-                            'staff_id':        None,
-                            'quantity_added':  qty,
-                            'quantity_before': (bs.data[0]['quantity'] if br_id and bs.data else 0),
-                            'quantity_after':  (bs.data[0]['quantity'] + qty if br_id and bs.data else qty),
-                            'to_branch_id':    br_id,
-                            'variant_options': opts if opts else None,
-                            'note':            f'Cancelled — Order #{order_id[:8].upper()}',
-                        }).execute()
-                    except Exception as log_err:
-                        print(f'Cancel inventory log warning: {log_err}')
+        # If cancelled or returned/failed delivery — return stock to branch,
+        # but ONLY if this order actually reached 'processing' at some point
+        # (already_processed, fetched above). A still-pending order was
+        # never deducted, so cancelling it must NOT add stock back — that
+        # would inflate inventory for stock that was never taken.
+        # (returned_failed here is a safety net for the generic PUT route;
+        # the dedicated not-delivered endpoint below is the normal path and
+        # already does its own restore, so this is a no-op in that case
+        # since the order will already be past 'processing'.)
+        if status in ('cancelled', 'returned_failed') and already_processed:
+            _restore_order_item_stock(
+                order_id,
+                {'branch_id': branch_id, 'order_item': order_items},
+                'Cancelled' if status == 'cancelled' else 'Returned — failed delivery'
+            )
 
         return jsonify({'message': f'Order status updated to {status}.'}), 200
     except Exception as e:
@@ -3626,6 +3696,254 @@ def admin_return_order_items(order_id):
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+# ─── Deliveries for Today ──────────────────────────────
+# Three-step flow for out_for_delivery orders, agreed with the panel:
+#   1. Dispatch  — admin/staff picks today's run from the Available list.
+#   2. Delivered — GCash orders complete immediately; COD orders need a
+#      remittance confirmation first (cash hasn't been handed in yet).
+#   3. Not Delivered — up to 3 attempts; the 3rd marks the order
+#      'returned_failed' and restores stock exactly like a cancellation.
+
+def _deduct_order_item_stock(order_id, branch_id, order_items):
+    """Shared per-item stock-deduction helper, called exactly once — the
+    moment an order actually enters 'processing' (not at checkout; see
+    api_place_order). Checks every item has enough stock BEFORE deducting
+    anything; if any item is short, nothing is deducted and an error string
+    is returned so the caller can block the transition instead of silently
+    flooring stock at zero and overselling.
+
+    order_items: list of {product_id, qty, selected_options, product:{product_name}}
+    Returns (ok: bool, error_message_or_None).
+    """
+    # Pass 1 — verify availability for every item before touching anything.
+    shortages = []
+    checked = []
+    for item in order_items:
+        pid  = item.get('product_id')
+        qty  = int(item.get('qty', 0))
+        opts = item.get('selected_options') or {}
+        if not pid or not qty:
+            continue
+        available = 0
+        try:
+            if opts and branch_id:
+                all_vs = supabase.table('variant_stock').select('quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                available = match[0]['quantity'] if match else 0
+            elif branch_id:
+                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                available = bs.data[0]['quantity'] if bs.data else 0
+            else:
+                pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                available = pr.data[0]['quantity'] if pr.data else 0
+        except Exception as check_err:
+            print(f'Stock availability check warning ({pid}): {check_err}')
+        checked.append((item, pid, qty, opts))
+        if available < qty:
+            pname = (item.get('product') or {}).get('product_name') or pid[:8]
+            shortages.append(f'{pname} (need {qty}, have {available})')
+
+    if shortages:
+        return False, 'Insufficient stock — ' + '; '.join(shortages)
+
+    # Pass 2 — all items confirmed available; now actually deduct.
+    for item, pid, qty, opts in checked:
+        try:
+            qty_before = 0
+            qty_after  = 0
+            if branch_id:
+                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                if bs.data:
+                    qty_before = bs.data[0]['quantity']
+                    qty_after  = max(qty_before - qty, 0)
+                    supabase.table('branch_stock').update({
+                        'quantity': qty_after, 'updated_at': 'now()'
+                    }).eq('product_id', pid).eq('branch_id', branch_id).execute()
+            if opts and branch_id:
+                try:
+                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                    if match:
+                        supabase.table('variant_stock').update({
+                            'quantity': max(match[0]['quantity'] - qty, 0), 'updated_at': 'now()'
+                        }).eq('id', match[0]['id']).execute()
+                except Exception as vs_err:
+                    print(f'Processing stock deduct (variant) warning ({pid}): {vs_err}')
+            pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+            if pr.data:
+                supabase.table('product').update({
+                    'quantity': max(pr.data[0]['quantity'] - qty, 0)
+                }).eq('product_id', pid).execute()
+            supabase.table('inventory').insert({
+                'product_id':      pid,
+                'staff_id':        session.get('staff_id'),
+                'quantity_added':  -qty,
+                'quantity_before': qty_before,
+                'quantity_after':  qty_after,
+                'to_branch_id':    branch_id,
+                'variant_options': opts if opts else None,
+                'note':            f'Sale — Order #{order_id[:8].upper()}',
+            }).execute()
+        except Exception as item_err:
+            print(f'Processing stock deduct warning ({pid}): {item_err}')
+    return True, None
+
+def _restore_order_item_stock(order_id, items, note_label):
+    """Shared per-item stock-restore helper for a whole order's worth of
+    items — same isolated-write pattern as the completed-order Return
+    endpoint above, reused here for a returned_failed delivery."""
+    br_id = items.get('branch_id')
+    for item in items.get('order_item', []):
+        pid  = item.get('product_id')
+        qty  = int(item.get('qty', 0))
+        opts = item.get('selected_options') or {}
+        if not pid or not qty:
+            continue
+        try:
+            qty_before = 0
+            qty_after  = qty
+            if br_id:
+                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                if bs.data:
+                    qty_before = bs.data[0]['quantity']
+                    qty_after  = qty_before + qty
+                    supabase.table('branch_stock').update({
+                        'quantity': qty_after, 'updated_at': 'now()'
+                    }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                else:
+                    supabase.table('branch_stock').insert({
+                        'product_id': pid, 'branch_id': br_id, 'quantity': qty
+                    }).execute()
+            if opts and br_id:
+                try:
+                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
+                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                    if match:
+                        supabase.table('variant_stock').update({
+                            'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
+                        }).eq('id', match[0]['id']).execute()
+                except Exception as vs_err:
+                    print(f'Returned-failed variant stock warning: {vs_err}')
+            pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+            if pr.data:
+                supabase.table('product').update({
+                    'quantity': pr.data[0]['quantity'] + qty
+                }).eq('product_id', pid).execute()
+            supabase.table('inventory').insert({
+                'product_id':      pid,
+                'staff_id':        session.get('staff_id'),
+                'quantity_added':  qty,
+                'quantity_before': qty_before,
+                'quantity_after':  qty_after,
+                'to_branch_id':    br_id,
+                'variant_options': opts if opts else None,
+                'note':            f'{note_label} — Order #{order_id[:8].upper()}',
+            }).execute()
+        except Exception as item_err:
+            print(f'Returned-failed stock restore warning ({pid}): {item_err}')
+
+@app.route('/api/admin/orders/dispatch', methods=['POST'])
+@admin_required
+def admin_dispatch_orders():
+    """Set dispatch_date = today for the selected out_for_delivery orders —
+    this is what moves them from 'Available' into "Today's Batch" on the
+    Deliveries for Today screen."""
+    try:
+        data       = request.get_json()
+        order_ids  = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        res = supabase.table('order').select('order_id, status').in_('order_id', order_ids).execute()
+        eligible = [o['order_id'] for o in (res.data or []) if o.get('status') == 'out_for_delivery']
+        if not eligible:
+            return jsonify({'error': 'No eligible out-for-delivery orders in the selection.'}), 400
+
+        supabase.table('order').update({'dispatch_date': today}).in_('order_id', eligible).execute()
+        return jsonify({'dispatched': len(eligible), 'order_ids': eligible, 'dispatch_date': today}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/orders/<order_id>/delivered', methods=['POST'])
+@admin_required
+def admin_mark_delivered(order_id):
+    """Delivered action from today's dispatch batch. GCash orders are
+    already paid (verified via PayMongo at order time), so they complete
+    immediately. COD orders are only completed once staff confirm they
+    actually collected/remitted the cash — pass {"confirm_remittance": true}
+    for those; without it the order is left as-is and a 409 explains why."""
+    try:
+        data = request.get_json(silent=True) or {}
+        order_res = supabase.table('order').select(
+            'order_id, status, payment(payment_method, status)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+
+        order_data = order_res.data[0]
+        if order_data.get('status') != 'out_for_delivery':
+            return jsonify({'error': 'Only out-for-delivery orders can be marked delivered.'}), 400
+
+        payment = order_data.get('payment')
+        if isinstance(payment, list):
+            payment = payment[0] if payment else None
+        payment_method = (payment or {}).get('payment_method')
+        payment_status = (payment or {}).get('payment_status') or (payment or {}).get('status')
+
+        if payment_status != 'paid':
+            if not data.get('confirm_remittance'):
+                return jsonify({
+                    'error': 'This is a Cash on Delivery order — confirm remittance to complete it.',
+                    'requires_remittance_confirmation': True,
+                    'payment_method': payment_method
+                }), 409
+            supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
+
+        supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
+        return jsonify({'message': 'Order marked delivered.', 'order_id': order_id}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/orders/<order_id>/not-delivered', methods=['POST'])
+@admin_required
+def admin_mark_not_delivered(order_id):
+    """Not Delivered action. Attempts 1-2: order stays out_for_delivery,
+    dispatch_date is cleared so it drops back into "Available" for a later
+    run. Attempt 3: order is marked returned_failed and its stock is
+    restored, same as a cancellation."""
+    try:
+        order_res = supabase.table('order').select(
+            'order_id, status, branch_id, delivery_attempts, order_item(product_id, qty, selected_options)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+
+        order_data = order_res.data[0]
+        if order_data.get('status') != 'out_for_delivery':
+            return jsonify({'error': 'Only out-for-delivery orders can be marked not delivered.'}), 400
+
+        attempts = int(order_data.get('delivery_attempts') or 0) + 1
+
+        if attempts >= 3:
+            supabase.table('order').update({
+                'status': 'returned_failed',
+                'delivery_attempts': attempts
+            }).eq('order_id', order_id).execute()
+            _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
+            return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
+        else:
+            supabase.table('order').update({
+                'delivery_attempts': attempts,
+                'dispatch_date': None
+            }).eq('order_id', order_id).execute()
+            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to Available for another try.', 'delivery_attempts': attempts, 'final': False}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 # ─── Sales Transactions ───────────────────────────────
 
 @app.route('/api/admin/transactions', methods=['GET'])
@@ -3656,8 +3974,12 @@ def admin_get_payments():
 @admin_required
 def admin_get_users():
     try:
+        # branch_id was missing from this select — the Edit Staff modal reads
+        # it to pre-select the branch dropdown, so without it every edit
+        # opened showing "Select branch" even when a branch WAS already
+        # saved, and saving from there silently wiped it back to null.
         res = supabase.table('user').select(
-            '*, staff(fname, mi, lname, email, phone_number), customer(fname, lname, email)'
+            '*, staff(fname, mi, lname, email, phone_number, branch_id), customer(fname, lname, email)'
         ).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -3807,17 +4129,24 @@ def staff_get_orders():
 
         staff_id = session.get('staff_id')
 
+        _auto_advance_processing_orders()
+
         # Get staff's assigned branch
         staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
         branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
 
-        query = supabase.table('order').select(
-            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
-        ).order('created_at', desc=True).limit(limit)
+        # A staff account with no branch assigned must see NO orders, not
+        # every branch's orders. Previously this fell through silently
+        # (missing .eq filter = unfiltered query = everything), which is how
+        # an unassigned test staff account ended up seeing both branches'
+        # orders during the mock defense. Fail safe instead of fail open.
+        if not branch_id:
+            print(f'Staff orders warning: staff_id={staff_id} has no branch_id assigned — returning empty list instead of all branches.')
+            return jsonify([]), 200
 
-        # Filter to this branch's orders only
-        if branch_id:
-            query = query.eq('branch_id', branch_id)
+        query = supabase.table('order').select(
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
+        ).order('created_at', desc=True).limit(limit).eq('branch_id', branch_id)
 
         import time
         # Retry on Windows socket error
@@ -3843,6 +4172,108 @@ def staff_get_orders():
         return jsonify(res.data), 200
     except Exception as e:
         print(f'Staff orders error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders/batch-process', methods=['POST'])
+@staff_required
+def staff_batch_process_orders():
+    """Same capped batch move as the admin endpoint, scoped to the staff
+    member's own branch — but counted against the one store-wide daily cap
+    (per the business rule: 30/day total, regardless of who triggered which
+    batch), not a separate per-branch allowance."""
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        # Fail safe, not fail open — an unassigned staff account must not be
+        # able to move another branch's pending orders into processing.
+        if not branch_id:
+            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
+
+        today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
+        today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
+
+        already_today = supabase.table('order').select('order_id') \
+            .gte('processing_started_at', today_start) \
+            .lte('processing_started_at', today_end).execute()
+        used_today = len(already_today.data or [])
+        remaining  = DAILY_PROCESSING_CAP - used_today
+
+        if remaining <= 0:
+            return jsonify({
+                'moved': 0,
+                'used_today': used_today,
+                'cap': DAILY_PROCESSING_CAP,
+                'message': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'
+            }), 200
+
+        pending_query = supabase.table('order').select(
+            'order_id, branch_id, order_item(product_id, qty, selected_options, product(product_name))'
+        ).eq('status', 'pending').eq('branch_id', branch_id)
+        pending_res = pending_query.order('created_at', desc=False).execute()
+        pending_orders = pending_res.data or []
+
+        if not pending_orders:
+            return jsonify({
+                'moved': 0,
+                'used_today': used_today,
+                'cap': DAILY_PROCESSING_CAP,
+                'message': 'No pending orders to move.'
+            }), 200
+
+        # Stock is taken off the shelf right here — the moment each order
+        # actually enters 'processing' — not at checkout. Same skip-on-
+        # shortage behavior as the admin batch route.
+        moved_ids = []
+        skipped   = []
+        for o in pending_orders:
+            if len(moved_ids) >= remaining:
+                break
+            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [])
+            if ok:
+                moved_ids.append(o['order_id'])
+            else:
+                skipped.append({'order_id': o['order_id'], 'reason': err})
+
+        if not moved_ids:
+            return jsonify({
+                'moved': 0,
+                'used_today': used_today,
+                'cap': DAILY_PROCESSING_CAP,
+                'skipped': skipped,
+                'message': 'No pending orders could be moved' + (' — all candidates are out of stock.' if skipped else '.')
+            }), 200
+
+        now_iso = datetime.utcnow().isoformat()
+        supabase.table('order').update({
+            'status': 'processing',
+            'processing_started_at': now_iso
+        }).in_('order_id', moved_ids).execute()
+
+        try:
+            notif_res = supabase.table('order').select(
+                'order_id, customer(fcm_token, fname)'
+            ).in_('order_id', moved_ids).execute()
+            notif_title, notif_body = ORDER_STATUS_MESSAGES['processing']
+            for o in (notif_res.data or []):
+                customer = o.get('customer')
+                if isinstance(customer, list): customer = customer[0] if customer else {}
+                fcm_token = customer.get('fcm_token') if customer else None
+                if fcm_token:
+                    send_push_notification(fcm_token, notif_title, notif_body, {'order_id': o['order_id'], 'status': 'processing'})
+        except Exception as notif_err:
+            print(f'Staff batch-process notification error: {notif_err}')
+
+        return jsonify({
+            'moved': len(moved_ids),
+            'used_today': used_today + len(moved_ids),
+            'cap': DAILY_PROCESSING_CAP,
+            'order_ids': moved_ids,
+            'skipped': skipped
+        }), 200
+    except Exception as e:
+        print(f'Staff batch-process error: {e}')
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/staff/paymongo/gcash/create', methods=['POST'])
@@ -4073,9 +4504,40 @@ def staff_update_order(order_id):
     try:
         data       = request.get_json()
         status     = data.get('status')
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled']
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled', 'returned_failed']
         if status not in valid_statuses:
             return jsonify({'error': 'Invalid status.'}), 400
+
+        # Fetch the order's current state once — same purpose as the admin
+        # route: deciding whether this transition takes stock off the shelf
+        # (pending -> processing, for the first time) or gives it back (an
+        # order that already reached processing -> cancelled/returned_failed).
+        order_res = supabase.table('order').select(
+            'branch_id, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+        order_row         = order_res.data[0]
+        branch_id         = order_row.get('branch_id')
+        already_processed = bool(order_row.get('processing_started_at'))
+        order_items       = order_row.get('order_item') or []
+
+        # Same daily processing cap enforced here as admin's route/the batch action.
+        if status == 'processing':
+            today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
+            today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
+            used_today_res = supabase.table('order').select('order_id') \
+                .gte('processing_started_at', today_start) \
+                .lte('processing_started_at', today_end).execute()
+            if len(used_today_res.data or []) >= DAILY_PROCESSING_CAP:
+                return jsonify({'error': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'}), 400
+
+            # Stock is reserved only once an order actually enters
+            # 'processing' — see the matching comment in admin_update_order.
+            if not already_processed:
+                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items)
+                if not ok:
+                    return jsonify({'error': stock_err}), 400
 
         # Update status and assign staff_id if not already set
         update_data = {'status': status}
@@ -4084,6 +4546,12 @@ def staff_update_order(order_id):
             existing = supabase.table('order').select('staff_id').eq('order_id', order_id).execute()
             if existing.data and not existing.data[0].get('staff_id'):
                 update_data['staff_id'] = staff_id
+
+        # Same auto-advance timer start as the admin route — keeps the lazy
+        # Processing -> Out for Delivery check accurate regardless of which
+        # role moved the order into processing.
+        if status == 'processing':
+            update_data['processing_started_at'] = datetime.utcnow().isoformat()
 
         supabase.table('order').update(update_data).eq('order_id', order_id).execute()
 
@@ -4109,72 +4577,20 @@ def staff_update_order(order_id):
         except Exception as notif_err:
             print(f'Notification error: {notif_err}')
 
-        # If cancelled — return stock to branch
-        if status == 'cancelled':
-            order_res = supabase.table('order').select(
-                'branch_id, order_item(product_id, qty, selected_options)'
-            ).eq('order_id', order_id).execute()
-            if order_res.data:
-                order_data = order_res.data[0]
-                br_id      = order_data.get('branch_id')
-                for item in order_data.get('order_item', []):
-                    pid  = item.get('product_id')
-                    qty  = int(item.get('qty', 0))
-                    opts = item.get('selected_options', {})
-                    if not pid or not qty:
-                        continue
-                    # Return to branch_stock
-                    bs_qty_before = 0
-                    bs_qty_after  = 0
-                    if br_id:
-                        bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
-                        if bs.data:
-                            bs_qty_before = bs.data[0]['quantity']
-                            bs_qty_after  = bs_qty_before + qty
-                            supabase.table('branch_stock').update({
-                                'quantity': bs_qty_after
-                            }).eq('product_id', pid).eq('branch_id', br_id).execute()
-                    # Return to variant stock
-                    if opts and br_id:
-                        try:
-                            import json as _json
-                            def normalize(o):
-                                if isinstance(o, str):
-                                    try: return _json.loads(o)
-                                    except: return o
-                                return o
-                            opts_norm = normalize(opts)
-                            all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
-                            match = [v for v in (all_vs.data or []) if normalize(v.get('options', {})) == opts_norm]
-                            if match:
-                                supabase.table('variant_stock').update({
-                                    'quantity': match[0]['quantity'] + qty
-                                }).eq('id', match[0]['id']).execute()
-                                print(f'Variant stock restored: {match[0]["id"]} +{qty}')
-                            else:
-                                print(f'Cancel staff - no variant match for opts: {opts_norm}')
-                        except Exception as vs_err:
-                            print(f'Variant stock restore warning: {vs_err}')
-                    # Return to product total
-                    pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
-                    if pr.data:
-                        supabase.table('product').update({
-                            'quantity': pr.data[0]['quantity'] + qty
-                        }).eq('product_id', pid).execute()
-                    # Log inventory movement
-                    try:
-                        supabase.table('inventory').insert({
-                            'product_id':      pid,
-                            'staff_id':        None,
-                            'quantity_added':  qty,
-                            'quantity_before': bs_qty_before,
-                            'quantity_after':  bs_qty_after,
-                            'to_branch_id':    br_id,
-                            'variant_options': opts if opts else None,
-                            'note':            f'Cancelled — Order #{order_id[:8].upper()}',
-                        }).execute()
-                    except Exception as log_err:
-                        print(f'Cancel inventory log warning: {log_err}')
+        # If cancelled or returned/failed delivery — return stock to branch,
+        # but ONLY if this order actually reached 'processing' at some point
+        # (already_processed, fetched above). A still-pending order was
+        # never deducted, so cancelling it must NOT add stock back.
+        # (returned_failed here is a safety net for the generic PUT route;
+        # the dedicated not-delivered endpoint below is the normal path and
+        # already does its own restore, so this is a no-op in that case
+        # since the order will already be past 'processing'.)
+        if status in ('cancelled', 'returned_failed') and already_processed:
+            _restore_order_item_stock(
+                order_id,
+                {'branch_id': branch_id, 'order_item': order_items},
+                'Cancelled' if status == 'cancelled' else 'Returned — failed delivery'
+            )
 
         return jsonify({'message': f'Order status updated to {status}.'}), 200
     except Exception as e:
@@ -4295,6 +4711,110 @@ def staff_return_order_items(order_id):
         status_code = 200 if not item_errors else 207
         return jsonify({'message': 'Return processed.', 'returned': results, 'item_errors': item_errors}), status_code
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ─── Deliveries for Today (staff) ──────────────────────
+# Branch-scoped mirror of the admin endpoints above — a staff member only
+# ever dispatches/acts on their own branch's orders.
+
+@app.route('/api/staff/orders/dispatch', methods=['POST'])
+@staff_required
+def staff_dispatch_orders():
+    try:
+        data      = request.get_json()
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        if not branch_id:
+            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
+
+        today = datetime.utcnow().strftime('%Y-%m-%d')
+        res = supabase.table('order').select('order_id, status, branch_id').in_('order_id', order_ids).execute()
+        eligible = [
+            o['order_id'] for o in (res.data or [])
+            if o.get('status') == 'out_for_delivery' and o.get('branch_id') == branch_id
+        ]
+        if not eligible:
+            return jsonify({'error': 'No eligible out-for-delivery orders in the selection.'}), 400
+
+        supabase.table('order').update({'dispatch_date': today}).in_('order_id', eligible).execute()
+        return jsonify({'dispatched': len(eligible), 'order_ids': eligible, 'dispatch_date': today}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders/<order_id>/delivered', methods=['POST'])
+@staff_required
+def staff_mark_delivered(order_id):
+    try:
+        data = request.get_json(silent=True) or {}
+        order_res = supabase.table('order').select(
+            'order_id, status, payment(payment_method, status)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+
+        order_data = order_res.data[0]
+        if order_data.get('status') != 'out_for_delivery':
+            return jsonify({'error': 'Only out-for-delivery orders can be marked delivered.'}), 400
+
+        payment = order_data.get('payment')
+        if isinstance(payment, list):
+            payment = payment[0] if payment else None
+        payment_method = (payment or {}).get('payment_method')
+        payment_status = (payment or {}).get('status')
+
+        if payment_status != 'paid':
+            if not data.get('confirm_remittance'):
+                return jsonify({
+                    'error': 'This is a Cash on Delivery order — confirm remittance to complete it.',
+                    'requires_remittance_confirmation': True,
+                    'payment_method': payment_method
+                }), 409
+            supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
+
+        supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
+        return jsonify({'message': 'Order marked delivered.', 'order_id': order_id}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders/<order_id>/not-delivered', methods=['POST'])
+@staff_required
+def staff_mark_not_delivered(order_id):
+    try:
+        order_res = supabase.table('order').select(
+            'order_id, status, branch_id, delivery_attempts, order_item(product_id, qty, selected_options)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+
+        order_data = order_res.data[0]
+        if order_data.get('status') != 'out_for_delivery':
+            return jsonify({'error': 'Only out-for-delivery orders can be marked not delivered.'}), 400
+
+        attempts = int(order_data.get('delivery_attempts') or 0) + 1
+
+        if attempts >= 3:
+            supabase.table('order').update({
+                'status': 'returned_failed',
+                'delivery_attempts': attempts
+            }).eq('order_id', order_id).execute()
+            _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
+            return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
+        else:
+            supabase.table('order').update({
+                'delivery_attempts': attempts,
+                'dispatch_date': None
+            }).eq('order_id', order_id).execute()
+            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to Available for another try.', 'delivery_attempts': attempts, 'final': False}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 # ─── Staff Inventory ──────────────────────────────────
