@@ -4916,7 +4916,7 @@ async function submitAssign() {
 async function loadUsers() {
   // ── Skeleton ──
   skTable('usersBody', ['sk-cell-full','sk-cell-md','sk-cell-full','sk-cell-sm',
-                        'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+                        'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
   // ─────────────
   try {
     if (!allBranches.length) await loadBranches();
@@ -4939,12 +4939,16 @@ function renderUsers(users) {
           : c?.fname
             ? `${c.fname} ${c.lname || ''}`.trim()
             : u.username;
+        const branchName = s?.branch_id
+          ? (allBranches.find(b => b.branch_id === s.branch_id)?.branch_name || '—')
+          : '—';
         return `
         <tr>
           <td>${name}</td>
           <td>${u.username}</td>
           <td>${s?.email || c?.email || '—'}</td>
           <td>${badge(u.role)}</td>
+          <td>${branchName}</td>
           <td>${badge(u.status)}</td>
           <td>${toUtcDate(u.created_at).toLocaleDateString('en-PH')}</td>
           <td>
@@ -4965,7 +4969,7 @@ function renderUsers(users) {
           </td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="7" class="table-empty">No users found</td></tr>';
+    : '<tr><td colspan="8" class="table-empty">No users found</td></tr>';
   renderPagerCustom('usersPagination', users.length, usersPage, USER_PAGE_SIZE, 'changeUsersPage');
 }
 function changeUsersPage(page) { usersPage = page; renderUsers(_userFilteredCache); }
