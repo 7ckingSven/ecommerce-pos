@@ -354,7 +354,7 @@ npx react-native run-android
 
 ## Deployment
 
-- **Backend** — Render (`https://ecommerce-pos-8rsf.onrender.com`)
+- **Backend** — Render, served under the custom domain `https://tefcecommerce.shop` (bought via Hostinger)
 - **Mobile** — APK hosted on Google Drive with QR code on landing page
 - **Database** — Supabase (hosted PostgreSQL)
 
