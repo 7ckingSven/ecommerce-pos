@@ -535,7 +535,10 @@ function badge(text) {
 }
 
 function peso(val) {
-  return '₱' + Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2 });
+  // maximumFractionDigits must be pinned too — without it, a value that
+  // isn't a clean 2-decimal number (e.g. the VAT-inclusive division,
+  // 179 / 1.12 = 159.8214...) prints with 3 decimals instead of 2.
+  return '₱' + Number(val || 0).toLocaleString('en-PH', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 function shortId(id) {
@@ -2050,10 +2053,11 @@ function buildReceiptHtml(data, items, received, payment, refNo, customerName = 
   const change       = received - total;
   const now       = new Date();
 
-  // VAT Inclusive (12%) breakdown
+  // VAT Inclusive (12%) breakdown — total already includes VAT, so VAT is
+  // extracted out of it (total / 1.12), not added as 12% on top of it.
   const VAT_RATE  = 0.12;
-  const vatAmount = total * VAT_RATE;
-  const baseAmt   = total - vatAmount;
+  const baseAmt   = total / (1 + VAT_RATE);
+  const vatAmount = total - baseAmt;
 
   // Get staff and customer name for receipt
   const staffFullName  = (window.staffFname || '') + ' ' + (window.staffLname || '');
@@ -2806,6 +2810,12 @@ async function loadOrders() {
   // ── Skeleton ──
   skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
                               'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  // Deliveries for Today — both panels (skTable no-ops if the tbody isn't
+  // on the current page, same as every other call site in this file).
+  skTable('staffDeliveriesAvailableBody', ['sk-cell-sm','sk-cell-sm','sk-cell-md',
+                                           'sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
+  skTable('staffDeliveriesTodayBody', ['sk-cell-sm','sk-cell-md','sk-cell-full',
+                                       'sk-cell-sm','sk-cell-sm','sk-cell-md'], 5);
   // ─────────────
   try {
     const res  = await fetch('/api/staff/orders?limit=50');

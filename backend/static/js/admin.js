@@ -2862,6 +2862,12 @@ async function loadOrders() {
   // ── Skeleton ──
   skTable('ordersBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
                          'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
+  // Deliveries for Today — both panels (skTable no-ops if the tbody isn't
+  // on the current page, same as every other call site in this file).
+  skTable('deliveriesAvailableBody', ['sk-cell-sm','sk-cell-sm','sk-cell-md',
+                                      'sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
+  skTable('deliveriesTodayBody', ['sk-cell-sm','sk-cell-md','sk-cell-full',
+                                  'sk-cell-sm','sk-cell-sm','sk-cell-md'], 5);
   // ─────────────
   try {
     const res  = await fetch('/api/admin/orders?limit=80');

@@ -63,22 +63,29 @@ BREVO_API_KEY    = os.getenv('BREVO_API_KEY', '')
 BREVO_FROM_EMAIL = os.getenv('BREVO_FROM_EMAIL', 'noreply@tefcecommerce.com')
 BREVO_FROM_NAME  = os.getenv('BREVO_FROM_NAME', 'TEFC E-Commerce')
 
-def send_email_resend(to_email, subject, html_body):
-    """Send email using Brevo API."""
+def send_email_resend(to_email, subject, html_body, attachments=None):
+    """Send email using Brevo API.
+
+    attachments (optional): list of {'content': <base64 str>, 'name': <filename>}
+    dicts, per Brevo's 'attachment' field — used for the e-receipt PDF.
+    """
     try:
+        payload = {
+            'sender':      { 'name': BREVO_FROM_NAME, 'email': BREVO_FROM_EMAIL },
+            'to':          [{ 'email': to_email }],
+            'subject':     subject,
+            'htmlContent': html_body,
+        }
+        if attachments:
+            payload['attachment'] = attachments
         response = resend_requests.post(
             'https://api.brevo.com/v3/smtp/email',
             headers={
                 'api-key':      BREVO_API_KEY,
                 'Content-Type': 'application/json',
             },
-            json={
-                'sender':      { 'name': BREVO_FROM_NAME, 'email': BREVO_FROM_EMAIL },
-                'to':          [{ 'email': to_email }],
-                'subject':     subject,
-                'htmlContent': html_body,
-            },
-            timeout=15
+            json=payload,
+            timeout=20
         )
         print(f'Brevo response: {response.status_code} {response.text}')
         return response.status_code in [200, 201]
@@ -363,6 +370,225 @@ def build_otp_email(otp_code, title='Verification Code', purpose='verify your em
 </body>
 </html>"""
 
+
+# ─── E-Receipt (Online Orders — COD & GCash) ───────────────────────────────
+# Sent right when an online order is placed (api_place_order), for both
+# payment methods, as an HTML email with a PDF receipt attached. Entirely
+# best-effort: any failure here is swallowed so it never blocks the order
+# placement response itself (see send_order_receipt_email).
+
+def build_receipt_pdf(order_info):
+    """Builds a one-page PDF receipt as bytes using fpdf2 (pure-Python,
+    no system dependencies — safe on Render). Uses 'PHP' instead of the
+    peso sign since core PDF fonts don't support non-latin-1 characters.
+    """
+    from fpdf import FPDF
+
+    pdf = FPDF(format='A4')
+    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+
+    pdf.set_font('Helvetica', 'B', 16)
+    pdf.set_text_color(22, 101, 52)
+    pdf.cell(0, 10, 'TEFC E-Commerce', ln=True)
+    pdf.set_font('Helvetica', '', 10)
+    pdf.set_text_color(100, 100, 100)
+    pdf.cell(0, 6, 'Triple E & Fiel Collince General Merchandise', ln=True)
+    pdf.ln(4)
+
+    pdf.set_text_color(17, 24, 39)
+    pdf.set_font('Helvetica', 'B', 13)
+    pdf.cell(0, 8, f"Order Receipt #{order_info['order_id'][:8].upper()}", ln=True)
+    pdf.set_font('Helvetica', '', 10)
+    pdf.cell(0, 6, f"Date: {order_info['date']}", ln=True)
+    pdf.cell(0, 6, f"Branch: {order_info['branch_name']}", ln=True)
+    pdf.cell(0, 6, f"Payment Method: {order_info['payment_method_label']}", ln=True)
+    if order_info.get('address'):
+        pdf.multi_cell(0, 6, f"Delivery Address: {order_info['address']}")
+    pdf.ln(4)
+
+    pdf.set_font('Helvetica', 'B', 10)
+    pdf.set_fill_color(240, 253, 244)
+    pdf.cell(90, 8, 'Item', border=1, fill=True)
+    pdf.cell(20, 8, 'Qty', border=1, fill=True, align='C')
+    pdf.cell(35, 8, 'Price', border=1, fill=True, align='R')
+    pdf.cell(35, 8, 'Subtotal', border=1, fill=True, align='R')
+    pdf.ln()
+    pdf.set_font('Helvetica', '', 10)
+    for it in order_info['items']:
+        name = it['name']
+        if len(name) > 38:
+            name = name[:35] + '...'
+        subtotal = it['qty'] * it['price']
+        pdf.cell(90, 8, name, border=1)
+        pdf.cell(20, 8, str(it['qty']), border=1, align='C')
+        pdf.cell(35, 8, f"PHP {it['price']:.2f}", border=1, align='R')
+        pdf.cell(35, 8, f"PHP {subtotal:.2f}", border=1, align='R')
+        pdf.ln()
+
+    pdf.ln(2)
+    pdf.set_font('Helvetica', '', 10)
+    pdf.cell(145, 7, 'Subtotal', align='R')
+    pdf.cell(35, 7, f"PHP {order_info['subtotal']:.2f}", align='R', ln=True)
+    pdf.cell(145, 7, 'Shipping Fee', align='R')
+    pdf.cell(35, 7, f"PHP {order_info['shipping_fee']:.2f}", align='R', ln=True)
+    pdf.cell(145, 6, 'VATable Sales', align='R')
+    pdf.cell(35, 6, f"PHP {order_info['vatable_sales']:.2f}", align='R', ln=True)
+    pdf.cell(145, 6, 'VAT Amount (12%)', align='R')
+    pdf.cell(35, 6, f"PHP {order_info['vat_amount']:.2f}", align='R', ln=True)
+    pdf.set_font('Helvetica', 'B', 11)
+    pdf.cell(145, 8, 'Total Sales (VAT Inc.)', align='R')
+    pdf.cell(35, 8, f"PHP {order_info['grand_total']:.2f}", align='R', ln=True)
+
+    pdf.ln(6)
+    pdf.set_font('Helvetica', '', 9)
+    pdf.set_text_color(150, 150, 150)
+    pdf.multi_cell(0, 5, 'Thank you for shopping with us! This is your official e-receipt. Keep this for your records.')
+
+    out = pdf.output()
+    return bytes(out)
+
+
+def build_receipt_email(order_info):
+    """HTML e-receipt email body, styled to match build_otp_email()."""
+    items_rows = ''.join(f"""
+              <tr>
+                <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:13px;color:#111827;">{it['name']}</td>
+                <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:13px;color:#6b7280;text-align:center;">{it['qty']}</td>
+                <td style="padding:8px 0;border-bottom:1px solid #e5e7eb;font-size:13px;color:#111827;text-align:right;">PHP {it['qty'] * it['price']:.2f}</td>
+              </tr>""" for it in order_info['items'])
+
+    address_block = (
+        f'<p style="margin:20px 0 0;font-size:13px;color:#6b7280;"><strong>Delivery Address:</strong><br/>{order_info["address"]}</p>'
+        if order_info.get('address') else ''
+    )
+
+    return f"""<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/></head>
+<body style="margin:0;padding:0;background:#f0fdf4;font-family:'Segoe UI',Arial,sans-serif;">
+  <table width="100%" cellpadding="0" cellspacing="0" style="background:#f0fdf4;padding:40px 0;">
+    <tr><td align="center">
+      <table width="520" cellpadding="0" cellspacing="0" style="background:#ffffff;border-radius:16px;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.08);">
+        <tr>
+          <td style="background:linear-gradient(135deg,#14532d,#16a34a);padding:32px;text-align:center;">
+            <h1 style="margin:0;color:#ffffff;font-size:24px;font-weight:700;">TEFC E-Commerce</h1>
+            <p style="margin:6px 0 0;color:rgba(255,255,255,0.8);font-size:13px;">Triple E &amp; Fiel Collince General Merchandise</p>
+          </td>
+        </tr>
+        <tr>
+          <td style="padding:32px;">
+            <p style="margin:0 0 4px;font-size:16px;color:#111827;font-weight:700;">Order Confirmed!</p>
+            <p style="margin:0 0 20px;font-size:14px;color:#6b7280;">Hi {order_info['customer_name']}, thanks for your order. Here's your e-receipt.</p>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="margin-bottom:20px;font-size:13px;color:#374151;">
+              <tr><td style="padding:3px 0;">Order ID</td><td style="text-align:right;font-weight:600;">#{order_info['order_id'][:8].upper()}</td></tr>
+              <tr><td style="padding:3px 0;">Date</td><td style="text-align:right;">{order_info['date']}</td></tr>
+              <tr><td style="padding:3px 0;">Branch</td><td style="text-align:right;">{order_info['branch_name']}</td></tr>
+              <tr><td style="padding:3px 0;">Payment Method</td><td style="text-align:right;">{order_info['payment_method_label']}</td></tr>
+            </table>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;margin-bottom:12px;">
+              <tr>
+                <td style="padding-bottom:8px;border-bottom:2px solid #16a34a;font-size:12px;color:#16a34a;font-weight:700;text-transform:uppercase;">Item</td>
+                <td style="padding-bottom:8px;border-bottom:2px solid #16a34a;font-size:12px;color:#16a34a;font-weight:700;text-align:center;">Qty</td>
+                <td style="padding-bottom:8px;border-bottom:2px solid #16a34a;font-size:12px;color:#16a34a;font-weight:700;text-align:right;">Amount</td>
+              </tr>{items_rows}
+            </table>
+
+            <table width="100%" cellpadding="0" cellspacing="0" style="font-size:13px;color:#374151;margin-top:12px;">
+              <tr><td style="padding:3px 0;">Subtotal</td><td style="text-align:right;">PHP {order_info['subtotal']:.2f}</td></tr>
+              <tr><td style="padding:3px 0;">Shipping Fee</td><td style="text-align:right;">PHP {order_info['shipping_fee']:.2f}</td></tr>
+              <tr><td style="padding:3px 0;">VATable Sales</td><td style="text-align:right;">PHP {order_info['vatable_sales']:.2f}</td></tr>
+              <tr><td style="padding:3px 0;">VAT Amount (12%)</td><td style="text-align:right;">PHP {order_info['vat_amount']:.2f}</td></tr>
+              <tr><td style="padding:8px 0 0;font-size:15px;font-weight:700;color:#111827;">Total Sales (VAT Inc.)</td><td style="padding:8px 0 0;text-align:right;font-size:15px;font-weight:700;color:#16a34a;">PHP {order_info['grand_total']:.2f}</td></tr>
+            </table>
+            {address_block}
+            <p style="margin:24px 0 0;font-size:12px;color:#9ca3af;">A PDF copy of this receipt is attached to this email.</p>
+            <hr style="border:none;border-top:1px solid #e5e7eb;margin:24px 0;"/>
+            <p style="margin:0;font-size:12px;color:#9ca3af;text-align:center;">
+              Thank you for shopping with TEFC E-Commerce!<br/>
+              Koronadal City, South Cotabato
+            </p>
+          </td>
+        </tr>
+        <tr>
+          <td style="background:#f9fafb;padding:16px;text-align:center;">
+            <p style="margin:0;font-size:11px;color:#9ca3af;">&copy; 2026 Triple E &amp; Fiel Collince General Merchandise. All rights reserved.</p>
+          </td>
+        </tr>
+      </table>
+    </td></tr>
+  </table>
+</body>
+</html>"""
+
+
+def send_order_receipt_email(order_id, customer_id, payment_method, shipping_fee, total, address, branch_id):
+    """Best-effort e-receipt for an online order (COD or GCash), sent right
+    at order placement. Must never raise — a failure here (missing PDF lib,
+    Brevo outage, bad data) must not block the order itself from succeeding.
+    """
+    try:
+        customer_res = supabase.table('customer').select('fname, lname, email').eq('customer_id', customer_id).execute()
+        if not customer_res.data or not customer_res.data[0].get('email'):
+            return
+        customer = customer_res.data[0]
+
+        items_res = supabase.table('order_item').select(
+            'qty, price, product(product_name)'
+        ).eq('order_id', order_id).execute()
+        items = [{
+            'name':  (i.get('product') or {}).get('product_name', 'Item'),
+            'qty':   i['qty'],
+            'price': float(i['price']),
+        } for i in (items_res.data or [])]
+
+        branch_name = 'N/A'
+        if branch_id:
+            b_res = supabase.table('branch').select('branch_name').eq('branch_id', branch_id).execute()
+            if b_res.data:
+                branch_name = b_res.data[0]['branch_name']
+
+        # 'total' (the order's stored total) is the items subtotal only —
+        # shipping is tracked separately on the order — so the actual
+        # amount due is subtotal + shipping. VAT here is the standard PH
+        # 12% rate, computed as already included in that amount (BIR-style
+        # VAT-inclusive breakdown: VATable Sales = amount / 1.12, VAT =
+        # amount - VATable Sales), not an extra charge on top.
+        subtotal     = float(total or 0)
+        shipping     = float(shipping_fee or 0)
+        grand_total  = subtotal + shipping
+        vatable_sales = grand_total / 1.12
+        vat_amount    = grand_total - vatable_sales
+
+        method_labels = {'gcash': 'GCash', 'cash_on_delivery': 'Cash on Delivery'}
+        order_info = {
+            'order_id':             order_id,
+            'date':                 datetime.now().strftime('%B %d, %Y %I:%M %p'),
+            'branch_name':          branch_name,
+            'payment_method_label': method_labels.get(payment_method, payment_method),
+            'customer_name':        customer.get('fname') or 'Customer',
+            'items':                items,
+            'subtotal':             subtotal,
+            'shipping_fee':         shipping,
+            'grand_total':          grand_total,
+            'vatable_sales':        vatable_sales,
+            'vat_amount':           vat_amount,
+            'address':              address or '',
+        }
+
+        pdf_bytes = build_receipt_pdf(order_info)
+        pdf_b64   = _b64.b64encode(pdf_bytes).decode('utf-8')
+
+        send_email_resend(
+            to_email    = customer['email'],
+            subject     = f"TEFC E-Commerce — Order Receipt #{order_id[:8].upper()}",
+            html_body   = build_receipt_email(order_info),
+            attachments = [{'content': pdf_b64, 'name': f"Receipt-{order_id[:8].upper()}.pdf"}]
+        )
+    except Exception as e:
+        print(f'Order receipt email error: {e}')
 
 
 # ─── Firebase FCM Push Notification (Admin SDK v1) ─────────────────────────
@@ -1862,6 +2088,13 @@ def api_place_order():
 
         # (No stock deduction here either — see note above. Stock is taken
         # off the shelf only when the order enters 'processing'.)
+
+        # E-receipt (COD & GCash alike) — sent right now, at order placement.
+        # Best-effort and non-blocking: send_order_receipt_email() swallows
+        # its own errors, so a failed/slow email never fails the order.
+        send_order_receipt_email(
+            order_id, customer_id, payment_method, shipping_fee, total, address, branch_id
+        )
 
         return jsonify({
             'message':  'Order placed successfully.',
