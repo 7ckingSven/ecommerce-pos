@@ -2771,6 +2771,17 @@ def admin_add_branch_stock():
                 'quantity':   quantity,
             }).execute()
 
+        # Keep product.quantity in sync with the real branch_stock total —
+        # this restock changes the aggregate, same fix as admin_add_inventory.
+        try:
+            prod = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
+            if prod.data:
+                supabase.table('product').update({
+                    'quantity': prod.data[0]['quantity'] + quantity
+                }).eq('product_id', product_id).execute()
+        except Exception as prod_err:
+            print(f'product.quantity sync warning: {prod_err}')
+
         # Record in inventory — use branch_stock qty for before/after, NOT product.quantity
         supabase.table('inventory').insert({
             'product_id':      product_id,
@@ -3014,7 +3025,10 @@ def admin_add_product():
         product_name = request.form.get('product_name', '').strip()
         brand        = request.form.get('brand', '').strip()
         category     = request.form.get('category', '').strip()
+        sub_category = request.form.get('sub_category', '').strip() or None
         price        = request.form.get('price', 0)
+        base_price_raw = request.form.get('base_price', '').strip()
+        base_price   = float(base_price_raw) if base_price_raw else None
         quantity     = request.form.get('quantity', 0)
         status       = request.form.get('status', 'active')
         description  = request.form.get('description', '').strip()
@@ -3066,7 +3080,9 @@ def admin_add_product():
             'product_name':  product_name,
             'brand':         brand,
             'category':      category,
+            'sub_category':  sub_category,
             'price':         float(price),
+            'base_price':    base_price,
             'quantity':      int(quantity),
             'status':        status,
             'description':   description,
@@ -3102,11 +3118,16 @@ def admin_update_product(product_id):
         net_weight      = float(request.form.get('net_weight', 0) or 0)
         net_weight_unit = request.form.get('net_weight_unit', 'kg')
 
+        base_price_raw = request.form.get('base_price', '').strip()
+        base_price     = float(base_price_raw) if base_price_raw else None
+
         updates = {
             'product_name': request.form.get('product_name'),
             'brand':        request.form.get('brand'),
             'category':     request.form.get('category'),
+            'sub_category': request.form.get('sub_category', '').strip() or None,
             'price':        float(request.form.get('price', 0)),
+            'base_price':   base_price,
             'quantity':     int(request.form.get('quantity', 0)),
             'status':       request.form.get('status'),
             'description':  request.form.get('description'),
@@ -3269,6 +3290,23 @@ def admin_add_inventory():
             qty_before_log = qty_before
             qty_after_log  = qty_after
 
+        # Keep product.quantity (the aggregate figure shown on the product
+        # list / low-stock checks) in sync with the real branch_stock total.
+        # A transfer just moves stock between branches — net change across
+        # all branches is zero, so product.quantity is left alone. A
+        # restock/adjustment actually changes the total, so it's applied here
+        # too; sale/cancel paths already do this, this endpoint previously
+        # didn't, which let product.quantity drift out of sync after manual
+        # stock changes.
+        if inv_type != 'transfer':
+            try:
+                prod = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
+                if prod.data:
+                    new_prod_qty = max(0, prod.data[0]['quantity'] + qty_change)
+                    supabase.table('product').update({'quantity': new_prod_qty}).eq('product_id', product_id).execute()
+            except Exception as prod_err:
+                print(f'product.quantity sync warning: {prod_err}')
+
         # Log to inventory table
         supabase.table('inventory').insert({
             'product_id':      product_id,
@@ -3341,7 +3379,7 @@ def admin_get_orders():
             limit = 500
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).execute()
 
         # Get branch lookup
@@ -3465,6 +3503,125 @@ def admin_update_order(order_id):
                         print(f'Cancel inventory log warning: {log_err}')
 
         return jsonify({'message': f'Order status updated to {status}.'}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+# Panelist-requested movement type: a customer/staff return AFTER an order is
+# already completed — distinct from "cancelled" above, which only applies
+# before an order ships/completes. Restores stock per-item (isolated writes,
+# same pattern as PO receiving) and tags the inventory log 'Return' so the
+# Stock Movement History table can filter/classify it separately from Sales
+# and Cancellations.
+@app.route('/api/admin/orders/<order_id>/return', methods=['POST'])
+@admin_required
+def admin_return_order_items(order_id):
+    try:
+        data   = request.get_json()
+        items  = data.get('items', [])  # [{order_item_id, qty}]
+        reason = (data.get('reason') or '').strip()
+
+        if not items:
+            return jsonify({'error': 'At least one item and quantity are required.'}), 400
+
+        order_res = supabase.table('order').select(
+            'order_id, status, branch_id, order_item(order_item_id, product_id, qty, returned_qty, selected_options)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+
+        order_data = order_res.data[0]
+        if order_data.get('status') != 'completed':
+            return jsonify({'error': 'Only completed orders can be returned.'}), 400
+
+        br_id    = order_data.get('branch_id')
+        item_map = {i['order_item_id']: i for i in (order_data.get('order_item') or [])}
+
+        results, item_errors, any_success = [], [], False
+
+        for req_item in items:
+            oi_id = req_item.get('order_item_id')
+            try:
+                qty = int(req_item.get('qty', 0))
+            except (TypeError, ValueError):
+                qty = 0
+            oi = item_map.get(oi_id)
+            if not oi or qty <= 0:
+                item_errors.append({'order_item_id': oi_id, 'error': 'Invalid item or quantity.'})
+                continue
+
+            already_returned = int(oi.get('returned_qty') or 0)
+            remaining = oi['qty'] - already_returned
+            if qty > remaining:
+                item_errors.append({'order_item_id': oi_id, 'error': f'Only {remaining} unit(s) left to return.'})
+                continue
+
+            # Each item's write is isolated (its own try/except) so one
+            # item's failure can't roll back or hide a sibling's success —
+            # same lesson learned from the partial PO-receive bug.
+            try:
+                pid  = oi.get('product_id')
+                opts = oi.get('selected_options') or {}
+
+                qty_before = 0
+                qty_after  = qty
+                if br_id:
+                    bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                    if bs.data:
+                        qty_before = bs.data[0]['quantity']
+                        qty_after  = qty_before + qty
+                        supabase.table('branch_stock').update({
+                            'quantity': qty_after, 'updated_at': 'now()'
+                        }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    else:
+                        supabase.table('branch_stock').insert({
+                            'product_id': pid, 'branch_id': br_id, 'quantity': qty
+                        }).execute()
+
+                if opts and br_id:
+                    try:
+                        all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
+                        match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                        if match:
+                            supabase.table('variant_stock').update({
+                                'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
+                            }).eq('id', match[0]['id']).execute()
+                    except Exception as vs_err:
+                        print(f'Return variant stock warning: {vs_err}')
+
+                pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                if pr.data:
+                    supabase.table('product').update({
+                        'quantity': pr.data[0]['quantity'] + qty
+                    }).eq('product_id', pid).execute()
+
+                supabase.table('order_item').update({
+                    'returned_qty': already_returned + qty
+                }).eq('order_item_id', oi_id).execute()
+
+                reason_text = f' — Reason: {reason}' if reason else ''
+                supabase.table('inventory').insert({
+                    'product_id':      pid,
+                    'staff_id':        session.get('staff_id'),
+                    'quantity_added':  qty,
+                    'quantity_before': qty_before,
+                    'quantity_after':  qty_after,
+                    'to_branch_id':    br_id,
+                    'variant_options': opts if opts else None,
+                    'note':            f'Return — Order #{order_id[:8].upper()}{reason_text}',
+                }).execute()
+
+                results.append({'order_item_id': oi_id, 'returned': qty})
+                any_success = True
+            except Exception as item_err:
+                print(f'Return item error ({oi_id}): {item_err}')
+                item_errors.append({'order_item_id': oi_id, 'error': str(item_err)})
+
+        if not any_success:
+            return jsonify({'error': 'Return failed.', 'item_errors': item_errors}), 400
+
+        status_code = 200 if not item_errors else 207
+        return jsonify({'message': 'Return processed.', 'returned': results, 'item_errors': item_errors}), status_code
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -3655,7 +3812,7 @@ def staff_get_orders():
         branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
 
         query = supabase.table('order').select(
-            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, branch(branch_name), customer(fname, lname, email), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit)
 
         # Filter to this branch's orders only
@@ -4023,6 +4180,123 @@ def staff_update_order(order_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# Staff-side version of the admin return route above — same per-item
+# isolated-write pattern, scoped to orders placed at the staff's own branch.
+@app.route('/api/staff/orders/<order_id>/return', methods=['POST'])
+@staff_required
+def staff_return_order_items(order_id):
+    try:
+        data   = request.get_json()
+        items  = data.get('items', [])  # [{order_item_id, qty}]
+        reason = (data.get('reason') or '').strip()
+
+        if not items:
+            return jsonify({'error': 'At least one item and quantity are required.'}), 400
+
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        order_res = supabase.table('order').select(
+            'order_id, status, branch_id, order_item(order_item_id, product_id, qty, returned_qty, selected_options)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+
+        order_data = order_res.data[0]
+        if order_data.get('status') != 'completed':
+            return jsonify({'error': 'Only completed orders can be returned.'}), 400
+        if my_branch and order_data.get('branch_id') and order_data.get('branch_id') != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
+
+        br_id    = order_data.get('branch_id')
+        item_map = {i['order_item_id']: i for i in (order_data.get('order_item') or [])}
+
+        results, item_errors, any_success = [], [], False
+
+        for req_item in items:
+            oi_id = req_item.get('order_item_id')
+            try:
+                qty = int(req_item.get('qty', 0))
+            except (TypeError, ValueError):
+                qty = 0
+            oi = item_map.get(oi_id)
+            if not oi or qty <= 0:
+                item_errors.append({'order_item_id': oi_id, 'error': 'Invalid item or quantity.'})
+                continue
+
+            already_returned = int(oi.get('returned_qty') or 0)
+            remaining = oi['qty'] - already_returned
+            if qty > remaining:
+                item_errors.append({'order_item_id': oi_id, 'error': f'Only {remaining} unit(s) left to return.'})
+                continue
+
+            try:
+                pid  = oi.get('product_id')
+                opts = oi.get('selected_options') or {}
+
+                qty_before = 0
+                qty_after  = qty
+                if br_id:
+                    bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                    if bs.data:
+                        qty_before = bs.data[0]['quantity']
+                        qty_after  = qty_before + qty
+                        supabase.table('branch_stock').update({
+                            'quantity': qty_after, 'updated_at': 'now()'
+                        }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    else:
+                        supabase.table('branch_stock').insert({
+                            'product_id': pid, 'branch_id': br_id, 'quantity': qty
+                        }).execute()
+
+                if opts and br_id:
+                    try:
+                        all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
+                        match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                        if match:
+                            supabase.table('variant_stock').update({
+                                'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
+                            }).eq('id', match[0]['id']).execute()
+                    except Exception as vs_err:
+                        print(f'Return variant stock warning: {vs_err}')
+
+                pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                if pr.data:
+                    supabase.table('product').update({
+                        'quantity': pr.data[0]['quantity'] + qty
+                    }).eq('product_id', pid).execute()
+
+                supabase.table('order_item').update({
+                    'returned_qty': already_returned + qty
+                }).eq('order_item_id', oi_id).execute()
+
+                reason_text = f' — Reason: {reason}' if reason else ''
+                supabase.table('inventory').insert({
+                    'product_id':      pid,
+                    'staff_id':        staff_id,
+                    'quantity_added':  qty,
+                    'quantity_before': qty_before,
+                    'quantity_after':  qty_after,
+                    'to_branch_id':    br_id,
+                    'variant_options': opts if opts else None,
+                    'note':            f'Return — Order #{order_id[:8].upper()}{reason_text}',
+                }).execute()
+
+                results.append({'order_item_id': oi_id, 'returned': qty})
+                any_success = True
+            except Exception as item_err:
+                print(f'Return item error ({oi_id}): {item_err}')
+                item_errors.append({'order_item_id': oi_id, 'error': str(item_err)})
+
+        if not any_success:
+            return jsonify({'error': 'Return failed.', 'item_errors': item_errors}), 400
+
+        status_code = 200 if not item_errors else 207
+        return jsonify({'message': 'Return processed.', 'returned': results, 'item_errors': item_errors}), status_code
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ─── Staff Inventory ──────────────────────────────────
 
 @app.route('/api/staff/inventory', methods=['GET'])
@@ -4082,6 +4356,17 @@ def staff_add_inventory():
                 'branch_id':  to_branch_id,
                 'quantity':   qty_added,
             }).execute()
+
+        # Keep product.quantity in sync with the real branch_stock total —
+        # same fix applied to the admin-side restock endpoints.
+        try:
+            prod = supabase.table('product').select('quantity').eq('product_id', product_id).execute()
+            if prod.data:
+                supabase.table('product').update({
+                    'quantity': prod.data[0]['quantity'] + qty_added
+                }).eq('product_id', product_id).execute()
+        except Exception as prod_err:
+            print(f'product.quantity sync warning: {prod_err}')
 
         # Log to inventory table
         supabase.table('inventory').insert({

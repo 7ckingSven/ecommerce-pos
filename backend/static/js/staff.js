@@ -931,8 +931,25 @@ function selectDiscount(el) {
   updateTotal();
 }
 
+// Category row shows only the category level. A category with
+// sub-categories gets a hover (or tap, via .open) flyout listing them —
+// panelist recommendation at the mock defense, so sub-category never
+// clutters the main chip row. Picking a sub-category item filters by
+// category + sub-category together; clicking the category chip itself
+// still filters by the whole category, same as before.
 function populateCategories(products) {
   const cats = [...new Set(products.map(p => p.category).filter(c => c != null && c !== ''))].sort();
+
+  // Map each category to its distinct, non-empty sub-categories.
+  const subCatsByCategory = {};
+  products.forEach(p => {
+    if (!p.category) return;
+    const sc = (p.sub_category || '').trim();
+    if (!sc) return;
+    if (!subCatsByCategory[p.category]) subCatsByCategory[p.category] = new Set();
+    subCatsByCategory[p.category].add(sc);
+  });
+
   const wrap = document.getElementById('posCats');
   wrap.innerHTML = '';
 
@@ -943,18 +960,69 @@ function populateCategories(products) {
   wrap.appendChild(allBtn);
 
   cats.forEach(c => {
+    const subCats = subCatsByCategory[c] ? [...subCatsByCategory[c]].sort() : [];
+
+    const catWrap = document.createElement('div');
+    catWrap.className = 'pos-cat-wrap';
+
     const btn = document.createElement('button');
     btn.className = 'pos-cat';
     btn.textContent = c;
-    btn.addEventListener('click', function() { filterPosCategory(c, this); });
-    wrap.appendChild(btn);
+    if (subCats.length) {
+      const caret = document.createElement('span');
+      caret.className = 'pos-cat-caret';
+      caret.textContent = '▾';
+      btn.appendChild(caret);
+      // Touch devices have no hover — a tap toggles the flyout open
+      // instead of only filtering, so sub-categories are still reachable.
+      btn.addEventListener('click', function(e) {
+        if (!catWrap.classList.contains('open') && window.matchMedia('(hover: none)').matches) {
+          e.stopPropagation();
+          document.querySelectorAll('.pos-cat-wrap.open').forEach(w => { if (w !== catWrap) w.classList.remove('open'); });
+          catWrap.classList.add('open');
+          return;
+        }
+        filterPosCategory(c, btn);
+      });
+    } else {
+      btn.addEventListener('click', function() { filterPosCategory(c, btn); });
+    }
+    catWrap.appendChild(btn);
+
+    if (subCats.length) {
+      const menu = document.createElement('div');
+      menu.className = 'pos-subcat-menu';
+      subCats.forEach(sc => {
+        const subBtn = document.createElement('button');
+        subBtn.className = 'pos-subcat-item';
+        subBtn.textContent = sc;
+        subBtn.addEventListener('click', function(e) {
+          e.stopPropagation();
+          catWrap.classList.remove('open');
+          filterPosCategory(c, btn, sc, subBtn);
+        });
+        menu.appendChild(subBtn);
+      });
+      catWrap.appendChild(menu);
+    }
+
+    wrap.appendChild(catWrap);
+  });
+
+  // Tap outside closes any flyout left open on touch devices.
+  document.addEventListener('click', function() {
+    document.querySelectorAll('.pos-cat-wrap.open').forEach(w => w.classList.remove('open'));
   });
 }
 
-function filterPosCategory(cat, el) {
+function filterPosCategory(cat, el, subcat, subEl) {
   document.querySelectorAll('#posCats .pos-cat').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('#posCats .pos-subcat-item').forEach(b => b.classList.remove('active'));
   el.classList.add('active');
-  const filtered = cat ? posProducts.filter(p => p.category === cat) : posProducts.slice();
+  if (subEl) subEl.classList.add('active');
+
+  let filtered = cat ? posProducts.filter(p => p.category === cat) : posProducts.slice();
+  if (subcat) filtered = filtered.filter(p => (p.sub_category || '').trim() === subcat);
   renderPosProducts(filtered);
 }
 

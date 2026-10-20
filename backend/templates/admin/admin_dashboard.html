@@ -1082,11 +1082,23 @@
             <span class="field-hint">Choose an existing category or type a new one.</span>
           </div>
           <div class="form-group">
-            <label class="form-label">Price (₱) <span class="req">*</span></label>
-            <input type="number" id="pPrice" class="form-input" step="0.01" min="0" oninput="_prodCheckField('pPrice')"/>
+            <label class="form-label">Sub-category <span style="font-weight:400;color:var(--text-muted);">(optional)</span></label>
+            <input type="text" id="pSubCategory" class="form-input" placeholder="Select or type a sub-category..." list="subCategoryList" autocomplete="off" oninput="_prodUpdateSaveBtn()"/>
+            <datalist id="subCategoryList"></datalist>
           </div>
         </div>
-        <div class="form-group">
+        <div class="form-row-2">
+          <div class="form-group">
+            <label class="form-label">Resale Price (₱) <span class="req">*</span> <span style="font-weight:400;color:var(--text-muted);">(what the customer pays)</span></label>
+            <input type="number" id="pPrice" class="form-input" step="0.01" min="0" oninput="_prodCheckField('pPrice')"/>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Base Price (₱) <span style="font-weight:400;color:var(--text-muted);">(cost — optional)</span></label>
+            <input type="number" id="pBasePrice" class="form-input" step="0.01" min="0" oninput="_prodUpdateSaveBtn()"/>
+            <span class="field-hint">Auto-fills Unit Cost when this product is added to a Purchase Order.</span>
+          </div>
+        </div>
+        <div class="form-group" id="pStatusBlock" style="display:none;">
           <label class="form-label">Status</label>
           <!-- Hidden input — controlled by stock level -->
           <input type="hidden" id="pStatus" value="inactive"/>
@@ -1115,9 +1127,9 @@
 
         <!-- Available At removed — branch stock controls visibility -->
 
-        <!-- Net Weight + Unit -->
-        <div class="form-group">
-          <label class="form-label">Net Weight / Volume <span class="req">*</span> <span style="font-weight:400;color:var(--text-muted);">(for shipping calculation)</span></label>
+        <!-- Net Weight + Unit — shown only in Edit mode (not required at creation) -->
+        <div class="form-group" id="pNetWeightBlock" style="display:none;">
+          <label class="form-label">Net Weight / Volume <span style="font-weight:400;color:var(--text-muted);">(optional — for shipping calculation)</span></label>
           <div style="display:flex;gap:8px;">
             <input type="number" id="pNetWeight" class="form-input" min="0" step="0.01" placeholder="e.g. 0.5, 250, 1.2" style="flex:1;" oninput="_prodCheckField('pNetWeight')"/>
             <select id="pNetWeightUnit" class="form-input form-select" style="width:90px;" onchange="_prodUpdateSaveBtn()">
@@ -1127,7 +1139,7 @@
               <option value="mL">mL</option>
             </select>
           </div>
-          <span class="field-hint">Enter the product's net weight or volume. Used to calculate shipping fee.</span>
+          <span class="field-hint">Enter the product's net weight or volume. Used to calculate shipping fee. Products missing this are flagged in the products table.</span>
         </div>
 
         <!-- Option Groups -->

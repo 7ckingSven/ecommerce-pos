@@ -103,8 +103,10 @@ Stores the product catalog with variants and weight.
 | `product_name` | VARCHAR | NOT NULL | Product name |
 | `brand` | VARCHAR | | Brand name |
 | `category` | VARCHAR | | Product category |
+| `sub_category` | VARCHAR | nullable | Optional sub-category under `category` (e.g. Category "Beverages" → Sub-category "Soft Drinks") |
 | `description` | TEXT | | Product description |
-| `price` | DECIMAL(10,2) | NOT NULL | Selling price |
+| `price` | DECIMAL(10,2) | NOT NULL | **Resale Price** — what the customer pays |
+| `base_price` | DECIMAL(10,2) | nullable | **Base Price (cost)** — what the business pays its supplier; auto-fills Unit Cost when the product is added to a Purchase Order |
 | `quantity` | INT | DEFAULT 0 | Legacy total stock (branch_stock is source of truth) |
 | `image_url` | TEXT | | Main product image URL (Supabase Storage) |
 | `image_urls` | TEXT[] | DEFAULT '{}' | Array of product image URLs |
@@ -335,6 +337,13 @@ ALTER TABLE product ADD COLUMN IF NOT EXISTS option_groups    JSONB        DEFAU
 ALTER TABLE product ADD COLUMN IF NOT EXISTS net_weight       DECIMAL(10,2) DEFAULT 0;
 ALTER TABLE product ADD COLUMN IF NOT EXISTS net_weight_unit  VARCHAR(10)  DEFAULT 'kg';
 
+-- product — Feature #3: sub-category + base/resale price split
+ALTER TABLE product ADD COLUMN IF NOT EXISTS sub_category VARCHAR;
+ALTER TABLE product ADD COLUMN IF NOT EXISTS base_price   DECIMAL(10,2);
+-- NOTE: `price` is kept as-is (no rename) and is now treated as "Resale
+-- Price" in the UI/docs only, so nothing else that reads product.price
+-- (POS, cart, discount calc, order_item.price) needed to change.
+
 -- order — new columns
 ALTER TABLE "order" ADD COLUMN IF NOT EXISTS shipping_fee DECIMAL(10,2) DEFAULT 0;
 ALTER TABLE "order" ADD COLUMN IF NOT EXISTS address      TEXT;
@@ -412,3 +421,6 @@ ALTER TABLE order_item ADD COLUMN IF NOT EXISTS returned_qty INTEGER NOT NULL DE
 | **Stock request batching** | Multiple items submitted together in one "Generate Stock Request" action share a `batch_id`; admin reviews and approves/rejects the whole batch as one action unless some items in it were already decided (e.g. a dropped connection left some approved and some pending), in which case only the still-pending ones remain actionable |
 | **Returns (post-completion)** | Separate from Cancel, which only applies before an order ships/completes. Admin/staff can process a return only on a `completed` order, per item, up to `qty - returned_qty` remaining. Restores `branch_stock`/`variant_stock`/`product.quantity` and logs an `inventory` row tagged `Return — Order #...` so Stock Movement History can tell it apart from a Sale or Cancellation. Each item's write is isolated (same per-item pattern as partial PO receiving) |
 | **product.quantity sync** | This aggregate field is kept in sync with the real `branch_stock` total on every stock-changing action — sale, cancel, return, and manual restock/transfer/adjustment (transfers are net-zero across branches, so `product.quantity` isn't touched for those) |
+| **Product creation — Status & Net Weight deferred** | Per panelist feedback at the mock defense: Net Weight is no longer required at product creation (it previously blocked Save). The Add Product modal hides both the Status display and the Net Weight field entirely — Status is auto-computed from stock and doesn't apply yet, and Net Weight can be filled in later. Both reappear in the Edit Product modal once the product exists. Products missing a net weight are visually flagged in the products table (tinted row + "⚠️ Needs weight" label) so admins know which ones still need it set via Edit |
+| **Base Price → PO Unit Cost auto-fill** | When a product with `base_price` set is selected in a Create PO row (or pulled in via "Use Approved Requests" / the branch-stock quick-create shortcut), Unit Cost auto-fills from `base_price` — still editable by hand. A product with no `base_price` yet is left blank rather than auto-filled with 0, so it doesn't read as "free" |
+| **POS category/sub-category browsing** | Staff POS shows only the category level in the chip row (per panelist feedback). A category with sub-categories gets a hover/tap flyout listing them; picking a sub-category filters by category + sub-category together, picking the category chip itself filters by the whole category (unchanged from before) |

@@ -895,6 +895,13 @@ async function loadProducts() {
     const datalist = document.getElementById('categoryList');
     if (datalist) datalist.innerHTML = categories.map(c => `<option value="${c}">`).join('');
 
+    // Populate sub-category datalist
+    const subCategories = [...new Set(
+      allProducts.map(p => p.sub_category?.trim()).filter(Boolean)
+    )].sort();
+    const subCatDatalist = document.getElementById('subCategoryList');
+    if (subCatDatalist) subCatDatalist.innerHTML = subCategories.map(c => `<option value="${c}">`).join('');
+
     // Populate brand datalist
     const brands = [...new Set(
       allProducts.map(p => p.brand?.trim()).filter(Boolean)
@@ -998,18 +1005,22 @@ function renderProducts(products) {
   const paged  = products.slice(start, start + PROD_PAGE_SIZE);
   document.getElementById('productsBody').innerHTML = paged.length
     ? paged.map(p => {
+        const missingWeight = !p.net_weight || Number(p.net_weight) <= 0;
         return `
-          <tr style='cursor:pointer;' onclick="toggleVariantRow('${p.product_id}', this.querySelector('.expand-btn'))">
+          <tr style='cursor:pointer;${missingWeight ? 'background:rgba(245,158,11,0.07);' : ''}' onclick="toggleVariantRow('${p.product_id}', this.querySelector('.expand-btn'))">
             <td>
               ${p.image_url
                 ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" class="product-img-cell" alt="${p.product_name}"/>`
                 : `<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg></div>`
               }
             </td>
-            <td><span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong></td>
+            <td>
+              <span class='expand-btn' style='margin-right:6px;font-size:11px;color:var(--text-muted);'>▶</span><strong>${p.product_name}</strong>
+              ${missingWeight ? `<span title="Needs net weight — edit this product to set it." style="margin-left:6px;color:#f59e0b;font-size:12px;">⚠️ Needs weight</span>` : ''}
+            </td>
             <td>${p.brand || '—'}</td>
-            <td>${p.category}</td>
-            <td>${peso(p.price)}</td>
+            <td>${p.category}${p.sub_category ? `<br><span style="font-size:11px;color:var(--text-muted);">${p.sub_category}</span>` : ''}</td>
+            <td>${peso(p.price)}${(p.base_price !== null && p.base_price !== undefined && p.base_price !== '') ? `<br><span style="font-size:11px;color:var(--text-muted);">Cost: ${peso(p.base_price)}</span>` : ''}</td>
             <td>${badge(p.status)}</td>
             <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.created_at ? toUtcDate(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + toUtcDate(p.created_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
             <td style="font-size:12px;color:var(--text-muted);white-space:nowrap;">${p.updated_at ? toUtcDate(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) + '<br><span style="font-size:11px;">' + toUtcDate(p.updated_at).toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit', timeZone:'Asia/Manila' }) + '</span>' : '—'}</td>
@@ -1123,7 +1134,7 @@ function viewAdminProductDetails(productId) {
       ${imgHtml}
       <div style="margin-top:14px;margin-bottom:16px;">
         <div style="font-size:20px;font-weight:800;color:var(--text);line-height:1.25;">${p.product_name}</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">${p.brand || '—'} • ${p.category || '—'}</div>
+        <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">${p.brand || '—'} • ${p.category || '—'}${p.sub_category ? ' / ' + p.sub_category : ''}</div>
         <div style="margin-top:8px;">${badge(p.status)}</div>
       </div>
       <div class="form-row-2" style="margin-bottom:10px;">
@@ -1134,6 +1145,7 @@ function viewAdminProductDetails(productId) {
                <div style="font-weight:800;font-size:20px;color:var(--g-400);">${peso(discountedPrice)} <span style="font-size:12px;font-weight:700;">(${disc.percentage}% OFF)</span></div>`
             : `<div style="font-weight:800;font-size:20px;color:var(--text);">${peso(p.price)}</div>`
           }
+          ${(p.base_price !== null && p.base_price !== undefined && p.base_price !== '') ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Cost (Base Price): ${peso(p.base_price)}</div>` : ''}
         </div>
         <div>
           <label class="form-label" style="font-size:11px;">Total Stock (all branches)</label>
@@ -1143,6 +1155,12 @@ function viewAdminProductDetails(productId) {
       <div style="margin-bottom:10px;">
         <label class="form-label" style="font-size:11px;">Stock by Branch</label>
         <div style="margin-top:4px;">${branchRows}</div>
+      </div>
+      <div style="margin-bottom:10px;">
+        <label class="form-label" style="font-size:11px;">Net Weight / Volume</label>
+        <div style="font-size:13px;${(!p.net_weight || Number(p.net_weight) <= 0) ? 'color:#f59e0b;font-weight:600;' : 'color:var(--text);'}margin-top:2px;">
+          ${(!p.net_weight || Number(p.net_weight) <= 0) ? '⚠️ Not set yet — edit this product to add it.' : `${p.net_weight} ${p.net_weight_unit || 'kg'}`}
+        </div>
       </div>
       ${p.description ? `
         <div style="margin-bottom:10px;">
@@ -1212,10 +1230,23 @@ function openProductModal(product = null) {
   document.getElementById('pName').value        = product?.product_name || '';
   document.getElementById('pBrand').value       = product?.brand || '';
   document.getElementById('pCategory').value    = product?.category || '';
+  const pSubCategoryEl = document.getElementById('pSubCategory');
+  if (pSubCategoryEl) pSubCategoryEl.value = product?.sub_category || '';
   document.getElementById('pPrice').value       = product?.price || '';
+  const pBasePriceEl = document.getElementById('pBasePrice');
+  if (pBasePriceEl) pBasePriceEl.value = product?.base_price ?? '';
   // Stock managed via Inventory — not set in product modal
   const status = product?.status || 'inactive';
   document.getElementById('pStatus').value = status;
+
+  // Status + Net Weight are only relevant once a product exists (status is
+  // auto-computed from stock, net weight gets flagged/filled in later) —
+  // hide both in Add mode, show both in Edit mode. Per panelist feedback at
+  // the mock defense: net weight shouldn't block product creation.
+  const statusBlock = document.getElementById('pStatusBlock');
+  const netWeightBlock = document.getElementById('pNetWeightBlock');
+  if (statusBlock)     statusBlock.style.display     = product ? '' : 'none';
+  if (netWeightBlock)  netWeightBlock.style.display  = product ? '' : 'none';
   // Update status badge display
   const dot  = document.getElementById('pStatusDot');
   const txt  = document.getElementById('pStatusText');
@@ -1274,7 +1305,9 @@ function openProductModal(product = null) {
     name:            product.product_name || '',
     brand:           product.brand        || '',
     category:        product.category     || '',
+    sub_category:    product.sub_category || '',
     price:           String(product.price ?? ''),
+    base_price:      String(product.base_price ?? ''),
     description:     product.description  || '',
     net_weight:      String(product.net_weight ?? ''),
     net_weight_unit: product.net_weight_unit || 'kg',
@@ -1315,6 +1348,11 @@ function _prodClearErrors() {
   ['pName','pBrand','pCategory','pPrice','pNetWeight'].forEach(id => _prodSetFieldError(id, ''));
 }
 
+// Required fields — net weight is intentionally NOT in this list (panelist
+// feedback: shouldn't block product creation; it's optional and flagged
+// later in the products table instead).
+const PROD_REQUIRED_FIELDS = ['pName','pBrand','pCategory','pPrice'];
+
 // Snapshot of the product's original values when editing (set in
 // openProductModal) — used by _prodUpdateSaveBtn's dirty-check below.
 let _prodOrigValues = null;
@@ -1326,7 +1364,7 @@ let _prodOrigValues = null;
 function _prodUpdateSaveBtn() {
   const btn = document.getElementById('productSubmitBtn');
   if (!btn) return;
-  const allFilled = ['pName','pBrand','pCategory','pPrice','pNetWeight'].every(id => {
+  const allFilled = PROD_REQUIRED_FIELDS.every(id => {
     const v = (document.getElementById(id)?.value || '').trim();
     return v !== '';
   });
@@ -1337,7 +1375,9 @@ function _prodUpdateSaveBtn() {
       name:            (document.getElementById('pName')?.value        || '').trim(),
       brand:           (document.getElementById('pBrand')?.value       || '').trim(),
       category:        (document.getElementById('pCategory')?.value    || '').trim(),
+      sub_category:    (document.getElementById('pSubCategory')?.value || '').trim(),
       price:           String(document.getElementById('pPrice')?.value || ''),
+      base_price:      String(document.getElementById('pBasePrice')?.value || ''),
       description:     (document.getElementById('pDescription')?.value || '').trim(),
       net_weight:      String(document.getElementById('pNetWeight')?.value || ''),
       net_weight_unit: document.getElementById('pNetWeightUnit')?.value || 'kg',
@@ -1365,8 +1405,10 @@ function _prodCheckField(id) {
       break;
     }
     case 'pNetWeight': {
-      const v = parseFloat(document.getElementById(id)?.value);
-      _prodSetFieldError(id, !document.getElementById(id)?.value ? 'Net weight is required.' : isNaN(v) || v <= 0 ? 'Must be greater than 0.' : '');
+      // Optional — only validate if the admin actually entered something.
+      const raw = document.getElementById(id)?.value;
+      const v   = parseFloat(raw);
+      _prodSetFieldError(id, raw && (isNaN(v) || v <= 0) ? 'Must be greater than 0.' : '');
       break;
     }
   }
@@ -1374,8 +1416,10 @@ function _prodCheckField(id) {
 }
 
 function _prodValidate() {
-  ['pName','pBrand','pCategory','pPrice','pNetWeight'].forEach(id => _prodCheckField(id));
-  return !['pName','pBrand','pCategory','pPrice','pNetWeight'].some(id => {
+  // pNetWeight is checked too (so an invalid-but-entered value still blocks
+  // save) even though it isn't in PROD_REQUIRED_FIELDS.
+  [...PROD_REQUIRED_FIELDS, 'pNetWeight'].forEach(id => _prodCheckField(id));
+  return ![...PROD_REQUIRED_FIELDS, 'pNetWeight'].some(id => {
     const hint = document.getElementById(id + '_perr');
     return hint && hint.textContent;
   });
@@ -1409,6 +1453,10 @@ function closeProductModal() {
   if (nwUnitEl) nwUnitEl.value = 'kg';
   const previewWrapEl = document.getElementById('imagePreviewsWrap');
   if (previewWrapEl) previewWrapEl.innerHTML = '';
+  const subCatEl = document.getElementById('pSubCategory');
+  if (subCatEl) subCatEl.value = '';
+  const basePriceEl = document.getElementById('pBasePrice');
+  if (basePriceEl) basePriceEl.value = '';
 }
 
 // ─── Variant Chip Functions ───────────────────────────
@@ -1589,7 +1637,9 @@ async function submitProduct(e) {
   formData.append('product_name',  document.getElementById('pName').value);
   formData.append('brand',         document.getElementById('pBrand').value);
   formData.append('category',      document.getElementById('pCategory').value);
+  formData.append('sub_category',  document.getElementById('pSubCategory')?.value || '');
   formData.append('price',         document.getElementById('pPrice').value);
+  formData.append('base_price',    document.getElementById('pBasePrice')?.value || '');
   formData.append('quantity',      '0'); // Stock managed via Inventory
 
   // Multiple images — use selectedImageFiles array (supports removal)
@@ -5541,14 +5591,15 @@ function addPOItemRow() {
   row.style.cssText = 'display:grid;grid-template-columns:0.8fr 80px 160px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);">
+      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);autofillPORowCost(this);">
         <option value="">Select product</option>
         ${allProducts.map(p => {
           const bs = p.branch_stock || [];
           const totalStock = bs.length
             ? bs.reduce((s, b) => s + Number(b.quantity), 0)
             : Number(p.quantity || 0);
-          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}' data-groups='${JSON.stringify(p.option_groups||[])}'>${p.product_name}</option>`;
+          const basePriceAttr = (p.base_price !== null && p.base_price !== undefined && p.base_price !== '') ? Number(p.base_price) : '';
+          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}' data-groups='${JSON.stringify(p.option_groups||[])}' data-base-price="${basePriceAttr}">${p.product_name}</option>`;
         }).join('')}
       </select>
       <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
@@ -5615,6 +5666,7 @@ function fillPORowForProduct(product, variantRow, requestId, qty) {
     sel.value = product.product_id;
     updatePORowStock(sel);
     loadPORowVariants(sel);
+    autofillPORowCost(sel);
   }
 
   if (variantRow && variantRow.options) {
@@ -5789,6 +5841,24 @@ function updatePORowStock(sel) {
   const infoEl = row?.querySelector('.po-stock-info');
   if (infoEl) infoEl.textContent = opt.value ? info : '';
 }
+
+// Auto-fills Unit Cost from the selected product's base_price (set in the
+// Add/Edit Product modal), the same idea as "Use Approved Requests"
+// auto-fill for qty/variant — still editable by hand afterward. Does NOT
+// fill in 0 for a product with no base_price set yet, since that would
+// read as "free" rather than "unknown".
+function autofillPORowCost(sel) {
+  const opt = sel.options[sel.selectedIndex];
+  const row = sel.closest('[style]');
+  const costEl = row?.querySelector('.po-cost');
+  if (!costEl) return;
+  const basePrice = opt?.dataset?.basePrice;
+  if (basePrice !== undefined && basePrice !== '') {
+    costEl.value = basePrice;
+    updatePOTotal();
+  }
+}
+window.autofillPORowCost = autofillPORowCost;
 
 function updatePOTotal() {
   const rows  = document.getElementById('poItemsWrap').children;
