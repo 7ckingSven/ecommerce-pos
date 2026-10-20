@@ -1632,8 +1632,14 @@ async function submitProduct(e) {
   if (!_prodValidate()) return;
   // ──────────────────────────────────────────────────────
 
+  const id = document.getElementById('productId').value;
+  const confirmed = await showConfirmDialog(
+    id ? 'Confirm Save Changes' : 'Confirm Add Product',
+    id ? 'Save changes to this product?' : 'Add this new product?'
+  );
+  if (!confirmed) return;
+
   setButtonLoading(submitBtn, true);
-  const id       = document.getElementById('productId').value;
   const formData = new FormData();
   formData.append('product_name',  document.getElementById('pName').value);
   formData.append('brand',         document.getElementById('pBrand').value);
@@ -2519,14 +2525,12 @@ function getSelectedVariantOptions() {
 async function submitAddStock(e) {
   e.preventDefault();
   const addStockBtn = e.submitter || document.querySelector('#addStockForm button[type="submit"]');
-  setButtonLoading(addStockBtn, true);
 
   const branchVal = document.getElementById('addStockBranch').value;
   const note      = document.getElementById('addStockNote').value || 'Stock added';
 
   if (!branchVal) {
     showToast('Please select a branch.', 'error');
-    setButtonLoading(addStockBtn, false);
     return;
   }
 
@@ -2534,7 +2538,6 @@ async function submitAddStock(e) {
   const rows = document.querySelectorAll('#addStockItems > div');
   if (!rows.length) {
     showToast('Please add at least one product.', 'error');
-    setButtonLoading(addStockBtn, false);
     return;
   }
 
@@ -2563,9 +2566,16 @@ async function submitAddStock(e) {
 
   if (hasError || !items.length) {
     showToast('Please fill in all product rows correctly.', 'error');
-    setButtonLoading(addStockBtn, false);
     return;
   }
+
+  const confirmed = await showConfirmDialog(
+    'Confirm Add Stock',
+    `Add stock for ${items.length} product${items.length !== 1 ? 's' : ''}?`
+  );
+  if (!confirmed) return;
+
+  setButtonLoading(addStockBtn, true);
 
   // Send requests for each item
   const branchIds = branchVal === 'both'
@@ -2726,6 +2736,10 @@ async function submitTransfer(e) {
     type:           'transfer',
   };
   const btn = e.submitter || document.getElementById('transferSubmitBtn');
+
+  const confirmed = await showConfirmDialog('Confirm Transfer', `Transfer ${data.quantity} unit(s) between branches?`);
+  if (!confirmed) return;
+
   setButtonLoading(btn, true);
   try {
     const res = await fetch('/api/admin/inventory', {
@@ -2817,6 +2831,10 @@ async function submitAdjust(e) {
   };
 
   const btn = e.submitter || document.getElementById('adjustSubmitBtn');
+
+  const confirmed = await showConfirmDialog('Confirm Adjustment', `Deduct ${qty} unit(s) from stock (${reason})?`);
+  if (!confirmed) return;
+
   setButtonLoading(btn, true);
   try {
     const res = await fetch('/api/admin/inventory', {
@@ -2880,6 +2898,9 @@ function updateProcessingCapIndicator(orders) {
 }
 
 async function runBatchProcessOrders() {
+  const confirmed = await showConfirmDialog('Confirm', 'Move the next batch of pending orders to Processing?');
+  if (!confirmed) return;
+
   try {
     const res  = await fetch('/api/admin/orders/batch-process', { method: 'POST' });
     const body = await res.json().catch(() => ({}));
@@ -2981,6 +3002,10 @@ async function dispatchSelectedOrders() {
     showToast('Select at least one order to dispatch.', 'error');
     return;
   }
+
+  const confirmed = await showConfirmDialog('Confirm Dispatch', `Dispatch ${ids.length} order(s) for delivery today?`);
+  if (!confirmed) return;
+
   try {
     const res  = await fetch('/api/admin/orders/dispatch', {
       method: 'POST',
@@ -2999,6 +3024,13 @@ async function dispatchSelectedOrders() {
 }
 
 async function markOrderDelivered(orderId, confirmRemittance) {
+  // Only ask the generic "are you sure" on the plain path — the COD
+  // remittance step below (confirmRemittance=true) is its own, more specific
+  // confirmation and re-asking on top of it would be redundant.
+  if (!confirmRemittance) {
+    const confirmed = await showConfirmDialog('Confirm', 'Mark this order as delivered?');
+    if (!confirmed) return;
+  }
   try {
     const res = await fetch(`/api/admin/orders/${orderId}/delivered`, {
       method: 'POST',
@@ -3028,7 +3060,8 @@ async function markOrderDelivered(orderId, confirmRemittance) {
 }
 
 async function markOrderNotDelivered(orderId) {
-  if (!confirm('Record a failed delivery attempt for this order?')) return;
+  const confirmed = await showConfirmDialog('Confirm', 'Record a failed delivery attempt for this order?');
+  if (!confirmed) return;
   try {
     const res  = await fetch(`/api/admin/orders/${orderId}/not-delivered`, { method: 'POST' });
     const body = await res.json().catch(() => ({}));
@@ -3217,7 +3250,7 @@ function orderStatusSelectHtml(orderId, status, updateFnName) {
   const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
     + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
   return `<select class="filter-select" style="font-size:11px;padding:4px 8px;" ${locked ? 'disabled' : ''}
-      onchange="${updateFnName}('${orderId}', this.value)">${options}</select>`;
+      onchange="${updateFnName}('${orderId}', this.value, this)">${options}</select>`;
 }
 
 function renderOrders(orders) {
@@ -3331,6 +3364,9 @@ async function submitProcessReturn(orderId) {
 
   const reason = (document.getElementById('returnReasonInput')?.value || '').trim();
 
+  const confirmed = await showConfirmDialog('Confirm Return', 'Process this return and restore stock for the entered items?');
+  if (!confirmed) return;
+
   try {
     const res = await fetch(`/api/admin/orders/${orderId}/return`, {
       method: 'POST',
@@ -3350,7 +3386,15 @@ async function submitProcessReturn(orderId) {
   }
 }
 
-async function updateOrderStatus(id, status) {
+async function updateOrderStatus(id, status, selectEl) {
+  // selectEl is the <select> itself (see orderStatusSelectHtml) — its value
+  // has already visually changed to `status` by the time onchange fires, so
+  // a cancel here needs to snap it back to the option it started on.
+  const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
+  if (!confirmed) {
+    if (selectEl && selectEl.options.length) selectEl.value = selectEl.options[0].value;
+    return;
+  }
   try {
     const res  = await fetch(`/api/admin/orders/${id}`, {
       method: 'PUT',
@@ -4701,6 +4745,12 @@ async function submitDiscount(e) {
   }
   // ───────────────────────────────────────────────────────
 
+  const confirmed = await showConfirmDialog(
+    id ? 'Confirm Save Changes' : 'Confirm Create Discount',
+    id ? `Save changes to <strong>${dName}</strong>?` : `Create discount <strong>${dName}</strong>?`
+  );
+  if (!confirmed) return;
+
   const data = {
     discount_name: dName,
     percentage:    dPercentage,
@@ -4833,6 +4883,10 @@ async function submitAssign() {
   const toUnassign = assignProductState.filter(p => p.wasAssigned && !p.checked).map(p => p.product_id);
 
   const btn = document.querySelector('#assignModal .btn-solid-green');
+
+  const confirmed = await showConfirmDialog('Confirm Assignment', 'Apply these discount assignment changes?');
+  if (!confirmed) return;
+
   setButtonLoading(btn, true);
   try {
     const requests = [];
@@ -5699,6 +5753,13 @@ async function submitReview(status) {
   const rejectBtn  = document.getElementById('reviewRejectBtn');
   const clickedBtn = status === 'approved' ? approveBtn : rejectBtn;
   const otherBtn    = status === 'approved' ? rejectBtn : approveBtn;
+
+  const confirmed = await showConfirmDialog(
+    status === 'approved' ? 'Confirm Approval' : 'Confirm Rejection',
+    `${status === 'approved' ? 'Approve' : 'Reject'} ${ids.length > 1 ? `these ${ids.length} requests` : 'this request'}?`
+  );
+  if (!confirmed) return;
+
   setButtonLoading(clickedBtn, true);
   if (otherBtn) otherBtn.disabled = true;
   try {
@@ -6090,6 +6151,9 @@ async function submitCreatePO() {
     }
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
+
+  const confirmed = await showConfirmDialog('Confirm Create PO', `Create this purchase order with ${items.length} item(s)?`);
+  if (!confirmed) return;
 
   // Validation passed — now (and only now) enter the loading state, so a
   // failed validation never leaves the button stuck showing "Processing...".
@@ -6505,6 +6569,10 @@ async function submitPOReceive(poId) {
   });
 
   var btn = document.getElementById('markReceivedBtn');
+
+  const confirmed = await showConfirmDialog('Confirm Receive', `Save receiving details for PO ${po.po_number}?`);
+  if (!confirmed) return;
+
   setButtonLoading(btn, true);
 
   try {
@@ -6587,6 +6655,10 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
   const otherBtnId  = status === 'ordered' ? 'cancelPOBtn' : status === 'cancelled' ? 'markOrderedBtn' : null;
   const activeBtn = document.getElementById(activeBtnId);
   const otherBtn  = otherBtnId ? document.getElementById(otherBtnId) : null;
+
+  const confirmed = await showConfirmDialog('Confirm', `Mark this PO as ${status}?`);
+  if (!confirmed) return;
+
   setButtonLoading(activeBtn, true);
   if (otherBtn) otherBtn.disabled = true;
   try {
@@ -6831,6 +6903,9 @@ async function saveProfile() {
 
   // Final validation guard (button should already be disabled on error, but safety net)
   if (!_profValidate()) return;
+
+  const confirmed = await showConfirmDialog('Confirm Save', changingPw ? 'Save profile changes and update your password?' : 'Save changes to your profile?');
+  if (!confirmed) return;
 
   setButtonLoading(btn, true);
   try {

@@ -379,6 +379,35 @@ function genUUID() {
   });
 }
 
+// ─── Generic Confirm-Before-Save Dialog ───────────────
+// Ported from admin.js (same implementation there) — a reusable, promise-
+// based "are you sure?" step used in front of every create/edit/process
+// action across the app (panelist follow-up after the mock defense), so
+// every modal/action behaves identically instead of each getting its own
+// bespoke confirm UI. Builds its own overlay on the fly (highest z-index),
+// so it safely stacks on top of whatever modal is already open underneath
+// it (e.g. confirming inside the Request Stock modal) without disturbing it.
+function showConfirmDialog(title, message) {
+  return new Promise(resolve => {
+    const overlay = document.createElement('div');
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;display:flex;align-items:center;justify-content:center;';
+    overlay.innerHTML = `
+      <div style="background:var(--card-bg);border-radius:16px;padding:1.5rem;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
+        <h3 style="margin:0 0 0.5rem;font-size:16px;color:var(--text);">${title}</h3>
+        <p style="margin:0 0 1.2rem;font-size:13px;color:var(--text-muted);line-height:1.6;">${message}</p>
+        <div style="display:flex;gap:8px;justify-content:flex-end;">
+          <button id="confirmNo"  style="padding:8px 18px;border-radius:8px;border:1.5px solid var(--border);background:none;color:var(--text);cursor:pointer;font-size:13px;">No</button>
+          <button id="confirmYes" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--g-700),var(--g-500));color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Yes, Confirm</button>
+        </div>
+      </div>
+    `;
+    document.body.appendChild(overlay);
+    overlay.querySelector('#confirmYes').onclick = () => { document.body.removeChild(overlay); resolve(true); };
+    overlay.querySelector('#confirmNo').onclick  = () => { document.body.removeChild(overlay); resolve(false); };
+  });
+}
+window.showConfirmDialog = showConfirmDialog;
+
 // ─── Button Loading Helper ────────────────────────────
 function setButtonLoading(btn, loading) {
   if (!btn) return;
@@ -1720,6 +1749,9 @@ async function confirmGcashOrder() {
     return;
   }
 
+  const confirmed = await showConfirmDialog('Confirm Order', 'Process this GCash order?');
+  if (!confirmed) return;
+
   const body = document.getElementById('gcashModalBody');
   const btn  = body.querySelector('button.btn-solid-green');
   if (btn) { btn.disabled = true; btn.textContent = 'Processing...'; }
@@ -1865,12 +1897,10 @@ async function processOrder() {
     return;
   }
   const processBtn = document.getElementById('processOrderBtn');
-  setButtonLoading(processBtn, true);
 
   // Branch is auto-detected from staff profile
   const branchId = staffBranchId || document.getElementById('posBranch').value;
   if (!branchId) {
-    setButtonLoading(processBtn, false);
     showToast('Branch not assigned. Please contact admin.', 'error');
     return;
   }
@@ -1884,11 +1914,15 @@ async function processOrder() {
     const _tot  = _sub - (_sub * _dPct / 100);
     const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
     if (received < _tot) {
-      setButtonLoading(processBtn, false);
       showToast('Cash received is less than total amount.', 'error');
       return;
     }
   }
+
+  const confirmed = await showConfirmDialog('Confirm Order', 'Process this order?');
+  if (!confirmed) return;
+
+  setButtonLoading(processBtn, true);
 
   const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
   const quantity = orderItems.reduce((s, i) => s + i.quantity, 0);
@@ -2620,7 +2654,7 @@ function orderStatusSelectHtml(orderId, status, updateFnName) {
   const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
     + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
   return `<select class="filter-select" style="font-size:11px;padding:4px 8px;" ${locked ? 'disabled' : ''}
-      onchange="${updateFnName}('${orderId}', this.value)">${options}</select>`;
+      onchange="${updateFnName}('${orderId}', this.value, this)">${options}</select>`;
 }
 
 function renderStaffOrders(orders) {
@@ -3120,7 +3154,15 @@ function applyStaffOrderFilters() {
 }
 window.filterStaffOrderType = filterStaffOrderType;
 
-async function updateOrderStatus(id, status) {
+async function updateOrderStatus(id, status, selectEl) {
+  // selectEl is the <select> itself (see orderStatusSelectHtml) — its value
+  // has already visually changed to `status` by the time onchange fires, so
+  // a cancel here needs to snap it back to the option it started on.
+  const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
+  if (!confirmed) {
+    if (selectEl && selectEl.options.length) selectEl.value = selectEl.options[0].value;
+    return;
+  }
   try {
     const res  = await fetch(`/api/staff/orders/${id}`, {
       method: 'PUT',
@@ -3145,6 +3187,9 @@ function updateStaffProcessingCapIndicator(orders) {
 }
 
 async function staffRunBatchProcessOrders() {
+  const confirmed = await showConfirmDialog('Confirm', 'Move the next batch of pending orders to Processing?');
+  if (!confirmed) return;
+
   try {
     const res  = await fetch('/api/staff/orders/batch-process', { method: 'POST' });
     const body = await res.json().catch(() => ({}));
@@ -3241,6 +3286,10 @@ async function staffDispatchSelectedOrders() {
     showToast('Select at least one order to dispatch.', 'error');
     return;
   }
+
+  const confirmed = await showConfirmDialog('Confirm Dispatch', `Dispatch ${ids.length} order(s) for delivery today?`);
+  if (!confirmed) return;
+
   try {
     const res  = await fetch('/api/staff/orders/dispatch', {
       method: 'POST',
@@ -3259,6 +3308,13 @@ async function staffDispatchSelectedOrders() {
 }
 
 async function staffMarkOrderDelivered(orderId, confirmRemittance) {
+  // Only ask the generic "are you sure" on the plain path — the COD
+  // remittance step below (confirmRemittance=true) is its own, more specific
+  // confirmation and re-asking on top of it would be redundant.
+  if (!confirmRemittance) {
+    const confirmed = await showConfirmDialog('Confirm', 'Mark this order as delivered?');
+    if (!confirmed) return;
+  }
   try {
     const res = await fetch(`/api/staff/orders/${orderId}/delivered`, {
       method: 'POST',
@@ -3288,7 +3344,8 @@ async function staffMarkOrderDelivered(orderId, confirmRemittance) {
 }
 
 async function staffMarkOrderNotDelivered(orderId) {
-  if (!confirm('Record a failed delivery attempt for this order?')) return;
+  const confirmed = await showConfirmDialog('Confirm', 'Record a failed delivery attempt for this order?');
+  if (!confirmed) return;
   try {
     const res  = await fetch(`/api/staff/orders/${orderId}/not-delivered`, { method: 'POST' });
     const body = await res.json().catch(() => ({}));
@@ -3804,14 +3861,12 @@ function _reqUpdateBtn() {
 async function submitRequest(e) {
   e.preventDefault();
   const reqBtn = e.submitter || document.querySelector('#requestForm button[type="submit"]');
-  setButtonLoading(reqBtn, true);
 
   const note = document.getElementById('reqNote').value;
   const rows = document.querySelectorAll('#reqItems > div');
 
   if (!rows.length) {
     showToast('Please add at least one product.', 'error');
-    setButtonLoading(reqBtn, false);
     return;
   }
 
@@ -3839,9 +3894,13 @@ async function submitRequest(e) {
 
   if (hasError || !items.length) {
     showToast('Please fill in all product rows correctly.', 'error');
-    setButtonLoading(reqBtn, false);
     return;
   }
+
+  const confirmed = await showConfirmDialog('Confirm Submission', `Submit ${items.length} stock request${items.length !== 1 ? 's' : ''}?`);
+  if (!confirmed) return;
+
+  setButtonLoading(reqBtn, true);
 
   try {
     // One id shared by every item in this submission — lets admin's Stock
@@ -4084,6 +4143,9 @@ async function saveProfile() {
 
   // Final validation guard (button should already be disabled on error, but safety net)
   if (!_profValidate()) return;
+
+  const confirmed = await showConfirmDialog('Confirm Save', changingPw ? 'Save profile changes and update your password?' : 'Save changes to your profile?');
+  if (!confirmed) return;
 
   setButtonLoading(btn, true);
   try {
