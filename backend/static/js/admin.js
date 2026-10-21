@@ -55,6 +55,9 @@ let branchStockLevelVal   = '';
 const STOCK_ALERT_PAGE_SIZE = 10;
 let stockAlertPage      = 1;
 let _stockAlertCache    = [];
+const LOGIN_SESSION_PAGE_SIZE = 10;
+let loginSessionsPage           = 1;
+let _loginSessionFilteredCache  = [];
 
 function paginate(arr, page) {
   return arr.slice((page - 1) * ITEMS_PER_PAGE, page * ITEMS_PER_PAGE);
@@ -582,6 +585,7 @@ let allOrders    = [];
 let allUsers     = [];
 let allDiscounts = [];
 let allBranches  = [];
+let allLoginSessions = [];
 
 // ══════════════════════════════════════════════════════
 // DATA LOADERS
@@ -593,7 +597,7 @@ var loaders = {
   orders:    loadOrders,
   sales:     loadSales,
   discounts: loadDiscounts,
-  users:          loadUsers,
+  users:          function() { loadUsers(); loadLoginSessions(); },
   purchase_orders: loadPurchaseOrders,
   profile:         loadProfile,
 };
@@ -5046,6 +5050,109 @@ function applyUserFilters() {
   renderUsers(filtered);
 }
 
+// ─── LOGIN ACTIVITY (audit trail) ──────────────────────
+// Admin + Staff dashboard login/logout history, surfaced inside User
+// Management below the account list. Customer logins (mobile app) are
+// out of scope — see admin_get_login_sessions() in app.py.
+async function loadLoginSessions() {
+  skTable('loginSessionsBody', ['sk-cell-md','sk-cell-sm','sk-cell-sm','sk-cell-md','sk-cell-md','sk-cell-sm','sk-cell-md','sk-badge'], 8);
+  try {
+    if (!allBranches.length) await loadBranches();
+    const branchSel = document.getElementById('loginSessionBranchFilter');
+    if (branchSel && branchSel.options.length <= 1) {
+      branchSel.innerHTML = '<option value="">All Branches</option>' +
+        allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+    }
+    const res = await fetch('/api/admin/login-sessions');
+    allLoginSessions = await res.json();
+    applyLoginSessionFilters();
+  } catch (e) { console.error('Login sessions error:', e); }
+}
+
+function resolveSessionUserName(s) {
+  const u = allUsers.find(u => u.user_id === s.user_id);
+  if (!u) return s.role === 'admin' ? 'Admin' : 'Staff';
+  const st = Array.isArray(u.staff) ? u.staff[0] : u.staff;
+  return st?.fname ? `${st.fname} ${st.lname || ''}`.trim() : u.username;
+}
+
+function renderLoginSessions(rows) {
+  _loginSessionFilteredCache = rows;
+  const start = (loginSessionsPage - 1) * LOGIN_SESSION_PAGE_SIZE;
+  const paged = rows.slice(start, start + LOGIN_SESSION_PAGE_SIZE);
+  document.getElementById('loginSessionsBody').innerHTML = paged.length
+    ? paged.map(s => {
+        const branchName = s.branch_id
+          ? (allBranches.find(b => b.branch_id === s.branch_id)?.branch_name || '—')
+          : '—';
+        const loginAt    = toUtcDate(s.login_at);
+        const logoutAt   = s.logout_at ? toUtcDate(s.logout_at) : null;
+        const durationMs = (logoutAt || new Date()) - loginAt;
+        const mins       = Math.max(0, Math.round(durationMs / 60000));
+        const duration   = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
+        const dtFmt = { timeZone: 'Asia/Manila', dateStyle: 'short', timeStyle: 'short' };
+        return `
+        <tr>
+          <td>${resolveSessionUserName(s)}</td>
+          <td>${badge(s.role)}</td>
+          <td>${branchName}</td>
+          <td>${loginAt ? loginAt.toLocaleString('en-PH', dtFmt) : '—'}</td>
+          <td>${logoutAt ? logoutAt.toLocaleString('en-PH', dtFmt) : '—'}</td>
+          <td>${duration}</td>
+          <td>${s.ip_address || '—'}</td>
+          <td>${s.is_active
+              ? '<span class="badge badge--green">🟢 Active</span>'
+              : '<span class="badge badge--gray">Ended</span>'}</td>
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="8" class="table-empty">No login activity found</td></tr>';
+  renderPagerCustom('loginSessionsPagination', rows.length, loginSessionsPage, LOGIN_SESSION_PAGE_SIZE, 'changeLoginSessionsPage');
+  const countEl = document.getElementById('loginSessionsActiveCount');
+  if (countEl) countEl.textContent = `${rows.filter(r => r.is_active).length} Active Now`;
+}
+function changeLoginSessionsPage(page) { loginSessionsPage = page; renderLoginSessions(_loginSessionFilteredCache); }
+window.changeLoginSessionsPage = changeLoginSessionsPage;
+
+let loginSessionRoleFilter   = '';
+let loginSessionBranchFilter = '';
+let loginSessionStatusFilter = '';
+let loginSessionDateFrom     = '';
+let loginSessionDateTo       = '';
+
+function filterLoginSessionRole(val)   { loginSessionRoleFilter = val;   loginSessionsPage = 1; applyLoginSessionFilters(); }
+function filterLoginSessionBranch(val) { loginSessionBranchFilter = val; loginSessionsPage = 1; applyLoginSessionFilters(); }
+function filterLoginSessionStatus(val) { loginSessionStatusFilter = val; loginSessionsPage = 1; applyLoginSessionFilters(); }
+function applyLoginSessionDateRange() {
+  loginSessionDateFrom = document.getElementById('loginSessionDateFrom')?.value || '';
+  loginSessionDateTo   = document.getElementById('loginSessionDateTo')?.value || '';
+  loginSessionsPage = 1;
+  applyLoginSessionFilters();
+}
+window.filterLoginSessionRole     = filterLoginSessionRole;
+window.filterLoginSessionBranch   = filterLoginSessionBranch;
+window.filterLoginSessionStatus   = filterLoginSessionStatus;
+window.applyLoginSessionDateRange = applyLoginSessionDateRange;
+
+function applyLoginSessionFilters() {
+  let filtered = allLoginSessions;
+
+  if (loginSessionRoleFilter)   filtered = filtered.filter(s => s.role === loginSessionRoleFilter);
+  if (loginSessionBranchFilter) filtered = filtered.filter(s => s.branch_id === loginSessionBranchFilter);
+  if (loginSessionStatusFilter) {
+    filtered = filtered.filter(s => loginSessionStatusFilter === 'active' ? s.is_active : !s.is_active);
+  }
+  if (loginSessionDateFrom || loginSessionDateTo) {
+    const fromDate = loginSessionDateFrom ? new Date(loginSessionDateFrom) : new Date(0);
+    const toDate   = loginSessionDateTo   ? new Date(loginSessionDateTo + 'T23:59:59') : new Date();
+    filtered = filtered.filter(s => {
+      const d = toUtcDate(s.login_at) || new Date(0);
+      return d >= fromDate && d <= toDate;
+    });
+  }
+
+  renderLoginSessions(filtered);
+}
+
 function toggleBranchVisibility(role) {
   const branchGroup = document.getElementById('uBranch')?.closest('.form-group');
   if (branchGroup) branchGroup.style.display = role === 'admin' ? 'none' : '';
@@ -6961,4 +7068,21 @@ function togglePwVisibility(inputId, btn) {
   btn.innerHTML = isHidden
     ? '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>'
     : '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94"/><path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19"/><line x1="1" y1="1" x2="23" y2="23"/></svg>';
+}
+
+// ─── Logout Confirmation Modal ─────────────────────────
+// Split out of admin_dashboard.html's inline <script> block so the
+// page's JS lives alongside the rest of admin.js instead of inline.
+var _logoutUrl = '';
+function openLogoutModal(url) {
+  _logoutUrl = url;
+  document.getElementById('logoutModalOverlay').style.display = 'block';
+  document.getElementById('logoutModal').style.display        = 'block';
+}
+function closeLogoutModal() {
+  document.getElementById('logoutModalOverlay').style.display = 'none';
+  document.getElementById('logoutModal').style.display        = 'none';
+}
+function confirmLogout() {
+  window.location.href = _logoutUrl;
 }

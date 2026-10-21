@@ -256,13 +256,81 @@ def _finalize_login(user, staff):
     session['role']          = user['role']
     session['name']          = f"{staff['fname']} {staff['lname']}"
     session['session_token'] = new_session_token
+
+    _record_login_session(user['user_id'], user['role'], staff['staff_id'], staff.get('branch_id'))
     return new_session_token
 
 def _clear_pending_login():
     for key in ('pending_login_user_id', 'pending_login_staff_id', 'pending_login_role',
-                'pending_login_name', 'mfa_otp_code', 'mfa_otp_sent',
+                'pending_login_name', 'pending_login_branch_id', 'mfa_otp_code', 'mfa_otp_sent',
                 'mfa_otp_created_at'):
         session.pop(key, None)
+
+# ══════════════════════════════════════════════════════
+# LOGIN / LOGOUT AUDIT TRAIL — login_sessions table
+# Admin + Staff dashboard logins only (customers use the mobile app's
+# separate token flow, not this session-cookie login). Purely additive —
+# no existing table is touched.
+# ══════════════════════════════════════════════════════
+LOGIN_SESSION_ACTIVE_WINDOW_SECONDS = 15 * 60  # no ping within this window => treated as Ended even without an explicit logout
+
+def _client_ip():
+    """Best-effort real client IP behind Render's reverse proxy."""
+    forwarded = request.headers.get('X-Forwarded-For', '')
+    if forwarded:
+        return forwarded.split(',')[0].strip()
+    return request.remote_addr or ''
+
+def _record_login_session(user_id, role, staff_id=None, branch_id=None):
+    """Inserts one login_sessions row for this login and stashes its id in
+    the Flask session so /logout and the last-seen 'touch' can find it
+    again. Best-effort — a failure here must never block an actual login."""
+    # Admin is never branch-scoped — enforce this here rather than trusting
+    # staff.branch_id to be null for every admin row (some admin accounts
+    # carry a stale/leftover branch_id from how they were originally
+    # created, before admin/staff were split on branch assignment).
+    if role == 'admin':
+        branch_id = None
+    try:
+        now_iso = datetime.now().isoformat()
+        res = supabase.table('login_sessions').insert({
+            'user_id':      user_id,
+            'staff_id':     staff_id,
+            'role':         role,
+            'branch_id':    branch_id,
+            'login_at':     now_iso,
+            'last_seen_at': now_iso,
+            'ip_address':   _client_ip(),
+            'user_agent':   request.headers.get('User-Agent', '')[:255],
+        }).execute()
+        if res.data:
+            session['login_session_id'] = res.data[0]['id']
+    except Exception as e:
+        print(f"login_sessions insert error: {e}")
+
+_LAST_SEEN_TOUCH_CACHE   = {}   # login_session_id -> last write (epoch seconds) — in-memory, best-effort throttle
+_LAST_SEEN_TOUCH_SECONDS = 60   # don't write last_seen_at more than once a minute per session
+
+def _touch_login_session():
+    """Refreshes last_seen_at on the current login_sessions row so the
+    audit trail's Active/Ended status reflects real usage. Called from
+    admin_required/staff_required, which fire on every dashboard API call
+    (the dashboard is a single-page app, so page-load routes alone would
+    barely update). Throttled in-memory so this doesn't turn into a DB
+    write on every single API call."""
+    login_session_id = session.get('login_session_id')
+    if not login_session_id:
+        return
+    now = _time.time()
+    if now - _LAST_SEEN_TOUCH_CACHE.get(login_session_id, 0) < _LAST_SEEN_TOUCH_SECONDS:
+        return
+    _LAST_SEEN_TOUCH_CACHE[login_session_id] = now
+    try:
+        supabase.table('login_sessions').update(
+            {'last_seen_at': datetime.now().isoformat()}
+        ).eq('id', login_session_id).execute()
+    except Exception as e:
+        print(f"last_seen_at update error: {e}")
 
 def login_required(role=None):
     def decorator(f):
@@ -299,6 +367,7 @@ def admin_required(f):
             return jsonify({'error': 'Unauthorized'}), 401
         if not _session_token_valid():
             return jsonify({'error': 'Session expired - signed in elsewhere', 'reason': 'session_superseded'}), 401
+        _touch_login_session()
         return f(*args, **kwargs)
     return decorated
 
@@ -310,6 +379,7 @@ def staff_required(f):
             return jsonify({'error': 'Unauthorized'}), 401
         if not _session_token_valid():
             return jsonify({'error': 'Session expired - signed in elsewhere', 'reason': 'session_superseded'}), 401
+        _touch_login_session()
         return f(*args, **kwargs)
     return decorated
 
@@ -802,10 +872,11 @@ def login_post():
                 # and require an MFA email code first. No 'user_id' is set
                 # in the session yet, so login_required() still blocks
                 # every protected page until this verification succeeds.
-                session['pending_login_user_id']  = user['user_id']
-                session['pending_login_staff_id'] = staff['staff_id']
-                session['pending_login_role']     = user['role']
-                session['pending_login_name']     = f"{staff['fname']} {staff['lname']}"
+                session['pending_login_user_id']   = user['user_id']
+                session['pending_login_staff_id']  = staff['staff_id']
+                session['pending_login_role']      = user['role']
+                session['pending_login_name']      = f"{staff['fname']} {staff['lname']}"
+                session['pending_login_branch_id'] = staff.get('branch_id')
 
                 otp = ''.join(random.choices(string.digits, k=6))
                 session['mfa_otp_code']       = otp
@@ -1027,6 +1098,8 @@ def verify_mfa():
             session['name']          = name
             session['session_token'] = new_session_token
 
+            _record_login_session(user_id, role, staff_id, session.get('pending_login_branch_id'))
+
             # ...and remember this browser/device from now on (trusted
             # forever, until its cookie is cleared or a different browser
             # is used).
@@ -1166,9 +1239,10 @@ def staff_dashboard():
 
 @app.route('/logout')
 def logout():
-    reason  = request.args.get('reason')
-    user_id = session.get('user_id')
-    token   = session.get('session_token')
+    reason            = request.args.get('reason')
+    user_id           = session.get('user_id')
+    token             = session.get('session_token')
+    login_session_id  = session.get('login_session_id')
 
     # Clear the account's active-session token on a normal/idle logout —
     # but NOT when this session is the one being superseded, since the DB
@@ -1180,6 +1254,16 @@ def logout():
                 supabase.table('user').update({'active_session_token': None}).eq('user_id', user_id).execute()
         except Exception as e:
             print(f"Logout token-clear error: {e}")
+
+    # Close out this device's audit-trail row regardless of reason — even
+    # a superseded session is genuinely ending from this browser's side.
+    if login_session_id:
+        try:
+            supabase.table('login_sessions').update(
+                {'logout_at': datetime.now().isoformat()}
+            ).eq('id', login_session_id).execute()
+        except Exception as e:
+            print(f"login_sessions logout-time update error: {e}")
 
     session.clear()
 
@@ -4215,6 +4299,42 @@ def admin_get_users():
             '*, staff(fname, mi, lname, email, phone_number, branch_id), customer(fname, lname, email)'
         ).order('created_at', desc=True).execute()
         return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# ─── LOGIN ACTIVITY (audit trail) ───────────────────────
+@app.route('/api/admin/login-sessions', methods=['GET'])
+@admin_required
+def admin_get_login_sessions():
+    """Login/logout audit trail for admin + staff dashboard accounts —
+    does NOT cover customer logins (mobile app uses a separate token
+    flow). Returns the full history; filtering (role/branch/status/date)
+    is done client-side in admin.js, same as Users and Sales Report.
+    'is_active' is derived here rather than stored: a row with no
+    logout_at whose last_seen_at was refreshed within
+    LOGIN_SESSION_ACTIVE_WINDOW_SECONDS."""
+    try:
+        rows = supabase.table('login_sessions').select('*') \
+            .order('login_at', desc=True).execute().data or []
+
+        now = datetime.now()
+        for r in rows:
+            last_seen = r.get('last_seen_at')
+            is_active = False
+            if not r.get('logout_at') and last_seen:
+                try:
+                    # Supabase returns timestamptz values with a timezone
+                    # offset (e.g. '...+00:00'); strip it since this app
+                    # stores/compares these as naive server-local
+                    # datetimes, same as login_at/last_seen_at on insert.
+                    naive = last_seen.split('+')[0].split('Z')[0]
+                    last_seen_dt = datetime.fromisoformat(naive)
+                    is_active = (now - last_seen_dt).total_seconds() <= LOGIN_SESSION_ACTIVE_WINDOW_SECONDS
+                except Exception:
+                    is_active = False
+            r['is_active'] = is_active
+
+        return jsonify(rows), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
