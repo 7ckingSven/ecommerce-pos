@@ -1021,6 +1021,8 @@ function populateCategories(products) {
         if (!catWrap.classList.contains('open') && window.matchMedia('(hover: none)').matches) {
           e.stopPropagation();
           document.querySelectorAll('.pos-cat-wrap.open').forEach(w => { if (w !== catWrap) w.classList.remove('open'); });
+          const openingMenu = catWrap.querySelector('.pos-subcat-menu');
+          if (openingMenu) positionSubcatMenu(catWrap, openingMenu);
           catWrap.classList.add('open');
           return;
         }
@@ -1046,6 +1048,12 @@ function populateCategories(products) {
         menu.appendChild(subBtn);
       });
       catWrap.appendChild(menu);
+
+      // Desktop hover path — the flyout is position: fixed (see staff.css
+      // for why), so its on-screen spot has to be computed in JS rather
+      // than via CSS top/left; do it right as the hover starts so it's in
+      // place before :hover makes it visible (no mispositioned flash).
+      catWrap.addEventListener('mouseenter', function() { positionSubcatMenu(catWrap, menu); });
     }
 
     wrap.appendChild(catWrap);
@@ -1055,6 +1063,21 @@ function populateCategories(products) {
   document.addEventListener('click', function() {
     document.querySelectorAll('.pos-cat-wrap.open').forEach(w => w.classList.remove('open'));
   });
+}
+
+// Positions a .pos-subcat-menu (position: fixed) directly under its
+// trigger .pos-cat-wrap, using the trigger's live on-screen rect. Needed
+// because #posCats scrolls horizontally and .pos-left clips overflow, so
+// the flyout can no longer be placed with plain CSS top/left — see the
+// comment on .pos-subcat-menu in staff.css for the full story.
+function positionSubcatMenu(catWrap, menu) {
+  const r = catWrap.getBoundingClientRect();
+  const menuWidth = Math.max(menu.offsetWidth, 160); // offsetWidth is 0 while display:none
+  // Clamp so a category near the right edge of the (horizontally-scrolling)
+  // tab row doesn't push the flyout partly off-screen.
+  const left = Math.min(Math.round(r.left), window.innerWidth - menuWidth - 8);
+  menu.style.left = Math.max(8, left) + 'px';
+  menu.style.top  = Math.round(r.bottom + 8) + 'px';
 }
 
 function filterPosCategory(cat, el, subcat, subEl) {

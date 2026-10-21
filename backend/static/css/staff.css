@@ -97,18 +97,25 @@
    clicking the category tab itself still filters by the whole category. */
 .pos-cat-wrap { position: relative; flex-shrink: 0; display: inline-block; }
 .pos-cat-caret { margin-left: 4px; font-size: 9px; opacity: 0.7; }
+/* position: fixed (not absolute) on purpose — #posCats scrolls horizontally
+   (overflow-x: auto), which per the CSS overflow spec silently forces its
+   overflow-y to behave as "auto" too (a "visible" axis paired with a
+   non-visible one computes to auto), and .pos-left also has its own
+   overflow: hidden on top of that — either one was clipping/hiding this
+   flyout the moment it tried to render below the tab, which is what made
+   it never actually show up on hover. position: fixed escapes both: its
+   top/left are computed in JS (positionSubcatMenu() in staff.js) from the
+   trigger's own on-screen position, right as it opens. */
 .pos-subcat-menu {
   display: none;
-  position: absolute;
-  top: calc(100% + 8px);
-  left: 0;
+  position: fixed;
   min-width: 160px;
   background: var(--card-bg);
   border: 1.5px solid var(--border);
   border-radius: 10px;
   padding: 6px;
   box-shadow: 0 8px 24px rgba(0,0,0,0.18);
-  z-index: 50;
+  z-index: 500;
   flex-direction: column;
   gap: 2px;
 }
