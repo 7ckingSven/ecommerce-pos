@@ -204,3 +204,56 @@ document.addEventListener('DOMContentLoaded', function () {
     if (document.querySelector('.flash-msg[data-flash-category="login_error"]')) recordFailedAttempt();
   });
 })();
+
+// ══════════════════════════════════════════════════════
+// SLIDESHOW — left panel on the login page
+// ══════════════════════════════════════════════════════
+let currentSlide = 0;
+const slides = document.querySelectorAll('.slide');
+const dots   = document.querySelectorAll('.slide-dot');
+let autoTimer = null;
+
+function goToSlide(n) {
+  slides[currentSlide].classList.remove('active');
+  dots[currentSlide].classList.remove('active');
+  currentSlide = (n + slides.length) % slides.length;
+  slides[currentSlide].classList.add('active');
+  dots[currentSlide].classList.add('active');
+}
+
+function changeSlide(dir) {
+  goToSlide(currentSlide + dir);
+  resetAuto();
+}
+
+function startAuto() {
+  autoTimer = setInterval(() => goToSlide(currentSlide + 1), 3000);
+}
+
+function resetAuto() {
+  clearInterval(autoTimer);
+  startAuto();
+}
+
+startAuto();
+
+// ─── Login button loading ──────────────────────────────
+document.querySelector('form').addEventListener('submit', function () {
+  const btn = document.getElementById('loginSubmitBtn');
+  if (btn) {
+    btn.innerHTML = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:15px;height:15px;animation:spin 1s linear infinite;"><circle cx="12" cy="12" r="10" stroke-dasharray="40" stroke-dashoffset="20"/></svg> Logging in...';
+    btn.style.opacity = '0.7';
+    setTimeout(() => { btn.disabled = true; }, 100);
+  }
+});
+
+// ─── Flash message styles ──────────────────────────────
+document.querySelectorAll('.flash-msg.error').forEach(el => {
+  el.style.background   = 'rgba(239,68,68,0.1)';
+  el.style.color        = '#ef4444';
+  el.style.border       = '1px solid rgba(239,68,68,0.3)';
+  el.style.borderRadius = '8px';
+  el.style.padding      = '10px 14px';
+  el.style.marginBottom = '1rem';
+  el.style.fontSize     = '13px';
+});
