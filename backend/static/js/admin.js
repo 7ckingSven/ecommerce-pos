@@ -5447,10 +5447,14 @@ const SR_PAGE_SIZE   = 10;
 let poItems          = []; // items in create PO modal
 let srStatusFilterVal = '';
 let poStatusFilterVal = '';
+// PO Created Date filter — plain yyyy-mm-dd strings from the <input
+// type="date"> fields, or '' when that bound is unset.
+let poDateFromVal = '';
+let poDateToVal   = '';
 
 
 // ─── PO & SR page change handlers ─────────────────────────────────────────
-function changePOPage(page) { poPage = page; renderPOs(applyPOStatusFilter(allPOs)); }
+function changePOPage(page) { poPage = page; renderPOs(getFilteredPOs()); }
 function changeSRPage(page) { srPage = page; renderStockRequests(applySRStatusFilter(allStockRequests)); }
 window.changePOPage = changePOPage;
 window.changeSRPage = changeSRPage;
@@ -5461,6 +5465,37 @@ function applySRStatusFilter(requests) {
 function applyPOStatusFilter(pos) {
   return poStatusFilterVal ? pos.filter(po => po.status === poStatusFilterVal) : pos;
 }
+// PO Created Date filter — filters by purchase_order.created_at, inclusive
+// of the whole "to" day. Applied on top of the status filter, and shared by
+// the on-screen table, Print, and Export (Excel) via getFilteredPOs() below.
+function applyPODateFilter(pos) {
+  if (!poDateFromVal && !poDateToVal) return pos;
+  const fromDate = poDateFromVal ? new Date(poDateFromVal + 'T00:00:00') : new Date(0);
+  const toDate   = poDateToVal   ? new Date(poDateToVal + 'T23:59:59')   : new Date(8640000000000000);
+  return pos.filter(po => {
+    const d = toUtcDate(po.created_at) || new Date(0);
+    return d >= fromDate && d <= toDate;
+  });
+}
+function getFilteredPOs() {
+  return applyPODateFilter(applyPOStatusFilter(allPOs));
+}
+function applyPODateRange() {
+  poDateFromVal = document.getElementById('poDateFrom').value;
+  poDateToVal   = document.getElementById('poDateTo').value;
+  poPage = 1;
+  renderPOs(getFilteredPOs());
+}
+function resetPODateFilter() {
+  document.getElementById('poDateFrom').value = '';
+  document.getElementById('poDateTo').value   = '';
+  poDateFromVal = '';
+  poDateToVal   = '';
+  poPage = 1;
+  renderPOs(getFilteredPOs());
+}
+window.applyPODateRange  = applyPODateRange;
+window.resetPODateFilter = resetPODateFilter;
 function filterSRByStatus(status) {
   srStatusFilterVal = status || '';
   srPage = 1;
@@ -5469,7 +5504,7 @@ function filterSRByStatus(status) {
 function filterPOByStatus(status) {
   poStatusFilterVal = status || '';
   poPage = 1;
-  renderPOs(applyPOStatusFilter(allPOs));
+  renderPOs(getFilteredPOs());
 }
 window.filterSRByStatus = filterSRByStatus;
 window.filterPOByStatus = filterPOByStatus;
@@ -5500,7 +5535,7 @@ async function loadPurchaseOrders() {
     updateApprovedReqBadge();
 
     renderStockRequests(applySRStatusFilter(allStockRequests));
-    renderPOs(applyPOStatusFilter(allPOs));
+    renderPOs(getFilteredPOs());
   } catch (e) { console.error('PO error:', e); }
 }
 
@@ -5659,7 +5694,7 @@ function exportPOListExcel() {
   if (typeof XLSX === 'undefined') {
     alert('Excel library not loaded. Please refresh and try again.'); return;
   }
-  const pos  = applyPOStatusFilter(allPOs);
+  const pos  = getFilteredPOs();
   const rows = [['PO Number', 'Supplier', 'Items', 'Total Cost', 'Status', 'Created']];
   pos.forEach(po => {
     const items = po.po_item || [];
@@ -5683,10 +5718,13 @@ window.exportPOListExcel = exportPOListExcel;
 // pattern as printSalesReport(), same full currently-filtered set (by
 // poStatusFilterVal) that exportPOListExcel() uses, not just the visible page.
 function printPOList() {
-  const pos        = applyPOStatusFilter(allPOs);
+  const pos        = getFilteredPOs();
   const statusLabel = poStatusFilterVal
     ? (poStatusFilterVal.replace(/_/g, ' '))
     : 'All Status';
+  const dateRangeLabel = (poDateFromVal || poDateToVal)
+    ? `PO Created: ${poDateFromVal || '—'} to ${poDateToVal || '—'}`
+    : '';
   const now = new Date().toLocaleDateString('en-PH', { timeZone: 'Asia/Manila', year: 'numeric', month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 
   const rowsHtml = pos.length ? pos.map(po => {
@@ -5731,6 +5769,7 @@ function printPOList() {
     <h1>TEFC E-Commerce</h1>
     <h2>Triple E &amp; Fiel Collince General Merchandise</h2>
     <p>PURCHASE ORDERS &nbsp;|&nbsp; <span class="badge-green">${statusLabel}</span></p>
+    ${dateRangeLabel ? `<p style="margin-top:4px;">${dateRangeLabel}</p>` : ''}
     <p style="margin-top:6px;">Generated: ${now}</p>
   </div>
   <table>

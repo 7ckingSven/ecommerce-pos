@@ -15,10 +15,25 @@ import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetworkBanner from '../components/NetworkBanner';
 
-const PAYMENT_METHODS = [
+const ALL_PAYMENT_METHODS = [
   { id: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'truck',      sub: 'Pay when your order arrives' },
   { id: 'gcash',            label: 'GCash',            icon: 'smartphone', sub: 'Pay instantly via GCash' },
 ];
+
+// ─── Shipping & Payment Method zone ──────────────────────
+// Within South Cotabato: Cash on Delivery AND Online Payment (GCash) are
+// both offered, and shipping is free. Outside South Cotabato: COD is not
+// offered — Online Payment (GCash) only — and the existing per-zone
+// shipping fee applies (see calculateShipping below).
+function isWithinSouthCotabato(addr) {
+  const parts = (addr || '').split('|').map(p => p.trim().toLowerCase());
+  return parts.some(p => p.includes('south cotabato') || p.includes('southcotabato'));
+}
+
+function getAvailablePaymentMethods(addr) {
+  if (isWithinSouthCotabato(addr)) return ALL_PAYMENT_METHODS;
+  return ALL_PAYMENT_METHODS.filter(m => m.id !== 'cash_on_delivery');
+}
 
 export default function CheckoutScreen({ route, navigation }) {
   const { cartItems, total, branchId } = route.params;
@@ -92,38 +107,20 @@ export default function CheckoutScreen({ route, navigation }) {
     // Parse address — fixed format: Street|Barangay|City|Province|Region|Zip
     // Search all parts for province/city/region keywords to handle missing fields
     const parts     = (addr || '').split('|').map(p => p.trim().toLowerCase());
-    const fullAddr  = parts.join(' ');
 
     // Detect location from full address string (more reliable than fixed index)
-    const inKoronadal = parts.some(p => p.includes('koronadal'));
-    const inSC        = parts.some(p =>
-      p.includes('south cotabato') || p.includes('southcotabato')
-    );
-    const inR12       = parts.some(p =>
+    const inSC  = isWithinSouthCotabato(addr);
+    const inR12 = parts.some(p =>
       p.includes('xii') || p.includes('soccsksargen') ||
       p.includes('region 12') || p.includes('region xii')
     );
 
-    // Subtotal
-    const subtotal = items.reduce((sum, item) => {
-      const disc       = Array.isArray(item.product?.discount) ? item.product.discount[0] : item.product?.discount;
-      const origPrice  = Number(item.product?.price || 0);
-      const finalPrice = disc ? origPrice * (1 - Number(disc.percentage) / 100) : origPrice;
-      return sum + finalPrice * Number(item.quantity || 1);
-    }, 0);
+    console.log('Shipping calc:', { inSC, inR12, totalWeight, parts });
 
-    console.log('Shipping calc:', { inKoronadal, inSC, inR12, totalWeight, subtotal, parts });
+    // Within South Cotabato (Koronadal included — it's a component city of
+    // the province) — always free shipping, regardless of weight/subtotal.
+    if (inSC) return 0;
 
-    if (inKoronadal) {
-      if (subtotal >= 500) return 0;
-      if (totalWeight <= 3) return 0;
-      return Math.ceil((totalWeight - 3) * 25);
-    }
-    if (inSC) {
-      const base  = 50;
-      const extra = totalWeight > 3 ? Math.ceil((totalWeight - 3) * 25) : 0;
-      return base + extra;
-    }
     if (inR12) {
       const base  = 120;
       const extra = totalWeight > 5 ? Math.ceil((totalWeight - 5) * 30) : 0;
@@ -159,6 +156,16 @@ export default function CheckoutScreen({ route, navigation }) {
       loadProfile();
     }, [])
   );
+
+  // Cash on Delivery is only offered within South Cotabato — if the
+  // loaded/edited address is outside it and COD is still selected
+  // (e.g. it was the default, or the address just changed), fall back
+  // to GCash automatically so the selection never goes stale.
+  useEffect(() => {
+    if (!profileLoading && address && payment === 'cash_on_delivery' && !isWithinSouthCotabato(address)) {
+      setPayment('gcash');
+    }
+  }, [address, profileLoading]);
 
   async function loadProfile() {
     try {
@@ -516,7 +523,15 @@ export default function CheckoutScreen({ route, navigation }) {
         {/* ─── Payment Method ─── */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Payment Method</Text>
-          {PAYMENT_METHODS.map(m => (
+          {address && !isWithinSouthCotabato(address) && (
+            <View style={styles.codUnavailableBox}>
+              <Feather name="info" size={14} color={COLORS.textMuted}/>
+              <Text style={styles.codUnavailableText}>
+                Cash on Delivery is only available within South Cotabato. Online Payment (GCash) is required for this address.
+              </Text>
+            </View>
+          )}
+          {getAvailablePaymentMethods(address).map(m => (
             <TouchableOpacity
               key={m.id}
               style={[styles.payMethod, payment === m.id && styles.payMethodActive]}
@@ -780,6 +795,8 @@ const styles = StyleSheet.create({
   payRadioActive:     { borderColor: COLORS.primary },
   payRadioDot:        { width: 10, height: 10, borderRadius: 5, backgroundColor: COLORS.primary },
   refWrap:            { gap: 6, marginTop: SPACING.sm },
+  codUnavailableBox:  { flexDirection:'row', alignItems:'flex-start', gap:8, padding:10, borderRadius:RADIUS.sm, backgroundColor:COLORS.grayBg, marginBottom: SPACING.sm },
+  codUnavailableText: { flex:1, fontSize:12, color:COLORS.textSecondary, lineHeight:17 },
   gcashNumberBox:     { flexDirection:'row', alignItems:'flex-start', gap:10, padding:12, borderRadius:RADIUS.sm, backgroundColor:'rgba(29,78,216,0.06)', borderWidth:1, borderColor:'rgba(29,78,216,0.2)' },
   gcashNumberLabel:   { fontSize:12, color:COLORS.textSecondary, lineHeight:17 },
 

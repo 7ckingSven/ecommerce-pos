@@ -1,4 +1,5 @@
 import json
+import math
 import random
 import secrets
 import traceback
@@ -2058,6 +2059,54 @@ def check_variant_stock():
 # ─── VARIANT STOCK ────────────────────────────────────
 
 
+# ─── Shipping / Payment Method eligibility (online orders) ───────────
+# Mirrors the mobile app's CheckoutScreen.js isWithinSouthCotabato(): the
+# address is stored pipe-delimited (Street|Barangay|City|Province|Region|
+# Zip), and we scan every part for a "South Cotabato" mention rather than
+# trusting a fixed index, to tolerate addresses with a missing field.
+def _is_within_south_cotabato(address):
+    parts = (address or '').lower().split('|')
+    return any('south cotabato' in p or 'southcotabato' in p for p in parts)
+
+
+def _compute_shipping_fee(address, cart_items):
+    """Recomputes the shipping fee from scratch server-side — never trusts
+    the client-sent amount — mirroring the mobile app's CheckoutScreen.js
+    calculateShipping() zone + weight formula exactly:
+      - Within South Cotabato: always free.
+      - Region XII (SOCCSKSARGEN) otherwise: PHP 120 base, +PHP 30/kg over 5kg.
+      - Anywhere else: PHP 200 base, +PHP 35/kg over 5kg.
+    """
+    product_ids = list({item.get('product_id') for item in cart_items if item.get('product_id')})
+    weight_by_id = {}
+    if product_ids:
+        prod_res = supabase.table('product').select('product_id, net_weight, net_weight_unit').in_('product_id', product_ids).execute()
+        for p in (prod_res.data or []):
+            weight_by_id[p['product_id']] = (p.get('net_weight') or 0, (p.get('net_weight_unit') or 'kg').lower())
+
+    total_weight = 0.0
+    for item in cart_items:
+        w, unit = weight_by_id.get(item.get('product_id'), (0, 'kg'))
+        w = float(w or 0)
+        # Same unit handling as the mobile app: gram/mL -> /1000, else 1:1.
+        w_kg = (w / 1000) if unit in ('gram', 'ml') else w
+        total_weight += w_kg * float(item.get('quantity', 1) or 1)
+
+    parts  = (address or '').lower().split('|')
+    in_sc  = any('south cotabato' in p or 'southcotabato' in p for p in parts)
+    in_r12 = any(('xii' in p) or ('soccsksargen' in p) or ('region 12' in p) or ('region xii' in p) for p in parts)
+
+    if in_sc:
+        return 0.0
+    if in_r12:
+        base, over_kg, rate = 120, 5, 30
+    else:
+        base, over_kg, rate = 200, 5, 35
+
+    extra = math.ceil((total_weight - over_kg) * rate) if total_weight > over_kg else 0
+    return float(base + extra)
+
+
 @app.route('/api/orders', methods=['POST'])
 def api_place_order():
     customer_id = request.headers.get('X-Customer-ID')
@@ -2085,10 +2134,18 @@ def api_place_order():
     cart_items         = data.get('cart_items', [])
     payment_method     = data.get('payment_method', '')
     payment_intent_id  = data.get('payment_intent_id', '')
+    address            = data.get('address', '')
     ref_no             = ''
 
     if not cart_items or not payment_method:
         return jsonify({'error': 'Cart items and payment method are required.'}), 400
+
+    # Cash on Delivery is only offered within South Cotabato — everywhere
+    # else is Online Payment (GCash) only. The mobile app already hides
+    # COD outside South Cotabato, but this is re-checked here too so a
+    # direct API call can't force COD for an out-of-area address.
+    if payment_method == 'cash_on_delivery' and not _is_within_south_cotabato(address):
+        return jsonify({'error': 'Cash on Delivery is only available within South Cotabato. Please choose Online Payment (GCash) for this address.'}), 400
 
     # GCash is verified-only — the mobile app completes payment via the
     # PayMongo WebView flow first, then submits the order with the
@@ -2111,8 +2168,11 @@ def api_place_order():
         quantity = sum(item['quantity'] for item in cart_items)
 
         branch_id    = data.get('branch_id')
-        shipping_fee = float(data.get('shipping_fee', 0) or 0)
-        address      = data.get('address', '')
+        # Never trust the client-sent shipping_fee — recompute it here from
+        # the address + each item's product weight, so the amount can't be
+        # tampered with via a direct API call (e.g. sending 0 for an
+        # out-of-South-Cotabato address to dodge the fee).
+        shipping_fee = _compute_shipping_fee(address, cart_items)
         address_note = data.get('address_note', '')
         order_res = supabase.table('order').insert({
             'customer_id':  customer_id,
