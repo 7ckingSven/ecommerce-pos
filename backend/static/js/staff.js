@@ -2201,18 +2201,47 @@ function printReceipt() {
 // INVENTORY
 // ══════════════════════════════════════════════════════
 
+// Shared Stock Movement classification — kept identical to admin.js's
+// classifyMovement()/MOVEMENT_TYPES so a movement is never labeled
+// differently here than on the Admin side or the Sales Report. Order
+// matters: Cancelled/Returned/PO Receiving are checked before Sale because
+// their notes also contain "order #" (Cancelled, Returned), which used to
+// get misread as a Sale; PO Receiving and a plain Restock/Added Stock used
+// to collapse into the same "Restock" bucket too.
+const MOVEMENT_TYPES = {
+  cancelled:    { label: 'Cancelled',              color: '#ef4444', icon: '✕',  bg: 'rgba(239,68,68,0.1)'  },
+  returned:     { label: 'Returned',               color: '#f59e0b', icon: '↩',  bg: 'rgba(245,158,11,0.1)' },
+  po_receiving: { label: 'PO Receiving',           color: '#3b82f6', icon: '📥', bg: 'rgba(59,130,246,0.1)' },
+  sale:         { label: 'Sale',                   color: '#16a34a', icon: '🛒', bg: 'rgba(22,163,74,0.1)'  },
+  transfer:     { label: 'Transfer Stocks',        color: '#8b5cf6', icon: '⇄',  bg: 'rgba(139,92,246,0.1)' },
+  adjustment:   { label: 'Adjust Stocks (Deduct)', color: '#ef4444', icon: '↓',  bg: 'rgba(239,68,68,0.1)'  },
+  added_stock:  { label: 'Added Stock',            color: '#16a34a', icon: '➕', bg: 'rgba(22,163,74,0.1)'  },
+  restock:      { label: 'Restock',                color: '#16a34a', icon: '↑',  bg: 'rgba(22,163,74,0.1)'  },
+  other:        { label: 'Other',                  color: '#9ca3af', icon: '•',  bg: 'rgba(107,114,128,0.1)'},
+};
+
+function classifyMovement(i) {
+  const note   = (i.note || '').toLowerCase();
+  const qty    = Number(i.quantity_added);
+  const before = Number(i.quantity_before);
+  if (note.includes('[cancelled]'))   return { key: 'cancelled',    ...MOVEMENT_TYPES.cancelled };
+  if (note.startsWith('return'))      return { key: 'returned',     ...MOVEMENT_TYPES.returned };
+  if (note.startsWith('po received')) return { key: 'po_receiving', ...MOVEMENT_TYPES.po_receiving };
+  if (note.includes('sale') || note.includes('order #') || note.includes('sold'))
+    return { key: 'sale', ...MOVEMENT_TYPES.sale };
+  if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id))
+    return { key: 'transfer', ...MOVEMENT_TYPES.transfer };
+  if (qty < 0)
+    return { key: 'adjustment', ...MOVEMENT_TYPES.adjustment };
+  if (qty > 0 && before === 0)
+    return { key: 'added_stock', ...MOVEMENT_TYPES.added_stock };
+  if (qty > 0)
+    return { key: 'restock', ...MOVEMENT_TYPES.restock };
+  return { key: 'other', ...MOVEMENT_TYPES.other };
+}
+
 function getStaffMovementType(i) {
-  const note = (i.note || '').toLowerCase();
-  const qty  = Number(i.quantity_added);
-  // Checked first — a cancelled order's note also contains "order #", which
-  // would otherwise be misread as a Sale below.
-  if (note.includes('[cancelled]')) return 'cancelled';
-  if (note.includes('sale') || note.includes('order #')) return 'sale';
-  if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id)) return 'transfer';
-  if (note.includes('[loss]') || note.includes('[damaged]') || note.includes('adjustment')) return 'adjustment';
-  if (qty > 0) return 'restock';
-  if (qty < 0) return 'deduction';
-  return 'other';
+  return classifyMovement(i).key;
 }
 
 function filterStaffHistoryType(val) {
@@ -2248,15 +2277,9 @@ function renderInvHistory(data) {
             <td>${toUtcDate(i.date).toLocaleDateString('en-PH', { month:'long', day:'numeric', year:'numeric' })}</td>
             <td style="max-width:200px;font-size:12px;">
               ${(() => {
-                const note = (i.note || '').toLowerCase();
-                const qty  = Number(i.quantity_added);
-                if (note.includes('[cancelled]'))
-                  return '<span style="background:rgba(239,68,68,0.1);color:#ef4444;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">✕ Cancelled</span>';
-                if (note.includes('sale') || note.includes('order #'))
-                  return '<span style="background:rgba(245,158,11,0.1);color:#f59e0b;border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">🛒 Sale</span>';
-                if (note.includes('po received') || note.includes('restock') || qty > 0)
-                  return '<span style="background:rgba(22,163,74,0.1);color:var(--g-400);border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;">↑ Restock</span>';
-                return '';
+                const type = classifyMovement(i);
+                if (type.key === 'other') return '';
+                return `<span style="background:${type.bg};color:${type.color};border-radius:999px;padding:2px 8px;font-size:10px;font-weight:700;margin-right:4px;white-space:nowrap;">${type.icon} ${type.label}</span>`;
               })()}
               ${i.note || '—'}
             </td>

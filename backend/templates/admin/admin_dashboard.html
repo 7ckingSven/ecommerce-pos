@@ -459,11 +459,14 @@
             </div>
             <select class="filter-select" onchange="filterInventoryType(this.value)" id="inventoryTypeFilter" style="font-size:12px;">
               <option value="">All Types</option>
-              <option value="sale">🛒 Sale</option>
+              <option value="added_stock">➕ Added Stock</option>
               <option value="restock">↑ Restock</option>
-              <option value="transfer">⇄ Transfer</option>
-              <option value="adjustment">↓ Adjustment</option>
+              <option value="transfer">⇄ Transfer Stocks</option>
+              <option value="adjustment">↓ Adjust Stocks (Deduct)</option>
+              <option value="sale">🛒 Sale</option>
               <option value="cancelled">✕ Cancelled</option>
+              <option value="returned">↩ Returned</option>
+              <option value="po_receiving">📥 PO Receiving</option>
             </select>
           </div>
         </div>
@@ -846,12 +849,14 @@
           <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
             <select class="filter-select" id="stockMovementTypeFilter" onchange="filterStockMovementType(this.value)" style="font-size:12px;">
               <option value="all">All Movement Types</option>
-              <option value="sale">Sales</option>
-              <option value="cancellation">Cancellations</option>
-              <option value="return">Returns</option>
+              <option value="added_stock">Added Stock</option>
+              <option value="restock">Restock</option>
+              <option value="transfer">Transfer Stocks</option>
+              <option value="adjustment">Adjust Stocks (Deduct)</option>
+              <option value="sale">Sale</option>
+              <option value="cancelled">Cancelled</option>
+              <option value="returned">Returned</option>
               <option value="po_receiving">PO Receiving</option>
-              <option value="transfer">Transfers</option>
-              <option value="manual_adjustment">Manual Adjustments</option>
             </select>
             <button class="btn btn-outline-green" onclick="printStockMovementHistory()" style="font-size:12px;padding:6px 12px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>

@@ -2045,24 +2045,50 @@ async function loadInventory() {
   } catch (e) { console.error('Inventory error:', e); }
 }
 
-function getMovementType(i) {
-  const note = (i.note || '').toLowerCase();
-  const qty  = Number(i.quantity_added);
-  // Checked first — a cancelled order's note also contains "Order #", which
-  // would otherwise be misread as a Sale below.
-  if (note.includes('[cancelled]'))
-    return { label: 'Cancelled', color: '#ef4444', icon: '✕', bg: 'rgba(239,68,68,0.1)' };
-  if (note.includes('[loss]') || note.includes('[stolen]') || note.includes('[damaged]') || note.includes('[expired]') || note.includes('[other]') || note.includes('adjustment'))
-    return { label: 'Adjustment', color: '#ef4444', icon: '↓', bg: 'rgba(239,68,68,0.1)' };
-  if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id))
-    return { label: 'Transfer', color: '#3b82f6', icon: '⇄', bg: 'rgba(59,130,246,0.1)' };
+// ── Shared Stock Movement classification ───────────────────────────────
+// One canonical set of 8 movement types, used identically here, in the
+// Sales Report's Stock Movement History (classifyMovement/movementRowCells
+// below), and in staff.js — so the same movement is never labeled two
+// different ways depending on which screen you're looking at it from.
+// The inventory table doesn't persist a "type" column, so every entry is
+// classified from its note prefix, falling back to quantity/branch fields.
+const MOVEMENT_TYPES = {
+  cancelled:    { label: 'Cancelled',             color: '#ef4444',      icon: '✕',  bg: 'rgba(239,68,68,0.1)'  },
+  returned:     { label: 'Returned',              color: '#f59e0b',      icon: '↩',  bg: 'rgba(245,158,11,0.1)' },
+  po_receiving: { label: 'PO Receiving',          color: '#3b82f6',      icon: '📥', bg: 'rgba(59,130,246,0.1)' },
+  sale:         { label: 'Sale',                  color: '#16a34a',      icon: '🛒', bg: 'rgba(22,163,74,0.1)'  },
+  transfer:     { label: 'Transfer Stocks',       color: '#8b5cf6',      icon: '⇄',  bg: 'rgba(139,92,246,0.1)' },
+  adjustment:   { label: 'Adjust Stocks (Deduct)',color: '#ef4444',      icon: '↓',  bg: 'rgba(239,68,68,0.1)'  },
+  added_stock:  { label: 'Added Stock',           color: '#16a34a',      icon: '➕', bg: 'rgba(22,163,74,0.1)'  },
+  restock:      { label: 'Restock',               color: '#16a34a',      icon: '↑',  bg: 'rgba(22,163,74,0.1)'  },
+  other:        { label: 'Other',                 color: '#9ca3af',      icon: '•',  bg: 'rgba(107,114,128,0.1)'},
+};
+
+function classifyMovement(i) {
+  const note   = (i.note || '').toLowerCase();
+  const qty    = Number(i.quantity_added);
+  const before = Number(i.quantity_before);
+  // Cancelled / Returned / PO Receiving are checked before Sale — their
+  // notes ("Cancelled — Order #…", "Return — Order #…") also contain
+  // "order #", which used to get misread as a Sale below.
+  if (note.includes('[cancelled]'))   return { key: 'cancelled',    ...MOVEMENT_TYPES.cancelled };
+  if (note.startsWith('return'))      return { key: 'returned',     ...MOVEMENT_TYPES.returned };
+  if (note.startsWith('po received')) return { key: 'po_receiving', ...MOVEMENT_TYPES.po_receiving };
   if (note.includes('sale') || note.includes('order #') || note.includes('sold'))
-    return { label: 'Sale', color: '#f59e0b', icon: '🛒', bg: 'rgba(245,158,11,0.1)' };
-  if (qty > 0)
-    return { label: 'Restock', color: 'var(--g-400)', icon: '↑', bg: 'rgba(22,163,74,0.1)' };
+    return { key: 'sale', ...MOVEMENT_TYPES.sale };
+  if (note.includes('transfer') || (i.from_branch_id && i.to_branch_id))
+    return { key: 'transfer', ...MOVEMENT_TYPES.transfer };
   if (qty < 0)
-    return { label: 'Deduction', color: '#ef4444', icon: '↓', bg: 'rgba(239,68,68,0.1)' };
-  return { label: 'Other', color: '#9ca3af', icon: '•', bg: 'rgba(107,114,128,0.1)' };
+    return { key: 'adjustment', ...MOVEMENT_TYPES.adjustment };
+  if (qty > 0 && before === 0)
+    return { key: 'added_stock', ...MOVEMENT_TYPES.added_stock };
+  if (qty > 0)
+    return { key: 'restock', ...MOVEMENT_TYPES.restock };
+  return { key: 'other', ...MOVEMENT_TYPES.other };
+}
+
+function getMovementType(i) {
+  return classifyMovement(i);
 }
 
 async function filterInventoryType(val, el) {
@@ -2130,9 +2156,9 @@ function renderInventory(data) {
   const filteredInv = data;
   const paged = paginate(filteredInv, invPage);
   // Update stats
-  const restocks    = data.filter(i => getMovementType(i).label === 'Restock');
-  const transfers   = data.filter(i => getMovementType(i).label === 'Transfer');
-  const adjustments = data.filter(i => getMovementType(i).label === 'Adjustment');
+  const restocks    = data.filter(i => ['restock', 'added_stock', 'po_receiving'].includes(getMovementType(i).key));
+  const transfers   = data.filter(i => getMovementType(i).key === 'transfer');
+  const adjustments = data.filter(i => getMovementType(i).key === 'adjustment');
   const totalRestock  = restocks.reduce((s,i)    => s + Math.abs(Number(i.quantity_added)), 0);
   const totalTransfer = transfers.reduce((s,i)   => s + Math.abs(Number(i.quantity_added)), 0);
   const totalAdjust   = adjustments.reduce((s,i) => s + Math.abs(Number(i.quantity_added)), 0);
@@ -2207,9 +2233,7 @@ function applyInventoryFilters() {
     );
   }
   if (inventoryTypeFilterVal) {
-    filtered = filtered.filter(i =>
-      getMovementType(i).label.toLowerCase().includes(inventoryTypeFilterVal)
-    );
+    filtered = filtered.filter(i => getMovementType(i).key === inventoryTypeFilterVal);
   }
   renderInventory(filtered);
 }
@@ -4197,37 +4221,15 @@ let currentStockMovementType    = 'all';
 let currentSalesDateFrom = null; // Date or null
 let currentSalesDateTo   = null;
 
-const STOCK_MOVEMENT_TYPE_LABELS = {
-  sale:              'Sale',
-  cancellation:      'Cancellation',
-  return:            'Return',
-  po_receiving:      'PO Receiving',
-  transfer:          'Transfer',
-  manual_adjustment: 'Manual Adjustment',
-};
-// Inline colors (not a shared CSS class — admin.css isn't guaranteed to
-// have a matching modifier for these report-only labels).
-const STOCK_MOVEMENT_TYPE_COLORS = {
-  sale:              '#16a34a',
-  cancellation:      '#ef4444',
-  return:            '#f59e0b',
-  po_receiving:      '#3b82f6',
-  transfer:          '#8b5cf6',
-  manual_adjustment: '#6b7280',
-};
-
-// The inventory table doesn't persist a "type" column — every insert site
-// already writes a distinctive note prefix (see DATABASE.md business
-// rules), so classify from that, falling back to from/to branch presence
-// to tell a transfer apart from a plain restock/adjustment.
+// Labels/colors for this table now come from the same classifyMovement()
+// used by the Inventory section's Stock Movement History (see
+// getMovementType/MOVEMENT_TYPES above) — this table used to classify
+// independently (no Restock/Added Stock bucket at all, so a plain restock
+// fell into "Manual Adjustment"; "Cancellation"/"Return" instead of
+// "Cancelled"/"Returned"), which is what made its labels disagree with the
+// Inventory section for the exact same rows.
 function classifyStockMovement(m) {
-  const note = (m.note || '').toLowerCase();
-  if (note.startsWith('sale'))        return 'sale';
-  if (note.includes('cancel'))        return 'cancellation';
-  if (note.startsWith('return'))      return 'return';
-  if (note.startsWith('po received')) return 'po_receiving';
-  if (m.from_branch_id && m.to_branch_id) return 'transfer';
-  return 'manual_adjustment';
+  return classifyMovement(m).key;
 }
 
 function movementDateStr(raw) {
@@ -4243,9 +4245,9 @@ function movementDateStr(raw) {
 }
 
 function movementRowCells(m) {
-  const type      = classifyStockMovement(m);
-  const label     = STOCK_MOVEMENT_TYPE_LABELS[type] || type;
-  const typeColor = STOCK_MOVEMENT_TYPE_COLORS[type] || '#6b7280';
+  const classified = classifyMovement(m);
+  const label     = classified.label;
+  const typeColor = classified.color;
   const qty       = Number(m.quantity_added || 0);
   const branchObj = Array.isArray(m.to_branch) ? m.to_branch[0]
     : (m.to_branch || (Array.isArray(m.from_branch) ? m.from_branch[0] : m.from_branch));
