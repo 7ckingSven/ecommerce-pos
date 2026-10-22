@@ -19,18 +19,20 @@ This system serves three types of users:
 
 ### Customer (Mobile App)
 - Browse and search product catalog with category filters
-- Product detail with option groups (size, color, variants)
+- Product detail with option groups (size, color, variants), including **per-choice and per-combo price/image overrides** — a specific variant (e.g. Size L) or a specific combination (e.g. Color: Red + Size: M) can have its own price and photo, not just the base product's
 - **Products sold count** displayed on cards and product detail (Shopee-style)
 - **Low stock warnings** on product cards and cart
 - Add to cart with selected options; edit options directly from cart
 - **PSGC Address Picker** — cascading Region → Province → City → Barangay
-- **Shipping fee calculation** (tiered flat + weight-based by zone)
+- **Shipping fee calculation** — 4-zone model (South Cotabato free / Region XII / rest of Mindanao mainland / Luzon-Visayas), each with its own under-500g light-item flat rate plus a weight-based rate beyond that, computed server-side and mirrored client-side
 - **Delivery estimate** shown on checkout and order detail
 - **GCash payment via PayMongo** — in-app WebView checkout, server-verified before order is placed (no manual reference typing) — or cash on delivery
 - **Push notifications** (Firebase Cloud Messaging) — alerted the moment an order's status changes, in foreground, background, or killed app state
 - **Cart selection persists** — checked/unchecked items in the cart are remembered across navigation and app restarts
 - **Shopee-style order progress tracker** (Pending → Processing → Out for Delivery → Completed)
 - **Mark as Order Received** button (appears when status is Out for Delivery)
+- **Buy Again** — on a completed order, re-fetches the item fresh (current price/stock/discount, not the order's stale snapshot) and opens it; a multi-item order opens a picker to choose which product
+- **Dark mode** — System / Light / Dark toggle (Profile → Appearance), applied app-wide and persisted across restarts
 - Order history with full detail: branch, address, selected options, images, PayMongo reference for GCash orders
 - **Auto-refresh every 10 seconds** on Home and Orders screens
 - Forgot password via OTP (email)
@@ -39,20 +41,22 @@ This system serves three types of users:
 - App version shown on splash screen (read from `package.json`)
 
 ### Admin (Web System)
-- **Product Management** — Add, edit, deactivate products with multiple images and option groups (variants). Image upload optional. **Sub-category** field under Category, and products priced with a **Base Price** (cost) and **Resale Price**, with Base Price auto-filling PO Unit Cost. Net Weight and Status are deferred — hidden at creation, only required/editable once the product exists via Edit; products missing a net weight are flagged in the table.
-- **Inventory Management** — Branch stock summary (side-by-side per branch, with a per-row **Generate PO** quick action on critical/out-of-stock items), stock movement history (date **and** time), add stock, transfer, adjust stock, process returns on completed orders. Low stock alert banner.
+- **Dashboard drill-down** — every stat card on the main dashboard is clickable, jumping straight into the matching filtered view (or branch highlight) instead of being a static number
+- **Product Management** — Add, edit, deactivate products with multiple images and option groups (variants). Image upload optional. **Sub-category** field under Category, and products priced with a **Base Price** (cost) and **Resale Price**, with Base Price auto-filling PO Unit Cost. Net Weight and Status are deferred — hidden at creation, only required/editable once the product exists via Edit; products missing a net weight are flagged in the table. **Per-choice and per-combo price/image overrides** on variant products. **Price Change History** — every resale-price edit is logged; view the full history for one product or across all products from a "Price History" button.
+- **Barcode Generation** — auto-generates a 12-digit numeric barcode per product, plus distinct barcodes per variant choice and per variant combination; generate/print from the Products table or Inventory, with a styled confirmation modal for bulk generation.
+- **Inventory Management** — Branch stock summary (side-by-side per branch, with a per-row **Generate PO** quick action on critical/out-of-stock items), stock movement history (date **and** time), add stock, transfer, adjust stock, process returns on completed orders, generate/print barcodes. Low stock alert banner.
 - **Discount Management** — Create/edit discounts with start and end dates, countdown status badges, assign to products with branch filter, remove discounts. Products with discounts table.
 - **Purchase Order (PO)** — Create POs (auto-fillable from approved stock requests via **Use Approved Requests**), mark as Ordered/Received with **partial-receive support** (status reflects actual received quantities), **digital receipt** generated after creation and after each receive, including partial receives.
 - **Orders** — Full order detail modal: product images, selected options, branch name, delivery address, delivery landmark/notes, customer phone, shipping fee. GCash orders show the **PayMongo Reference** and a verified **Paid** status. **Pending orders badge** on nav. Auto-refresh every 5 seconds. Batch move **Pending → Processing** (capped at 30/day store-wide), automatic **Processing → Out for Delivery** after 1 day, and a dedicated **Deliveries for Today** view (Available vs Today's Batch) to mark orders Delivered/Not Delivered — with a required cash-remittance confirmation on COD deliveries, and automatic Returned/Failed after 3 failed delivery attempts (stock restored).
-- **User Management** — Manage Admin and Staff accounts, with each staff row showing their assigned **branch** directly in the table.
+- **User Management** — Manage Admin and Staff accounts, with each staff row showing their assigned **branch** directly in the table. **Login Activity** — audit trail of every admin/staff login/logout.
 - **Sales Report** — Sales analytics, revenue breakdown, walk-in vs online orders, plus a filterable **stock movement history** table (type, date range, branch) with Excel export.
 - **Stock Requests** — Review and batch-approve/reject staff stock requests (multi-item submissions grouped into one row with variant/branch/requester detail), with a shared daily PO auto-fill path.
 - **Branch Stock Summary** — Side-by-side grid showing stock per product per branch (Triple E | Fiel Collince).
 - **Confirmation dialogs** — A confirm-before-save step on every create/edit/process action across the dashboard (products, discounts, stock, PO, orders, users, etc.) before it's submitted.
 
 ### Staff (Web System)
-- **POS (Sales Management)** — Process walk-in orders, GCash (via PayMongo QR, server-verified) or cash payment, **VAT-inclusive receipt** (12%) with print support. Button disabled while processing. Cart quantity is **directly editable** (typed, stock-clamped), and a dedicated **USB barcode scanner** input (keyboard-wedge, auto-focused on the POS tab) adds products straight to cart, including variant products — working online or offline.
-- **Inventory Management** — View branch-specific stock, submit stock requests to admin — auto-filled from the triggering critical/out-of-stock product, including every critical variant in one batch submission.
+- **POS (Sales Management)** — Process walk-in orders, GCash (via PayMongo QR, server-verified) or cash payment, **VAT-inclusive receipt** (12%) with print support. Button disabled while processing. Cart quantity is **directly editable** (typed, stock-clamped), and a dedicated **USB barcode scanner** input (keyboard-wedge, auto-focused on the POS tab) adds products straight to cart, including variant products — working online or offline. Scanning a variant's own barcode preselects that exact variant.
+- **Inventory Management** — View branch-specific stock, submit stock requests to admin — auto-filled from the triggering critical/out-of-stock product, including every critical variant in one batch submission. **Generate/print barcodes** — same access as Admin, so a variant/label can be (re)printed without needing an admin on hand.
 - **Orders** — View online customer orders with full detail modal (product images, selected options, branch, delivery address, landmark/notes, customer phone). GCash orders show the **PayMongo Reference** and a verified **Paid** status. **Pending orders badge** on nav. Auto-refresh every 5 seconds. Same batch Pending→Processing, Deliveries for Today, and Delivered/Not Delivered flow as Admin.
 - **Sales Summary** — View daily/weekly sales with walk-in and online breakdown.
 - **Confirmation dialogs** — A confirm-before-save/process step on every create/edit/process action, including POS checkout (cash and GCash).
@@ -146,10 +150,13 @@ ecommerce-pos/
 │   │   │   ├── ProductDetailScreen.js ← product detail with option groups, sold count
 │   │   │   ├── CartScreen.js         ← cart with option editing, low stock warnings
 │   │   │   ├── CheckoutScreen.js     ← checkout with PSGC address, shipping fee
-│   │   │   ├── OrdersScreen.js       ← orders with progress tracker, mark as received
-│   │   │   └── ProfileScreen.js      ← user profile with PSGC address update
+│   │   │   ├── OrdersScreen.js       ← orders with progress tracker, mark as received, Buy Again
+│   │   │   └── ProfileScreen.js      ← user profile with PSGC address update, Appearance (dark mode) picker
 │   │   ├── components/
-│   │   │   └── PSGCAddressPicker.js  ← cascading PSGC address picker
+│   │   │   ├── PSGCAddressPicker.js  ← cascading PSGC address picker
+│   │   │   ├── CustomAlert.js        ← styled alert/confirm modal (replaces Alert.alert)
+│   │   │   ├── SkeletonLoader.js     ← shimmer loading placeholders (product/order/cart/profile)
+│   │   │   └── NetworkBanner.js      ← offline/back-online connectivity banner
 │   │   ├── services/
 │   │   │   ├── api.js                ← axios instance (base URL config)
 │   │   │   ├── authService.js        ← login, register, logout, OTP
@@ -157,7 +164,9 @@ ecommerce-pos/
 │   │   │   ├── orderService.js       ← order placement, history, PayMongo GCash intent/status
 │   │   │   └── notificationService.js ← FCM permission, token registration, foreground/background handlers
 │   │   └── utils/
-│   │       ├── constants.js          ← colors, spacing, typography, API URL toggle
+│   │       ├── constants.js          ← colors (light + dark), spacing, typography, API URL toggle
+│   │       ├── ThemeContext.js       ← dark mode: ThemeProvider + useTheme() hook, System/Light/Dark
+│   │       ├── variantPricing.js     ← resolves a variant choice/combo's effective price + image
 │   │       └── CartContext.js        ← global cart count context
 │   ├── android/                      ← Android build files
 │   ├── index.js                      ← app entry point; registers FCM background message handler
@@ -221,7 +230,9 @@ This project uses **Supabase (PostgreSQL)**.
 | `user` | Admin and Staff accounts |
 | `mfa_device` | Trusted browsers for web login MFA (admin/staff) |
 | `staff` | Staff details and branch assignment |
-| `product` | Product catalog with option groups, net weight, sub-category, and Base Price (cost) / Resale Price (`price`) |
+| `product` | Product catalog with option groups, net weight, sub-category, Base Price (cost) / Resale Price (`price`), a per-product `barcode`, and `variant_overrides` (per-combination price/image/barcode) |
+| `price_history` | One row per resale-price edit (old price, new price, who, when) |
+| `login_sessions` | Admin/Staff login/logout audit trail |
 | `branch_stock` | Per-product, per-branch stock quantities — the source of truth for current stock |
 | `inventory` | Stock movement history (restock, transfer, adjustment, PO receive, sale, return), with a `TIMESTAMPTZ` timestamp per movement |
 | `discount` | Discounts with percentage, start and end dates |
@@ -238,12 +249,13 @@ This project uses **Supabase (PostgreSQL)**.
 - **Branch stock controls visibility** — products only show on the app if the branch has stock > 0
 - **VAT Inclusive (12%)** — applied on POS walk-in receipts
 - Payment methods: **GCash** (verified via a PayMongo Payment Intent — no manual reference entry) or **walk-in cash**
-- Shipping fee: tiered flat + weight-based by zone (Koronadal, South Cotabato, Region XII, outside)
+- **Shipping fee** — 4-zone model (South Cotabato free / Region XII / rest of Mindanao mainland / Luzon-Visayas), each with an under-500g flat rate and a weight-based rate beyond that; computed server-side, mirrored client-side
 - Order statuses: `pending` → `processing` → `out_for_delivery` → `completed` (set by customer) or `cancelled`
 - **Stock timing** — stock is deducted only once an order enters `processing`, not at checkout; a critical-stock (≤5 units) reserve buffer keeps a product from being sold down to zero
 - **Returns** — a completed order's items can be returned individually (up to the remaining un-returned quantity), which restores stock and logs an `inventory` row distinct from a sale or cancellation
 - **Stock requests** — staff submissions auto-fill from critical/out-of-stock levels (every critical variant in one batch); admin can batch-approve/reject and pull approved requests straight into a PO draft
-- **Barcode scanning** — POS matches a scanned code against each product's **Product ID** (the schema has no dedicated barcode/SKU column yet)
+- **Price history** — a product's resale price change is logged automatically whenever it actually changes, viewable per-product or store-wide
+- **Barcode scanning** — each product, each variant choice, and each variant combination can carry its own generated barcode (`product.barcode` / inline on `option_groups` / `variant_overrides`); POS scanning matches against those
 - **Confirmation required** — every create/edit/process action across Admin and Staff (including POS checkout) requires an explicit confirm step before it submits
 - Order status changes push a **Firebase Cloud Messaging** notification to the customer's mobile app
 - Web login requires MFA from an unrecognized browser — verified browsers are trusted for future logins

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, RefreshControl, Image, Alert,
@@ -9,7 +9,8 @@ import Feather from 'react-native-vector-icons/Feather';
 import { getProducts, searchProducts } from '../services/productService';
 import { addToCart } from '../services/cartService';
 import { isLoggedIn } from '../services/authService';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCart } from '../utils/CartContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -23,6 +24,8 @@ import NetworkBanner from '../components/NetworkBanner';
 // doesn't force every visible card to re-render — only cards whose own
 // product data actually changed re-render.
 const ProductCard = React.memo(function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
+  const { colors: COLORS } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const inStock    = (product._branchQty || product.quantity || 0) > 0;
   const branchName = product._branchName || null;
 
@@ -138,6 +141,8 @@ function sortProducts(list, sort) {
 }
 
 export default function HomeScreen({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
   const insets = useSafeAreaInsets();
 
@@ -658,7 +663,7 @@ export default function HomeScreen({ navigation }) {
                   onPress={() => handleSuggestionTap(item)}
                 >
                   {item.image_url ? (
-                    <View style={[styles.suggCardImg, { backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }]}>
+                    <View style={[styles.suggCardImg, { backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' }]}>
                       <Image source={{ uri: item.image_url }} style={{ width: '100%', height: '100%' }} resizeMode="contain"/>
                     </View>
                   ) : (
@@ -896,7 +901,7 @@ export default function HomeScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container:              { flex: 1, backgroundColor: COLORS.grayBg },
 
   // Header
@@ -911,9 +916,9 @@ const styles = StyleSheet.create({
   cartBadgeText:          { fontSize: 9, color: COLORS.white, fontWeight: '700' },
 
   // Search
-  searchWrap:             { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.white, borderRadius: 10, paddingHorizontal: SPACING.sm, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
+  searchWrap:             { flex: 1, flexDirection: 'row', alignItems: 'center', backgroundColor: COLORS.surface, borderRadius: 10, paddingHorizontal: SPACING.sm, paddingVertical: 4, borderWidth: 1, borderColor: 'rgba(255,255,255,0.3)' },
   searchWrapFocused:      { borderColor: COLORS.primary, borderWidth: 1.5 },
-  searchOverlay:          { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: COLORS.white, zIndex: 999, paddingTop: 8 },
+  searchOverlay:          { position: 'absolute', left: 0, right: 0, bottom: 0, backgroundColor: COLORS.surface, zIndex: 999, paddingTop: 8 },
   historyHeader:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: SPACING.sm },
   historyTitle:           { fontSize: 13, fontWeight: '700', color: COLORS.dark },
   clearAll:               { fontSize: 12, color: COLORS.primary, fontWeight: '600' },
@@ -923,7 +928,7 @@ const styles = StyleSheet.create({
   noHistoryText:          { fontSize: 13, color: COLORS.textMuted },
   suggItem:               { flexDirection: 'row', alignItems: 'center', paddingHorizontal: SPACING.md, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder, gap: 12 },
   suggImg:                { width: 48, height: 48, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg },
-  suggCard:               { flex: 1, backgroundColor: COLORS.white, borderRadius: RADIUS.md, overflow: 'hidden', marginBottom: SPACING.sm, ...SHADOW.sm },
+  suggCard:               { flex: 1, backgroundColor: COLORS.surface, borderRadius: RADIUS.md, overflow: 'hidden', marginBottom: SPACING.sm, ...SHADOW.sm },
   suggCardImg:            { width: '100%', height: 110 },
   suggName:               { fontSize: 13, fontWeight: '600', color: COLORS.dark },
   suggBrand:              { fontSize: 11, color: COLORS.textMuted, marginTop: 2 },
@@ -935,7 +940,7 @@ const styles = StyleSheet.create({
   catContent:             { paddingHorizontal: SPACING.md, gap: 8, alignItems: 'center' },
   filterIconBtn:          { padding: 6, marginLeft: 6, position: 'relative' },
   filterDot:              { position: 'absolute', top: 4, right: 4, width: 8, height: 8, borderRadius: 4, backgroundColor: '#ef4444' },
-  activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6, backgroundColor: COLORS.white, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
+  activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   activeTag:              { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.primaryBorder },
   activeTagText:          { fontSize: 11, color: COLORS.primary, fontWeight: '600' },
   filterOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
@@ -944,7 +949,7 @@ const styles = StyleSheet.create({
   // No maxHeight here — the sheet's height is driven by the animated
   // filterSheetHeight value instead, so dragging the handle can expand it
   // all the way to the top of the screen.
-  filterModal:            { backgroundColor: COLORS.white, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: SPACING.md, paddingBottom: 20, overflow: 'hidden', ...SHADOW.lg },
+  filterModal:            { backgroundColor: COLORS.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingHorizontal: SPACING.md, paddingBottom: 20, overflow: 'hidden', ...SHADOW.lg },
   filterDragZone:         { paddingTop: SPACING.sm, paddingBottom: SPACING.sm, alignItems: 'center' },
   filterHandle:           { width: 40, height: 4, backgroundColor: COLORS.grayBorder, borderRadius: 2 },
   filterModalHeader:      { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: SPACING.sm, paddingBottom: SPACING.sm, borderBottomWidth: 1, borderBottomColor: COLORS.grayBg },
@@ -961,7 +966,7 @@ const styles = StyleSheet.create({
   filterSectionTitle:     { fontSize: 11, fontWeight: '700', color: COLORS.gray, letterSpacing: 0.6, marginBottom: SPACING.sm },
   filterDropCount:        { fontSize: 11, fontWeight: '400', color: COLORS.textMuted },
   filterChipRow:          { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
-  filterChip:             { paddingHorizontal: 14, paddingVertical: 9, borderRadius: RADIUS.full, borderWidth: 1.3, borderColor: COLORS.grayBorder, backgroundColor: COLORS.white },
+  filterChip:             { paddingHorizontal: 14, paddingVertical: 9, borderRadius: RADIUS.full, borderWidth: 1.3, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface },
   filterChipActive:       { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
   filterChipText:         { fontSize: 13, color: COLORS.textSecondary, fontWeight: '500' },
   filterChipTextActive:   { color: COLORS.primary, fontWeight: '700' },
@@ -973,7 +978,7 @@ const styles = StyleSheet.create({
   filterApplyBadge:       { backgroundColor: 'rgba(255,255,255,0.25)', borderRadius: RADIUS.full, paddingHorizontal: 7, paddingVertical: 1, minWidth: 20, alignItems: 'center' },
   filterApplyBadgeText:   { fontSize: 12, fontWeight: '700', color: '#fff' },
   filterLabel:            { fontSize: 11, fontWeight: '600', color: COLORS.textMuted, paddingHorizontal: SPACING.md, marginBottom: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
-  catChip:                { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.white, borderWidth: 1.5, borderColor: COLORS.grayBorder },
+  catChip:                { paddingHorizontal: 14, paddingVertical: 6, borderRadius: RADIUS.full, backgroundColor: COLORS.surface, borderWidth: 1.5, borderColor: COLORS.grayBorder },
   catChipActive:          { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   catText:                { fontSize: 12, fontWeight: '600', color: COLORS.textSecondary },
   catTextActive:          { color: COLORS.white },
@@ -981,8 +986,8 @@ const styles = StyleSheet.create({
   // Products
   productList:            { padding: SPACING.md, paddingTop: SPACING.sm, gap: SPACING.sm },
   productRow:             { gap: SPACING.sm },
-  productCard:            { flex: 1, backgroundColor: COLORS.white, borderRadius: RADIUS.md, overflow: 'hidden', ...SHADOW.sm },
-  productImgWrap:         { height: 110, width: '100%', backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+  productCard:            { flex: 1, backgroundColor: COLORS.surface, borderRadius: RADIUS.md, overflow: 'hidden', ...SHADOW.sm },
+  productImgWrap:         { height: 110, width: '100%', backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
   productImg:             { height: '100%', width: '100%' },
   productImgPlaceholder:  { height: 110, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center' },
 
@@ -995,6 +1000,13 @@ const styles = StyleSheet.create({
   productName:            { fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 2 },
   productBrand:           { fontSize: 10, color: COLORS.textMuted, marginBottom: 1 },
   productCat:             { fontSize: 10, color: COLORS.textMuted, marginBottom: 4 },
+  // branchTag/branchTagText were referenced above (the 🏪 branch-name tag
+  // on each card) but never actually defined anywhere in this stylesheet —
+  // a pre-existing bug. An undefined style falls back to RN's default text
+  // color (plain black), which happened to be unnoticeable on a white card
+  // in light mode but is stark black-on-dark-card now that dark mode exists.
+  branchTag:              { alignSelf: 'flex-start', backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.sm, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4 },
+  branchTagText:          { fontSize: 10, color: COLORS.primary, fontWeight: '600' },
 
   // Price
   productPrice:           { fontSize: 13, fontWeight: '700', color: COLORS.primary, marginBottom: 6 },

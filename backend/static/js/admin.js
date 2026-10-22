@@ -1,3 +1,84 @@
+// ─── Option Group Choice Helper ───────────────────────
+// A choice is now {value, price, image} (per-choice price/image overrides)
+// instead of a plain string. Every place that renders/matches a choice
+// value — variant selects in Add Stock/Transfer/Adjust/PO modals, the
+// product form, stock requests — must unwrap it through this, or it
+// prints "[object Object]" / fails to match.
+function _choiceVal(c) { return (typeof c === 'object' && c !== null) ? c.value : c; }
+
+// Resolves the price/image actually in effect for a selected_options combo
+// on an order item — same 3-layer resolution staff.js's POS uses
+// (resolveVariantPricing): exact variant_overrides combo match -> first
+// option_group whose chosen choice has its own price/image -> base
+// product.price/image. Used by viewOrderItems() to show the variant photo
+// that was actually charged, instead of always the base product photo.
+function resolveVariantPricing(product, selectedOptions) {
+  const basePrice = Number(product?.price) || 0;
+  const baseImage = (product?.image_urls && product.image_urls[0]) || product?.image_url || null;
+  if (!selectedOptions || !Object.keys(selectedOptions).length) {
+    return { price: basePrice, image: baseImage };
+  }
+  const overrides = product?.variant_overrides || [];
+  const comboMatch = overrides.find(o => o.options
+    && Object.keys(o.options).length === Object.keys(selectedOptions).length
+    && Object.keys(selectedOptions).every(k => o.options[k] === selectedOptions[k]));
+  if (comboMatch) {
+    const hasPrice = comboMatch.price !== undefined && comboMatch.price !== null && comboMatch.price !== '';
+    return { price: hasPrice ? Number(comboMatch.price) : basePrice, image: comboMatch.image || baseImage };
+  }
+  const groups = product?.option_groups || [];
+  for (const g of groups) {
+    const chosenVal = selectedOptions[g.label];
+    if (chosenVal == null) continue;
+    const choice = (g.choices || []).find(c => _choiceVal(c) === chosenVal);
+    if (choice && typeof choice === 'object') {
+      const hasPrice = choice.price !== undefined && choice.price !== null && choice.price !== '';
+      const hasImage = !!choice.image;
+      if (hasPrice || hasImage) {
+        return { price: hasPrice ? Number(choice.price) : basePrice, image: choice.image || baseImage };
+      }
+    }
+  }
+  return { price: basePrice, image: baseImage };
+}
+
+// Expands a row's variant selection into one or more concrete variant_options
+// objects for Add Stock / Transfer / Adjust. A group left on its "Any" /
+// "All (no variant)" option expands across EVERY choice in that group
+// (same qty applied to each), rather than being dropped — e.g. Color=Red +
+// Size=Any on a product with sizes S/M/L produces three combinations:
+// {Color:Red,Size:S}, {Color:Red,Size:M}, {Color:Red,Size:L}. A product
+// with no option groups returns [null] — one plain (non-variant) entry.
+function expandVariantSelection(groups, selectedOpts) {
+  if (!groups || !groups.length) return [null];
+  let combos = [{}];
+  groups.forEach(g => {
+    const fixed = selectedOpts[g.label];
+    const vals  = fixed ? [fixed] : (g.choices || []).map(_choiceVal).filter(Boolean);
+    if (!vals.length) return; // group has no choices defined yet — skip it
+    const next = [];
+    combos.forEach(c => vals.forEach(v => next.push({ ...c, [g.label]: v })));
+    combos = next;
+  });
+  return combos.map(c => Object.keys(c).length ? c : null);
+}
+
+// Looks up available quantity for a specific variant combination (falls
+// back to the branch/product total when there's no combination, or no
+// variant_stock row recorded for it yet).
+function _findVariantStockQty(product, branchId, options) {
+  if (options && Object.keys(options).length && product?.variant_stock?.length) {
+    const vs = product.variant_stock.find(v =>
+      (branchId === 'both' || v.branch_id === branchId) &&
+      JSON.stringify(v.options || {}) === JSON.stringify(options));
+    return vs ? vs.quantity : 0;
+  }
+  const branchStock = branchId && branchId !== 'both' && product?.branch_stock?.length
+    ? product.branch_stock.find(bs => bs.branch_id === branchId)
+    : null;
+  return branchStock ? branchStock.quantity : (product?.quantity || 0);
+}
+
 // ─── Skeleton Loading Helpers ────────────────────────
 /**
  * skRow(cols)  — returns one <tr> with skeleton cells.
@@ -397,6 +478,99 @@ function showSection(name, el) {
     loaders[name]();
   }
 }
+
+// ─── Dashboard Overview — Clickable Drill-Downs ───────────
+// Panelist recommendation (mock defense): every summary card on the
+// Overview is clickable and jumps straight to the specific filtered data
+// it summarizes, instead of just being a static number. Each helper below
+// marks the target section as already-loaded and awaits its loader itself
+// (rather than letting showSection() fire-and-forget it), so the filter we
+// apply right after is guaranteed to run against data that's actually in
+// memory — not a half-finished fetch.
+async function _ensureSectionLoaded(name) {
+  if (!_loadedSections.has(name) && loaders[name]) {
+    _loadedSections.add(name);
+    await loaders[name]();
+  }
+}
+
+function _navEl(name) {
+  return document.querySelector('[onclick*=' + name + ']');
+}
+
+async function dashGoToInventory(level) {
+  await _ensureSectionLoaded('inventory');
+  showSection('inventory', _navEl('inventory'));
+  const sel = document.getElementById('branchStockLevelFilter');
+  if (sel) sel.value = level || '';
+  filterBranchStockLevel(level || '');
+}
+
+async function dashGoToBranchInventory(branchName) {
+  await _ensureSectionLoaded('inventory');
+  showSection('inventory', _navEl('inventory'));
+  const sel = document.getElementById('branchStockLevelFilter');
+  if (sel) sel.value = '';
+  filterBranchStockLevel('');
+  // Scroll to and briefly highlight that branch's card so "redirect to that
+  // branch's exact inventory list" is visually obvious, not just a jump to
+  // the top of a shared Inventory section.
+  setTimeout(() => {
+    const card = document.getElementById('branchStockCard_' + branchName.replace(/\s+/g, '_'));
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.style.transition = 'box-shadow 0.3s ease';
+    card.style.boxShadow  = '0 0 0 3px var(--g-500)';
+    setTimeout(() => { card.style.boxShadow = ''; }, 1600);
+  }, 150);
+}
+
+async function dashGoToProducts() {
+  await _ensureSectionLoaded('products');
+  showSection('products', _navEl('products'));
+}
+
+async function dashGoToOrders(status) {
+  await _ensureSectionLoaded('orders');
+  showSection('orders', _navEl('orders'));
+  const sel = document.getElementById('adminOrderStatusFilter');
+  if (sel) sel.value = status || '';
+  filterOrderStatus(status || '');
+}
+
+async function dashGoToSales() {
+  await _ensureSectionLoaded('sales');
+  showSection('sales', _navEl('sales'));
+}
+
+async function dashGoToDiscounts() {
+  await _ensureSectionLoaded('discounts');
+  showSection('discounts', _navEl('discounts'));
+}
+
+async function dashGoToPurchaseOrders() {
+  await _ensureSectionLoaded('purchase_orders');
+  showSection('purchase_orders', _navEl('purchase_orders'));
+}
+window.dashGoToInventory       = dashGoToInventory;
+window.dashGoToBranchInventory = dashGoToBranchInventory;
+window.dashGoToProducts        = dashGoToProducts;
+window.dashGoToOrders          = dashGoToOrders;
+window.dashGoToSales           = dashGoToSales;
+window.dashGoToDiscounts       = dashGoToDiscounts;
+window.dashGoToPurchaseOrders  = dashGoToPurchaseOrders;
+
+// Keyboard activation for the clickable dashboard cards (role="button"
+// tabindex="0" divs don't fire click on Enter/Space the way a native
+// <button> does, so this delegated listener fills that gap for anyone
+// tabbing through the Overview with a keyboard).
+document.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('[role="button"][tabindex]');
+  if (!el) return;
+  e.preventDefault();
+  el.click();
+});
 
 
 // ─── Button Loading Helper ────────────────────────────
@@ -1037,6 +1211,12 @@ function renderProducts(products) {
                 <button class="btn-icon" onclick="event.stopPropagation();viewAdminProductDetails('${p.product_id}')" title="View Details">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
                 </button>
+                <button class="btn-icon" onclick="event.stopPropagation();openPriceHistoryModal('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}')" title="Price History">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+                </button>
+                <button class="btn-icon" onclick="event.stopPropagation();openBarcodeModal('${p.product_id}')" title="${p.barcode ? 'Barcode' : 'No barcode yet — click to generate'}" ${!p.barcode ? 'style="color:#f59e0b;"' : ''}>
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
+                </button>
                 <button class="btn-icon"
                   ${(() => { const totalStock = (p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0); const noStock = totalStock === 0; return noStock ? 'disabled title="No stock available" style="opacity:0.35;cursor:not-allowed;"' : `style="color:${p.status === 'active' ? '#ef4444' : '#16a34a'}" title="${p.status === 'active' ? 'Deactivate' : 'Activate'}"`; })()}
                   onclick="event.stopPropagation();openProductToggleModal('${p.product_id}', '${p.product_name.replace(/'/g, "\\'")}', '${p.status}', ${(p.branch_stock || []).reduce((s, b) => s + Number(b.quantity || 0), 0)})">
@@ -1059,6 +1239,308 @@ function changeProductsPage(page) {
   renderProducts(_prodFilteredCache);
 }
 window.changeProductsPage = changeProductsPage;
+
+// ─── Price History (Products module) ──────────────────
+// Read path for the price_history rows admin_update_product() has been
+// writing on every resale-price change since Day 1/2 of the variant-pricing
+// work — this is the first UI that actually reads price_history back.
+// Called with no args from the Products header button (all products,
+// most recent first); called with (productId, productName) from a
+// product row's own "Price History" icon to filter to just that product.
+async function openPriceHistoryModal(productId, productName) {
+  const titleSuffix = productName ? ` — ${productName}` : ' — All Products';
+  showModal(`
+    <div style="padding:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Price History${titleSuffix}</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">Resale price changes, most recent first</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+      <div id="priceHistoryBody" style="max-height:60vh;overflow-y:auto;">
+        <p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Loading…</p>
+      </div>
+    </div>
+  `, '720px');
+
+  try {
+    const qs  = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
+    const res = await fetch(`/api/admin/price-history${qs}`, { credentials: 'same-origin' });
+    const rows = await res.json();
+    renderPriceHistoryRows(Array.isArray(rows) ? rows : [], !productId);
+  } catch (e) {
+    const wrap = document.getElementById('priceHistoryBody');
+    if (wrap) wrap.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Failed to load price history.</p>';
+  }
+}
+window.openPriceHistoryModal = openPriceHistoryModal;
+
+// showProductCol: true for the all-products view (Products header button),
+// false when already filtered to one product (its own name is in the modal
+// title, so repeating it in every row would be redundant).
+function renderPriceHistoryRows(rows, showProductCol) {
+  const wrap = document.getElementById('priceHistoryBody');
+  if (!wrap) return;
+  if (!rows.length) {
+    wrap.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">No price changes recorded yet.</p>';
+    return;
+  }
+  wrap.innerHTML = `
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+      <thead>
+        <tr style="text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border);">
+          <th style="padding:6px 8px;">Date</th>
+          ${showProductCol ? '<th style="padding:6px 8px;">Product</th>' : ''}
+          <th style="padding:6px 8px;text-align:right;">Old Price</th>
+          <th style="padding:6px 8px;text-align:right;">New Price</th>
+          <th style="padding:6px 8px;text-align:right;">Change</th>
+          <th style="padding:6px 8px;">Changed By</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const oldP  = Number(r.old_price || 0);
+          const newP  = Number(r.new_price || 0);
+          const delta = newP - oldP;
+          const deltaColor = delta > 0 ? '#ef4444' : (delta < 0 ? '#16a34a' : 'var(--text-muted)');
+          const deltaStr   = delta > 0 ? `+${peso(delta)}` : (delta < 0 ? `-${peso(Math.abs(delta))}` : peso(0));
+          return `
+            <tr style="border-bottom:1px solid var(--border);">
+              <td style="padding:7px 8px;white-space:nowrap;">${movementDateStr(r.created_at)}</td>
+              ${showProductCol ? `<td style="padding:7px 8px;">${r.product_name || '—'}</td>` : ''}
+              <td style="padding:7px 8px;text-align:right;color:var(--text-muted);text-decoration:line-through;">${peso(oldP)}</td>
+              <td style="padding:7px 8px;text-align:right;font-weight:600;">${peso(newP)}</td>
+              <td style="padding:7px 8px;text-align:right;font-weight:700;color:${deltaColor};">${deltaStr}</td>
+              <td style="padding:7px 8px;">${r.changed_by_name || '—'}${r.changed_by_role ? `<br><span style="font-size:10.5px;color:var(--text-muted);text-transform:capitalize;">${r.changed_by_role}</span>` : ''}</td>
+            </tr>`;
+        }).join('')}
+      </tbody>
+    </table>
+  `;
+}
+
+// ─── Barcode (Products module) ─────────────────────────────────────
+// staff.js's handleBarcodeScan() already matches a scanned code against
+// product.barcode (falling back to product_id) — built in anticipation of
+// this feature, so no staff.js change is needed; once a product has a real
+// barcode value, scanning it just works.
+
+async function regenerateProductBarcode() {
+  const productId = document.getElementById('productId')?.value;
+  if (!productId) {
+    showToast('Save the product first, then generate its barcode.', 'error');
+    return;
+  }
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate barcode.');
+    const input = document.getElementById('pBarcode');
+    if (input) input.value = data.barcode;
+    const p = allProducts.find(pr => pr.product_id === productId);
+    if (p) p.barcode = data.barcode;
+    showToast('New barcode generated.', 'success');
+  } catch (e) {
+    showToast(e.message || 'Failed to generate barcode.', 'error');
+  }
+}
+window.regenerateProductBarcode = regenerateProductBarcode;
+
+async function bulkGenerateBarcodes() {
+  const confirmed = await showConfirmDialog(
+    'Generate Barcodes',
+    "Generate barcodes for every product that doesn't have one yet? Products that already have a barcode are left untouched."
+  );
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/admin/products/generate-barcodes', { method: 'POST' });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate barcodes.');
+    showToast(data.updated > 0 ? `Generated ${data.updated} new barcode(s).` : 'Every product already has a barcode.', 'success');
+    if (typeof loadProducts === 'function') loadProducts();
+  } catch (e) {
+    showToast(e.message || 'Failed to generate barcodes.', 'error');
+  }
+}
+window.bulkGenerateBarcodes = bulkGenerateBarcodes;
+
+function openBarcodeModal(productId) {
+  const p = allProducts.find(pr => pr.product_id === productId);
+  if (!p) { showToast('Product not found.', 'error'); return; }
+  _renderBarcodeModalContent(p);
+}
+window.openBarcodeModal = openBarcodeModal;
+
+// Finds an existing variant_overrides-style entry for an exact options
+// combo in an arbitrary array (not the live editor's module-level
+// variantOverrides — this runs against a plain product record from
+// allProducts/invProducts, e.g. in the read-only Barcode modal).
+function _findComboEntry(overridesArr, options) {
+  return (overridesArr || []).find(o => o.options
+    && Object.keys(o.options).length === Object.keys(options).length
+    && Object.keys(options).every(k => o.options[k] === options[k]));
+}
+
+// Builds the row list for the Barcode modal: always a base/no-variant row,
+// plus one row per choice (single option group) or one row per combination
+// (2+ option groups) — never both, same split the price/image override
+// editor already uses. Each row carries what a Generate/Print click needs:
+// { label, code, scope, payload }.
+function _barcodeRows(p) {
+  const rows = [{ label: 'Base (no variant)', code: p.barcode || '', scope: 'product', payload: {} }];
+  const groups = (p.option_groups || []).filter(g => g.label && (g.choices || []).length);
+  if (groups.length === 1) {
+    const g = groups[0];
+    (g.choices || []).forEach(c => {
+      if (typeof c !== 'object' || c === null) return;
+      rows.push({ label: c.value, code: c.barcode || '', scope: 'choice', payload: { group_index: 0, choice_value: c.value } });
+    });
+  } else if (groups.length >= 2) {
+    const combos = _cartesianCombos(groups);
+    if (combos.length > 30) {
+      rows.push({ tooMany: combos.length });
+    } else {
+      combos.forEach(options => {
+        const entry = _findComboEntry(p.variant_overrides, options);
+        rows.push({ label: Object.values(options).join(' / '), code: (entry && entry.barcode) || '', scope: 'combo', payload: { options } });
+      });
+    }
+  }
+  return rows;
+}
+
+function _renderBarcodeModalContent(p) {
+  const rows = _barcodeRows(p);
+  showModal(`
+    <div style="padding:1.25rem 1.5rem 1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Barcode</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${p.product_name}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;padding-right:4px;">
+        ${rows.map((r, idx) => {
+          if (r.tooMany) return `<div class="field-hint">${r.tooMany} combinations — too many to list here. Generate combo barcodes from the product's Edit modal instead.</div>`;
+          return `
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:${r.code ? '6px' : '0'};">
+              <span style="font-size:12.5px;font-weight:600;">${r.label}</span>
+              <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick='_generateBarcodeFromModal("${p.product_id}", ${JSON.stringify(r.scope)}, ${JSON.stringify(r.payload)})'>${r.code ? 'Generate New' : 'Generate'}</button>
+            </div>
+            ${r.code ? `
+              <svg id="barcodeSvg_${idx}" style="max-width:100%;"></svg>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--text-muted);">${r.code}</span>
+                <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick='printProductBarcode("${p.product_id}", ${JSON.stringify(r.code)}, ${JSON.stringify(r.label)})'>Print</button>
+              </div>
+            ` : `<p style="color:var(--text-muted);font-size:12px;margin:0;">No barcode yet.</p>`}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `, '460px');
+
+  if (typeof JsBarcode !== 'undefined') {
+    // Deferred a tick so the SVG nodes exist in the DOM showModal() just wrote.
+    setTimeout(() => {
+      rows.forEach((r, idx) => {
+        if (!r.code) return;
+        try {
+          JsBarcode(`#barcodeSvg_${idx}`, r.code, { format: 'CODE128', displayValue: false, height: 50, margin: 6 });
+        } catch (e) { /* malformed manual value — label just won't render, text below it still shows the code */ }
+      });
+    }, 0);
+  }
+}
+
+async function _generateBarcodeFromModal(productId, scope, payload) {
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, ...payload }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate barcode.');
+
+    const p = allProducts.find(pr => pr.product_id === productId);
+    if (p) {
+      if (scope === 'product') {
+        p.barcode = data.barcode;
+      } else if (scope === 'choice') {
+        const g = (p.option_groups || [])[payload.group_index];
+        const c = g && (g.choices || []).find(ch => ch && ch.value === payload.choice_value);
+        if (c) c.barcode = data.barcode;
+      } else if (scope === 'combo') {
+        p.variant_overrides = p.variant_overrides || [];
+        let entry = _findComboEntry(p.variant_overrides, payload.options);
+        if (!entry) { entry = { options: payload.options, price: '', image: '', barcode: data.barcode }; p.variant_overrides.push(entry); }
+        else entry.barcode = data.barcode;
+      }
+      _renderBarcodeModalContent(p);
+    }
+    showToast('Barcode generated.', 'success');
+  } catch (e) {
+    showToast(e.message || 'Failed to generate barcode.', 'error');
+  }
+}
+window._generateBarcodeFromModal = _generateBarcodeFromModal;
+
+// Printable barcode label — same popup-window pattern as
+// printStockMovementHistory()/printPOList(). Sized for a small adhesive
+// label rather than a full report page. Takes the exact code + row label
+// (not just the product) since a product can now have several barcodes —
+// one base plus one per variant.
+function printProductBarcode(productId, code, label) {
+  const p = allProducts.find(pr => pr.product_id === productId);
+  if (!p || !code) { showToast('Generate a barcode first.', 'error'); return; }
+  const subLabel = label && label !== 'Base (no variant)' ? label : '';
+
+  const printWin = window.open('', '_blank', 'width=420,height=320');
+  printWin.document.write(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Barcode Label — ${p.product_name}</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #111; background: #fff; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .label { width: 2.25in; padding: 10px; text-align: center; border: 1px dashed #d1d5db; }
+    .label .name { font-size: 11px; font-weight: 700; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .label .variant { font-size: 10px; color: #16a34a; font-weight: 600; margin-bottom: 4px; }
+    .label .price { font-size: 11px; color: #374151; margin-bottom: 4px; }
+    .actions { margin-top: 16px; text-align: center; }
+    @media print { .actions { display: none; } body { min-height: auto; } .label { border: none; } }
+  </style>
+</head>
+<body>
+  <div>
+    <div class="label">
+      <div class="name">${p.product_name}</div>
+      ${subLabel ? `<div class="variant">${subLabel}</div>` : ''}
+      <div class="price">₱${Number(p.price || 0).toFixed(2)}</div>
+      <svg id="labelBarcode"></svg>
+    </div>
+    <div class="actions">
+      <button onclick="window.print()" style="background:#16a34a;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;">Print</button>
+      <button onclick="window.close()" style="background:#f3f4f6;color:#111;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;">Close</button>
+    </div>
+  </div>
+  <script>
+    JsBarcode("#labelBarcode", "${code}", { format: "CODE128", displayValue: true, fontSize: 12, height: 50, margin: 4 });
+  </script>
+</body>
+</html>
+  `);
+  printWin.document.close();
+  printWin.focus();
+}
+window.printProductBarcode = printProductBarcode;
 
 // ─── Read-only Product Details Modal (Products module) ─────────────
 // Slideshow state for the admin "View Details" product modal — a module-
@@ -1124,7 +1606,7 @@ function viewAdminProductDetails(productId) {
          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
            ${groups.map(g => `
              <div style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;">
-               <strong>${g.label}:</strong> ${(g.choices || []).join(', ') || '—'}
+               <strong>${g.label}:</strong> ${(g.choices || []).map(_choiceVal).join(', ') || '—'}
              </div>`).join('')}
          </div>
        </div>`
@@ -1290,11 +1772,25 @@ function openProductModal(product = null) {
   // Available At
   // available_at removed — branch stock controls visibility
 
-  // Option Groups — load existing
+  // Option Groups — load existing. Choices are {value, price, image} objects;
+  // normalize legacy plain-string choices (pre-variant-pricing products) into
+  // that same shape so render/edit code only ever deals with one format.
   optionGroups = [];
   if (product?.option_groups?.length) {
-    optionGroups = JSON.parse(JSON.stringify(product.option_groups)); // deep copy
+    optionGroups = JSON.parse(JSON.stringify(product.option_groups)).map(g => ({
+      label: g.label,
+      choices: (g.choices || []).map(c => typeof c === 'object' && c !== null
+        ? { value: c.value, price: c.price ?? '', image: c.image || '', barcode: c.barcode || '' }
+        : { value: c, price: '', image: '', barcode: '' })
+    }));
   }
+  // Variant Overrides (per-combination price/image) — loaded alongside
+  variantOverrides = [];
+  if (product?.variant_overrides?.length) {
+    variantOverrides = JSON.parse(JSON.stringify(product.variant_overrides));
+  }
+  const voEl = document.getElementById('pVariantOverrides');
+  if (voEl) voEl.value = JSON.stringify(variantOverrides);
   renderOptionGroups();
 
   // Net Weight + Unit
@@ -1302,6 +1798,13 @@ function openProductModal(product = null) {
   const netWeightUnit = document.getElementById('pNetWeightUnit');
   if (netWeightEl)   netWeightEl.value   = product?.net_weight      || '';
   if (netWeightUnit) netWeightUnit.value = product?.net_weight_unit || 'kg';
+
+  // Barcode — auto-generated on create, so only shown once a product exists
+  // (same reasoning as Status/Net Weight above).
+  const barcodeBlock = document.getElementById('pBarcodeBlock');
+  const barcodeEl     = document.getElementById('pBarcode');
+  if (barcodeBlock) barcodeBlock.style.display = product ? '' : 'none';
+  if (barcodeEl)    barcodeEl.value            = product?.barcode || '';
 
   // Snapshot of the product's original values when editing — Save stays
   // disabled until something actually differs (same dirty-check idea as
@@ -1316,7 +1819,9 @@ function openProductModal(product = null) {
     description:     product.description  || '',
     net_weight:      String(product.net_weight ?? ''),
     net_weight_unit: product.net_weight_unit || 'kg',
+    barcode:         product.barcode || '',
     option_groups:   JSON.stringify(product.option_groups || []),
+    variant_overrides: JSON.stringify(product.variant_overrides || []),
     existing_images: document.getElementById('pExistingImages')?.value || '[]',
   } : null;
 
@@ -1386,7 +1891,9 @@ function _prodUpdateSaveBtn() {
       description:     (document.getElementById('pDescription')?.value || '').trim(),
       net_weight:      String(document.getElementById('pNetWeight')?.value || ''),
       net_weight_unit: document.getElementById('pNetWeightUnit')?.value || 'kg',
+      barcode:         (document.getElementById('pBarcode')?.value || '').trim(),
       option_groups:   document.getElementById('pOptionGroups')?.value   || '[]',
+      variant_overrides: document.getElementById('pVariantOverrides')?.value || '[]',
       existing_images: document.getElementById('pExistingImages')?.value || '[]',
     };
     const hasNewImages = (typeof selectedImageFiles !== 'undefined' && selectedImageFiles.length > 0);
@@ -1447,11 +1954,16 @@ function closeProductModal() {
   const existingInput = document.getElementById('pExistingImages');
   if (existingInput) existingInput.value = '[]';
   optionGroups = [];
+  variantOverrides = [];
   selectedImageFiles = [];
   const ogWrap = document.getElementById('optionGroupsWrap');
   if (ogWrap) ogWrap.innerHTML = '';
   const ogEl = document.getElementById('pOptionGroups');
   if (ogEl) ogEl.value = '[]';
+  const voWrap = document.getElementById('variantOverridesWrap');
+  if (voWrap) { voWrap.innerHTML = ''; voWrap.style.display = 'none'; }
+  const voEl2 = document.getElementById('pVariantOverrides');
+  if (voEl2) voEl2.value = '[]';
   const nwEl     = document.getElementById('pNetWeight');
   if (nwEl) nwEl.value = '';
   const nwUnitEl = document.getElementById('pNetWeightUnit');
@@ -1469,6 +1981,38 @@ function closeProductModal() {
 // ─── Option Group Functions ───────────────────────────
 
 let optionGroups = [];
+// Variant price/image overrides — two layers, both optional:
+//   1. Per-choice (on optionGroups[gi].choices[ci].price/.image) — set below,
+//      inline with each choice chip.
+//   2. Per-combination (variantOverrides below) — only shown once a product
+//      has 2+ option groups, since a single-group product's "combination"
+//      IS the choice, already covered by layer 1.
+// Resolution order used at checkout/display time (resolveVariantPricing,
+// mirrored in staff.js for POS): exact combo override -> per-choice
+// override -> base product price/image. Both layers only ever override
+// resale price (product.price) — base_price/cost is untouched.
+let variantOverrides = [];
+let _currentCombos   = [];
+
+// Image picker for variant overrides reuses the product's own uploaded
+// gallery (no separate upload flow) — so it's empty until at least one
+// product image has been uploaded/saved.
+function _prodGalleryUrls() {
+  try {
+    const raw = document.getElementById('pExistingImages')?.value || '[]';
+    const urls = JSON.parse(raw);
+    return Array.isArray(urls) ? urls : [];
+  } catch (e) { return []; }
+}
+
+function _choiceImagePickerHtml(gi, ci, selectedUrl) {
+  const urls = _prodGalleryUrls();
+  if (!urls.length) return `<span style="font-size:10px;color:var(--text-muted);white-space:nowrap;">no images yet</span>`;
+  return `<select class="form-input form-select" style="font-size:11px;padding:4px 6px;max-width:120px;" onchange="updateChoiceImage(${gi},${ci},this.value)">
+    <option value="">Default image</option>
+    ${urls.map((u, ui) => `<option value="${u}" ${u === selectedUrl ? 'selected' : ''}>Image ${ui + 1}</option>`).join('')}
+  </select>`;
+}
 
 function renderOptionGroups() {
   const wrap = document.getElementById('optionGroupsWrap');
@@ -1489,17 +2033,23 @@ function renderOptionGroups() {
           Remove
         </button>
       </div>
-      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px;min-height:28px;">
+      <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
         ${g.choices.map((c, ci) => `
-          <span onclick="removeChoice(${gi}, ${ci})" style="
-            display:inline-flex;align-items:center;gap:4px;
-            background:rgba(22,163,74,0.12);color:#16a34a;
-            border:1px solid rgba(22,163,74,0.3);
-            border-radius:999px;padding:4px 10px;font-size:12px;
-            font-weight:600;cursor:pointer;"
-            title="Click to remove">
-            ${c} &times;
-          </span>`).join('')}
+          <div style="display:flex;align-items:center;gap:6px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.25);border-radius:8px;padding:5px 8px;flex-wrap:wrap;">
+            <span style="font-size:12px;font-weight:600;color:#16a34a;min-width:60px;">${c.value}</span>
+            <input type="number" step="0.01" min="0" class="form-input" placeholder="Price override"
+              value="${c.price ?? ''}" oninput="updateChoicePrice(${gi}, ${ci}, this.value)"
+              title="Leave blank to use the base price"
+              style="width:110px;font-size:11px;padding:4px 6px;"/>
+            ${_choiceImagePickerHtml(gi, ci, c.image)}
+            <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-muted);min-width:78px;" title="This choice's own barcode — leave ungenerated to scan the product's base barcode instead">${c.barcode || 'no barcode'}</span>
+            <button type="button" onclick="generateChoiceBarcode(${gi}, ${ci})"
+              class="btn-icon" title="${c.barcode ? 'Regenerate this choice’s barcode' : 'Generate a barcode for this choice'}" style="padding:3px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
+            </button>
+            <button type="button" onclick="removeChoice(${gi}, ${ci})"
+              style="margin-left:auto;background:none;border:none;color:#ef4444;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;" title="Remove choice">&times;</button>
+          </div>`).join('')}
       </div>
       <div style="display:flex;gap:8px;">
         <input
@@ -1519,6 +2069,7 @@ function renderOptionGroups() {
   `).join('');
   const el = document.getElementById('pOptionGroups');
   if (el) el.value = JSON.stringify(optionGroups);
+  renderVariantOverridesGrid();
   _prodUpdateSaveBtn();
 }
 
@@ -1536,6 +2087,7 @@ function updateGroupLabel(gi, val) {
   optionGroups[gi].label = val;
   const el = document.getElementById('pOptionGroups');
   if (el) el.value = JSON.stringify(optionGroups);
+  renderVariantOverridesGrid();
   _prodUpdateSaveBtn();
 }
 
@@ -1544,8 +2096,8 @@ function addChoice(gi) {
   if (!input) return;
   const val = input.value.trim();
   if (!val) return;
-  if (!optionGroups[gi].choices.includes(val)) {
-    optionGroups[gi].choices.push(val);
+  if (!optionGroups[gi].choices.some(c => c.value === val)) {
+    optionGroups[gi].choices.push({ value: val, price: '', image: '' });
     renderOptionGroups();
   }
   input.value = '';
@@ -1555,6 +2107,185 @@ function removeChoice(gi, ci) {
   optionGroups[gi].choices.splice(ci, 1);
   renderOptionGroups();
 }
+
+function updateChoicePrice(gi, ci, val) {
+  optionGroups[gi].choices[ci].price = val;
+  const el = document.getElementById('pOptionGroups');
+  if (el) el.value = JSON.stringify(optionGroups);
+  _prodUpdateSaveBtn();
+}
+
+function updateChoiceImage(gi, ci, val) {
+  optionGroups[gi].choices[ci].image = val;
+  const el = document.getElementById('pOptionGroups');
+  if (el) el.value = JSON.stringify(optionGroups);
+  _prodUpdateSaveBtn();
+}
+
+// Per-choice barcode — a distinct code for one variant choice (e.g. "Red"),
+// separate from the product's own base barcode. Only usable once the
+// product exists (needs a product_id to write the code against).
+async function generateChoiceBarcode(gi, ci) {
+  const productId = document.getElementById('productId')?.value;
+  if (!productId) {
+    showToast('Save the product first, then generate variant barcodes.', 'error');
+    return;
+  }
+  const choiceValue = optionGroups[gi]?.choices?.[ci]?.value;
+  if (!choiceValue) return;
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'choice', group_index: gi, choice_value: choiceValue }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate barcode.');
+    optionGroups[gi].choices[ci].barcode = data.barcode;
+    const el = document.getElementById('pOptionGroups');
+    if (el) el.value = JSON.stringify(optionGroups);
+    // Already written to the DB by the endpoint above — mirror it into the
+    // allProducts cache too, so the Products table's Barcode modal reflects
+    // it immediately without waiting for Save Product + a reload.
+    const cached = allProducts.find(pr => pr.product_id === productId);
+    const cg = cached && (cached.option_groups || [])[gi];
+    const cc = cg && (cg.choices || []).find(ch => ch && ch.value === choiceValue);
+    if (cc) cc.barcode = data.barcode;
+    renderOptionGroups();
+    showToast('Barcode generated for this variant.', 'success');
+  } catch (e) {
+    showToast(e.message || 'Failed to generate barcode.', 'error');
+  }
+}
+window.generateChoiceBarcode = generateChoiceBarcode;
+
+// ─── Variant Combination Overrides (Option B) ─────────────
+// Only relevant once a product has 2+ option groups — a single group's
+// "combination" is just its choice, already covered by the per-choice
+// override above.
+function _cartesianCombos(groups) {
+  return groups.reduce((acc, g) => {
+    const vals = (g.choices || []).map(c => c.value).filter(Boolean);
+    if (!vals.length) return acc;
+    if (!acc.length) return vals.map(v => ({ [g.label]: v }));
+    const out = [];
+    acc.forEach(combo => vals.forEach(v => out.push({ ...combo, [g.label]: v })));
+    return out;
+  }, []);
+}
+
+function _findComboOverride(options) {
+  return variantOverrides.find(o => o.options
+    && Object.keys(o.options).length === Object.keys(options).length
+    && Object.keys(options).every(k => o.options[k] === options[k]));
+}
+
+function renderVariantOverridesGrid() {
+  const wrap = document.getElementById('variantOverridesWrap');
+  if (!wrap) return;
+  const groups = optionGroups.filter(g => g.label && (g.choices || []).length);
+  if (groups.length < 2) { wrap.innerHTML = ''; wrap.style.display = 'none'; _currentCombos = []; return; }
+
+  const combos = _cartesianCombos(groups);
+  if (!combos.length) { wrap.innerHTML = ''; wrap.style.display = 'none'; _currentCombos = []; return; }
+
+  _currentCombos = combos;
+  wrap.style.display = 'block';
+
+  if (combos.length > 30) {
+    wrap.innerHTML = `<div class="field-hint" style="padding:8px 0;">${combos.length} combinations — too many to edit individually here. Use the per-choice overrides above instead.</div>`;
+    return;
+  }
+
+  const urls = _prodGalleryUrls();
+  wrap.innerHTML = `
+    <div class="field-hint" style="margin-bottom:6px;">Optional — override price/image for one exact combination (e.g. "Red / Large"). Leave blank to fall back to that choice's own override, then the base price.</div>
+    <div style="display:flex;flex-direction:column;gap:4px;max-height:260px;overflow-y:auto;padding-right:4px;">
+      ${combos.map((options, idx) => {
+        const ov    = _findComboOverride(options) || {};
+        const label = Object.values(options).join(' / ');
+        return `
+        <div style="display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:5px 8px;flex-wrap:wrap;">
+          <span style="flex:1;font-size:12px;min-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span>
+          <input type="number" step="0.01" min="0" class="form-input" placeholder="Price"
+            value="${ov.price ?? ''}" oninput="updateComboOverride(${idx}, 'price', this.value)"
+            style="width:90px;font-size:11px;padding:4px 6px;"/>
+          <select class="form-input form-select" style="font-size:11px;padding:4px 6px;max-width:120px;" onchange="updateComboOverride(${idx}, 'image', this.value)" ${urls.length ? '' : 'disabled'}>
+            <option value="">Default image</option>
+            ${urls.map((u, ui) => `<option value="${u}" ${u === ov.image ? 'selected' : ''}>Image ${ui + 1}</option>`).join('')}
+          </select>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-muted);min-width:78px;" title="This exact combination's own barcode — leave ungenerated to fall back to its choices' or the product's barcode">${ov.barcode || 'no barcode'}</span>
+          <button type="button" onclick="generateComboBarcode(${idx})"
+            class="btn-icon" title="${ov.barcode ? 'Regenerate this combination’s barcode' : 'Generate a barcode for this combination'}" style="padding:3px;">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
+          </button>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
+}
+
+// Shared setter for one combo-override field (price/image/barcode) — finds
+// or creates the entry for this exact combination, sets the field, then
+// drops entries with nothing at all set so the payload doesn't accumulate
+// empty rows as the admin clears fields back out. A barcode alone (no
+// price/image override) is enough to keep an entry — generateComboBarcode
+// relies on that.
+function _setComboField(idx, field, val) {
+  const options = _currentCombos[idx];
+  if (!options) return;
+  let entry = _findComboOverride(options);
+  if (!entry) {
+    entry = { options, price: '', image: '', barcode: '' };
+    variantOverrides.push(entry);
+  }
+  entry[field] = val;
+  variantOverrides = variantOverrides.filter(o =>
+    (o.price !== '' && o.price != null) || (o.image !== '' && o.image != null) || o.barcode);
+  const el = document.getElementById('pVariantOverrides');
+  if (el) el.value = JSON.stringify(variantOverrides);
+  _prodUpdateSaveBtn();
+}
+
+function updateComboOverride(idx, field, val) {
+  _setComboField(idx, field, val);
+}
+
+// Per-combination barcode — a distinct code for one exact variant
+// combination (e.g. "Red / Large"), separate from both the product's base
+// barcode and any per-choice barcode. Only usable once the product exists.
+async function generateComboBarcode(idx) {
+  const productId = document.getElementById('productId')?.value;
+  if (!productId) {
+    showToast('Save the product first, then generate variant barcodes.', 'error');
+    return;
+  }
+  const options = _currentCombos[idx];
+  if (!options) return;
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope: 'combo', options }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate barcode.');
+    _setComboField(idx, 'barcode', data.barcode);
+    // Mirror into the allProducts cache too — see generateChoiceBarcode for why.
+    const cached = allProducts.find(pr => pr.product_id === productId);
+    if (cached) {
+      cached.variant_overrides = cached.variant_overrides || [];
+      let entry = _findComboEntry(cached.variant_overrides, options);
+      if (!entry) { entry = { options, price: '', image: '', barcode: data.barcode }; cached.variant_overrides.push(entry); }
+      else entry.barcode = data.barcode;
+    }
+    renderVariantOverridesGrid();
+    showToast('Barcode generated for this combination.', 'success');
+  } catch (e) {
+    showToast(e.message || 'Failed to generate barcode.', 'error');
+  }
+}
+window.generateComboBarcode = generateComboBarcode;
 
 // Legacy variant functions — kept for compatibility
 function renderVariantChips(variants) {}
@@ -1666,10 +2397,17 @@ async function submitProduct(e) {
   // available_at removed — not needed anymore
   const ogEl2 = document.getElementById('pOptionGroups');
   formData.append('option_groups', ogEl2 ? ogEl2.value : '[]');
+  const voEl3 = document.getElementById('pVariantOverrides');
+  formData.append('variant_overrides', voEl3 ? voEl3.value : '[]');
   const nwEl2   = document.getElementById('pNetWeight');
   const nwUnit2 = document.getElementById('pNetWeightUnit');
   formData.append('net_weight',      nwEl2   ? (nwEl2.value   || '0')  : '0');
   formData.append('net_weight_unit', nwUnit2 ? (nwUnit2.value || 'kg') : 'kg');
+  // Barcode — hidden (and empty) in Add mode, so the backend auto-generates
+  // one; in Edit mode this carries either the unchanged existing code or a
+  // manual override the admin typed in.
+  const barcodeEl2 = document.getElementById('pBarcode');
+  formData.append('barcode', barcodeEl2 ? barcodeEl2.value.trim() : '');
   // pImage removed — using pImages (multiple) via selectedImageFiles array
 
   try {
@@ -1767,9 +2505,19 @@ function renderExistingImages(urls) {
 function removeExistingImage(idx) {
   const input   = document.getElementById('pExistingImages');
   const current = JSON.parse(input?.value || '[]');
+  const removedUrl = current[idx];
   current.splice(idx, 1);
   input.value = JSON.stringify(current);
   renderExistingImages(current);
+  // A choice/combo override may have pointed at the image just removed —
+  // clear those references so the pickers don't keep a dangling URL.
+  if (removedUrl) {
+    optionGroups.forEach(g => (g.choices || []).forEach(c => { if (c.image === removedUrl) c.image = ''; }));
+    const ogEl = document.getElementById('pOptionGroups');
+    if (ogEl) ogEl.value = JSON.stringify(optionGroups);
+    variantOverrides.forEach(o => { if (o.image === removedUrl) o.image = ''; });
+  }
+  renderOptionGroups(); // re-renders choice pickers + combo grid against the updated gallery
   _prodUpdateSaveBtn();
 }
 
@@ -1889,7 +2637,7 @@ function updateBranchStockSummary(products) {
         + '</tr>';
     }).join('');
 
-    html += '<div class="branch-stock-card">'
+    html += '<div class="branch-stock-card" id="branchStockCard_' + branch.replace(/\s+/g, '_') + '">'
       + '<div class="branch-stock-header"><span> </span>'
       + '<span class="branch-stock-name">' + branch + '</span>'
       + '<span class="branch-stock-count">' + allItems.length + ' products</span></div>'
@@ -2452,6 +3200,9 @@ function loadRowVariantsByProduct(product, rowId) {
   const row  = document.getElementById(rowId);
   const wrap = row.querySelector('.add-stock-variant-wrap');
   const cont = row.querySelector('.add-stock-variant-selects');
+  // Stashed so submitAddStock can expand an "Any" selection across every
+  // choice in that group without having to re-look-up the product.
+  row.dataset.optionGroups = JSON.stringify(product?.option_groups || []);
   if (!product) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
   const groups = product.option_groups || [];
   if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
@@ -2461,7 +3212,7 @@ function loadRowVariantsByProduct(product, rowId) {
       <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
       <select class="form-input form-select add-stock-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
         <option value="">Any</option>
-        ${(g.choices||[]).map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
   `).join('');
@@ -2532,7 +3283,7 @@ function loadAddStockVariants(productId) {
       <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
       <select id="variantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
         <option value="">All (no variant)</option>
-        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
   `).join('');
@@ -2579,16 +3330,22 @@ async function submitAddStock(e) {
 
     if (!productId || qty <= 0) { hasError = true; return; }
 
-    // Get variant options
-    const variantOpts = {};
+    // Get variant options the admin explicitly fixed on this row
+    const selectedOpts = {};
     row.querySelectorAll('.add-stock-variant-opt').forEach(function(vs) {
-      if (vs.value) variantOpts[vs.dataset.label] = vs.value;
+      if (vs.value) selectedOpts[vs.dataset.label] = vs.value;
     });
 
-    items.push({
-      product_id:      productId,
-      quantity:        qty,
-      variant_options: Object.keys(variantOpts).length ? variantOpts : null,
+    // Any group left on "Any" expands across every choice in that group —
+    // same qty applied to each resulting combination, not split between them.
+    const groups = JSON.parse(row.dataset.optionGroups || '[]');
+    const combos = expandVariantSelection(groups, selectedOpts);
+    combos.forEach(variantOpts => {
+      items.push({
+        product_id:      productId,
+        quantity:        qty,
+        variant_options: variantOpts,
+      });
     });
   });
 
@@ -2599,7 +3356,7 @@ async function submitAddStock(e) {
 
   const confirmed = await showConfirmDialog(
     'Confirm Add Stock',
-    `Add stock for ${items.length} product${items.length !== 1 ? 's' : ''}?`
+    `Add stock for ${items.length} item${items.length !== 1 ? 's' : ''}${items.length !== rows.length ? ` (expanded from "Any" variant selections)` : ''}?`
   );
   if (!confirmed) return;
 
@@ -2701,7 +3458,7 @@ function loadTransferVariants(productId) {
       <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
       <select id="transferVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
         <option value="">All (no variant)</option>
-        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
   `).join('');
@@ -2731,7 +3488,7 @@ function loadAdjustVariants(productId) {
       <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
       <select id="adjustVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
         <option value="">All (no variant)</option>
-        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
   `).join('');
@@ -2753,35 +3510,54 @@ async function submitTransfer(e) {
   const fromId = document.getElementById('transferFrom').value;
   const toId   = document.getElementById('transferTo').value;
   if (fromId === toId) { showToast('From and To branch must be different.', 'error'); return; }
-  const transferVariantOpts = getTransferVariantOptions();
-  const data = {
-    product_id:      document.getElementById('transferProduct').value,
-    quantity:        parseInt(document.getElementById('transferQty').value),
-    from_branch_id:  fromId,
-    to_branch_id:    toId,
-    variant_options: Object.keys(transferVariantOpts).length ? transferVariantOpts : null,
-    note:           document.getElementById('transferNote').value || 'Stock transfer',
-    type:           'transfer',
-  };
-  const btn = e.submitter || document.getElementById('transferSubmitBtn');
 
-  const confirmed = await showConfirmDialog('Confirm Transfer', `Transfer ${data.quantity} unit(s) between branches?`);
+  const productId    = document.getElementById('transferProduct').value;
+  const qty          = parseInt(document.getElementById('transferQty').value);
+  const note         = document.getElementById('transferNote').value || 'Stock transfer';
+  const selectedOpts = getTransferVariantOptions();
+
+  // A group left on "All (no variant)" expands across every choice in that
+  // group — same qty transferred for each resulting combination.
+  const product = allProducts?.find(p => p.product_id === productId);
+  const groups  = product?.option_groups || [];
+  const combos  = expandVariantSelection(groups, selectedOpts);
+
+  const btn = e.submitter || document.getElementById('transferSubmitBtn');
+  const confirmMsg = combos.length > 1
+    ? `Transfer ${qty} unit(s) of EACH of ${combos.length} variants between branches?`
+    : `Transfer ${qty} unit(s) between branches?`;
+  const confirmed = await showConfirmDialog('Confirm Transfer', confirmMsg);
   if (!confirmed) return;
 
   setButtonLoading(btn, true);
   try {
-    const res = await fetch('/api/admin/inventory', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      showToast('Stock transferred successfully!');
-      closeTransferModal();
-      invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
-    } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to transfer stock.', 'error');
+    let allOk = true;
+    let lastErr = '';
+    for (const combo of combos) {
+      const res = await fetch('/api/admin/inventory', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id:      productId,
+          quantity:        qty,
+          from_branch_id:  fromId,
+          to_branch_id:    toId,
+          variant_options: combo,
+          note:            note,
+          type:            'transfer',
+        }),
+      });
+      if (!res.ok) {
+        allOk = false;
+        try { lastErr = (await res.json()).error || ''; } catch (_e) {}
+      }
     }
+    if (allOk) {
+      showToast(combos.length > 1 ? `${combos.length} variant transfers completed!` : 'Stock transferred successfully!');
+      closeTransferModal();
+    } else {
+      showToast(lastErr || 'Some transfers failed — check stock for the affected variant(s).', 'error');
+    }
+    invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
   } catch (e) { showToast('Error transferring stock.', 'error'); }
   finally { setButtonLoading(btn, false); }
 }
@@ -2830,53 +3606,66 @@ function closeAdjustModal() {
 
 async function submitAdjust(e) {
   e.preventDefault();
-  const productId       = document.getElementById('adjustProduct').value;
-  const qty             = parseInt(document.getElementById('adjustQty').value);
-  const reason          = document.getElementById('adjustReason').value;
-  const branchId        = document.getElementById('adjustBranch').value;
-  const note            = document.getElementById('adjustNote').value;
-  const adjustVariantOpts = getAdjustVariantOptions();
+  const productId    = document.getElementById('adjustProduct').value;
+  const qty          = parseInt(document.getElementById('adjustQty').value);
+  const reason       = document.getElementById('adjustReason').value;
+  const branchId     = document.getElementById('adjustBranch').value;
+  const note         = document.getElementById('adjustNote').value;
+  const selectedOpts = getAdjustVariantOptions();
 
-  // Find current stock — check branch-level stock if branchId is set
   const product = allProducts.find(p => p.product_id === productId);
   if (!product) { showToast('Product not found.', 'error'); return; }
-  const branchStock = branchId && product.branch_stock?.length
-    ? product.branch_stock.find(bs => bs.branch_id === branchId)
-    : null;
-  const availableQty = branchStock ? branchStock.quantity : product.quantity;
-  if (qty > availableQty) {
-    showToast(`Cannot deduct ${qty} — only ${availableQty} units in stock for this branch.`, 'error');
-    return;
+
+  // A group left on "All (no variant)" expands across every choice in that
+  // group — same qty deducted from each resulting combination.
+  const groups = product.option_groups || [];
+  const combos = expandVariantSelection(groups, selectedOpts);
+
+  // Validate EVERY combination has enough stock before sending anything.
+  for (const combo of combos) {
+    const availableQty = _findVariantStockQty(product, branchId, combo);
+    if (qty > availableQty) {
+      const label = combo ? Object.values(combo).join(' / ') : 'this product';
+      showToast(`Cannot deduct ${qty} from ${label} — only ${availableQty} units in stock for this branch.`, 'error');
+      return;
+    }
   }
 
-  const data = {
-    product_id:      productId,
-    quantity:        -qty,
-    to_branch_id:    branchId,
-    note:            `[${reason.toUpperCase()}] ${note || reason}`,
-    type:            'adjustment',
-    variant_options: Object.keys(adjustVariantOpts).length ? adjustVariantOpts : null,
-  };
-
   const btn = e.submitter || document.getElementById('adjustSubmitBtn');
-
-  const confirmed = await showConfirmDialog('Confirm Adjustment', `Deduct ${qty} unit(s) from stock (${reason})?`);
+  const confirmMsg = combos.length > 1
+    ? `Deduct ${qty} unit(s) from EACH of ${combos.length} variants (${reason})?`
+    : `Deduct ${qty} unit(s) from stock (${reason})?`;
+  const confirmed = await showConfirmDialog('Confirm Adjustment', confirmMsg);
   if (!confirmed) return;
 
   setButtonLoading(btn, true);
   try {
-    const res = await fetch('/api/admin/inventory', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
-    });
-    if (res.ok) {
-      showToast(`Stock adjusted — ${qty} unit(s) deducted (${reason}).`);
-      closeAdjustModal();
-      invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
-    } else {
-      const err = await res.json();
-      showToast(err.error || 'Failed to adjust stock.', 'error');
+    let allOk = true;
+    let lastErr = '';
+    for (const combo of combos) {
+      const res = await fetch('/api/admin/inventory', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id:      productId,
+          quantity:        -qty,
+          to_branch_id:    branchId,
+          note:            `[${reason.toUpperCase()}] ${note || reason}`,
+          type:            'adjustment',
+          variant_options: combo,
+        }),
+      });
+      if (!res.ok) {
+        allOk = false;
+        try { lastErr = (await res.json()).error || ''; } catch (_e) {}
+      }
     }
+    if (allOk) {
+      showToast(`Stock adjusted — ${qty} unit(s) deducted${combos.length > 1 ? ` across ${combos.length} variants` : ''} (${reason}).`);
+      closeAdjustModal();
+    } else {
+      showToast(lastErr || 'Some adjustments failed — check inventory for the affected variant(s).', 'error');
+    }
+    invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
   } catch (e) { showToast('Error adjusting stock.', 'error'); }
   finally { setButtonLoading(btn, false); }
 }
@@ -3168,7 +3957,9 @@ function viewOrderItems(order) {
               `<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">${k}: ${v}</span>`
             ).join(' ')
           : '';
-        const imgUrl = i.product?.image_url;
+        // Resolve the variant photo that was actually charged (per-choice or
+        // per-combo override image), falling back to the base product photo.
+        const imgUrl = resolveVariantPricing(i.product, i.selected_options).image;
         return `
           <div style="padding:10px 0;border-bottom:1px solid var(--border);">
             <div style="display:flex;gap:10px;align-items:flex-start;">
@@ -5980,7 +6771,7 @@ function loadPORowVariants(sel) {
       <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
       <select class="form-input form-select po-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
         <option value="">Any</option>
-        ${(g.choices || []).map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
   `).join('');

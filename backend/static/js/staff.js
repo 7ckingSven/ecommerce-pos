@@ -1239,11 +1239,253 @@ function renderOrderItems() {
 }
 
 
+// ─── Variant Pricing Resolution ────────────────────────
+// Resolution order: exact combination override (product.variant_overrides)
+// -> per-choice override (on the matching option_groups choice) -> base
+// product price/image. Mirrors the same logic in admin.js (used there only
+// for the product-form editor); this copy is what actually prices a sale.
+// Handles legacy option_groups where a choice is still a plain string
+// (pre-variant-pricing products that haven't been re-saved yet) as well as
+// the new {value, price, image} shape.
+function _choiceVal(c) { return (typeof c === 'object' && c !== null) ? c.value : c; }
+
+function resolveVariantPricing(product, selectedOptions) {
+  const basePrice = Number(product.price) || 0;
+  const baseImage = (product.image_urls && product.image_urls[0]) || product.image_url || null;
+  if (!selectedOptions || !Object.keys(selectedOptions).length) {
+    return { price: basePrice, image: baseImage };
+  }
+
+  // 1. Exact combination override
+  const overrides = product.variant_overrides || [];
+  const comboMatch = overrides.find(o => o.options
+    && Object.keys(o.options).length === Object.keys(selectedOptions).length
+    && Object.keys(selectedOptions).every(k => o.options[k] === selectedOptions[k]));
+  if (comboMatch) {
+    const hasPrice = comboMatch.price !== undefined && comboMatch.price !== null && comboMatch.price !== '';
+    return {
+      price: hasPrice ? Number(comboMatch.price) : basePrice,
+      image: comboMatch.image || baseImage,
+    };
+  }
+
+  // 2. Per-choice override — first group (in option_groups order) whose
+  // selected value carries its own price or image override.
+  const groups = product.option_groups || [];
+  for (const g of groups) {
+    const chosenVal = selectedOptions[g.label];
+    if (chosenVal == null) continue;
+    const choice = (g.choices || []).find(c => _choiceVal(c) === chosenVal);
+    if (choice && typeof choice === 'object') {
+      const hasPrice = choice.price !== undefined && choice.price !== null && choice.price !== '';
+      const hasImage = !!choice.image;
+      if (hasPrice || hasImage) {
+        return { price: hasPrice ? Number(choice.price) : basePrice, image: choice.image || baseImage };
+      }
+    }
+  }
+
+  return { price: basePrice, image: baseImage };
+}
+window.resolveVariantPricing = resolveVariantPricing;
+
+// ─── Barcode (Inventory + POS scan matching) ───────────────────────
+// JsBarcode isn't on this dashboard's own <script> tags, so load it once,
+// on demand, instead of requiring an HTML edit just for this one library.
+(function _ensureJsBarcodeLoaded() {
+  if (window.JsBarcode || document.getElementById('jsbarcode-cdn')) return;
+  const s = document.createElement('script');
+  s.id  = 'jsbarcode-cdn';
+  s.src = 'https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js';
+  document.head.appendChild(s);
+})();
+
+// Same cartesian-combination builder as admin.js's editor-only _cartesianCombos
+// — duplicated here since staff.js has no shared module with admin.js and
+// only needs it for display/matching, not for editing.
+function _barcodeCartesianCombos(groups) {
+  return (groups || []).reduce((acc, g) => {
+    const vals = (g.choices || []).map(_choiceVal).filter(Boolean);
+    if (!vals.length) return acc;
+    if (!acc.length) return vals.map(v => ({ [g.label]: v }));
+    const out = [];
+    acc.forEach(combo => vals.forEach(v => out.push({ ...combo, [g.label]: v })));
+    return out;
+  }, []);
+}
+
+function _findComboEntry(overridesArr, options) {
+  return (overridesArr || []).find(o => o.options
+    && Object.keys(o.options).length === Object.keys(options).length
+    && Object.keys(options).every(k => o.options[k] === options[k]));
+}
+
+// Row list for the Barcode modal: a base/no-variant row, plus one row per
+// choice (single option group) or one row per combination (2+ option
+// groups) — same product/choice/combo split Day 2's price/image overrides
+// already use.
+function _barcodeRows(p) {
+  const rows = [{ label: 'Base (no variant)', code: p.barcode || '', scope: 'product', payload: {} }];
+  const groups = (p.option_groups || []).filter(g => g.label && (g.choices || []).length);
+  if (groups.length === 1) {
+    const g = groups[0];
+    (g.choices || []).forEach(c => {
+      if (typeof c !== 'object' || c === null) return;
+      rows.push({ label: c.value, code: c.barcode || '', scope: 'choice', payload: { group_index: 0, choice_value: c.value } });
+    });
+  } else if (groups.length >= 2) {
+    const combos = _barcodeCartesianCombos(groups);
+    if (combos.length > 30) {
+      rows.push({ tooMany: combos.length });
+    } else {
+      combos.forEach(options => {
+        const entry = _findComboEntry(p.variant_overrides, options);
+        rows.push({ label: Object.values(options).join(' / '), code: (entry && entry.barcode) || '', scope: 'combo', payload: { options } });
+      });
+    }
+  }
+  return rows;
+}
+
+function openStaffBarcodeModal(productId) {
+  const p = invProducts.find(pr => pr.product_id === productId);
+  if (!p) { showToast('Product not found.', 'error'); return; }
+  _renderStaffBarcodeModalContent(p);
+}
+window.openStaffBarcodeModal = openStaffBarcodeModal;
+
+function _renderStaffBarcodeModalContent(p) {
+  const rows = _barcodeRows(p);
+  showGenericModal(`
+    <div style="padding:1.25rem 1.5rem 1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:16px;">Barcode</h3>
+          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${p.product_name}</p>
+        </div>
+        <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;padding-right:4px;">
+        ${rows.map((r, idx) => {
+          if (r.tooMany) return `<div class="field-hint">${r.tooMany} combinations — too many to list here. Ask an admin to generate combo barcodes from the product's Edit modal instead.</div>`;
+          return `
+          <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:${r.code ? '6px' : '0'};">
+              <span style="font-size:12.5px;font-weight:600;">${r.label}</span>
+              <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick='_staffGenerateBarcodeFromModal("${p.product_id}", ${JSON.stringify(r.scope)}, ${JSON.stringify(r.payload)})'>${r.code ? 'Generate New' : 'Generate'}</button>
+            </div>
+            ${r.code ? `
+              <svg id="staffBarcodeSvg_${idx}" style="max-width:100%;"></svg>
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--text-muted);">${r.code}</span>
+                <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick='printStaffProductBarcode("${p.product_id}", ${JSON.stringify(r.code)}, ${JSON.stringify(r.label)})'>Print</button>
+              </div>
+            ` : `<p style="color:var(--text-muted);font-size:12px;margin:0;">No barcode yet.</p>`}
+          </div>`;
+        }).join('')}
+      </div>
+    </div>
+  `);
+
+  if (typeof JsBarcode !== 'undefined') {
+    setTimeout(() => {
+      rows.forEach((r, idx) => {
+        if (!r.code) return;
+        try {
+          JsBarcode(`#staffBarcodeSvg_${idx}`, r.code, { format: 'CODE128', displayValue: false, height: 50, margin: 6 });
+        } catch (e) { /* malformed manual value — label just won't render, text below it still shows the code */ }
+      });
+    }, 0);
+  }
+}
+
+async function _staffGenerateBarcodeFromModal(productId, scope, payload) {
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ scope, ...payload }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Failed to generate barcode.');
+
+    const p = invProducts.find(pr => pr.product_id === productId);
+    if (p) {
+      if (scope === 'product') {
+        p.barcode = data.barcode;
+      } else if (scope === 'choice') {
+        const g = (p.option_groups || [])[payload.group_index];
+        const c = g && (g.choices || []).find(ch => ch && ch.value === payload.choice_value);
+        if (c) c.barcode = data.barcode;
+      } else if (scope === 'combo') {
+        p.variant_overrides = p.variant_overrides || [];
+        let entry = _findComboEntry(p.variant_overrides, payload.options);
+        if (!entry) { entry = { options: payload.options, price: '', image: '', barcode: data.barcode }; p.variant_overrides.push(entry); }
+        else entry.barcode = data.barcode;
+      }
+      _renderStaffBarcodeModalContent(p);
+    }
+    showToast('Barcode generated.', 'success');
+  } catch (e) {
+    showToast(e.message || 'Failed to generate barcode.', 'error');
+  }
+}
+window._staffGenerateBarcodeFromModal = _staffGenerateBarcodeFromModal;
+
+// Printable barcode label — same popup-window pattern admin.js uses.
+function printStaffProductBarcode(productId, code, label) {
+  const p = invProducts.find(pr => pr.product_id === productId);
+  if (!p || !code) { showToast('Generate a barcode first.', 'error'); return; }
+  const subLabel = label && label !== 'Base (no variant)' ? label : '';
+
+  const printWin = window.open('', '_blank', 'width=420,height=320');
+  printWin.document.write(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8"/>
+  <title>Barcode Label — ${p.product_name}</title>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: 'Segoe UI', Arial, sans-serif; color: #111; background: #fff; display:flex; align-items:center; justify-content:center; min-height:100vh; }
+    .label { width: 2.25in; padding: 10px; text-align: center; border: 1px dashed #d1d5db; }
+    .label .name { font-size: 11px; font-weight: 700; margin-bottom: 2px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .label .variant { font-size: 10px; color: #16a34a; font-weight: 600; margin-bottom: 4px; }
+    .label .price { font-size: 11px; color: #374151; margin-bottom: 4px; }
+    .actions { margin-top: 16px; text-align: center; }
+    @media print { .actions { display: none; } body { min-height: auto; } .label { border: none; } }
+  </style>
+</head>
+<body>
+  <div>
+    <div class="label">
+      <div class="name">${p.product_name}</div>
+      ${subLabel ? `<div class="variant">${subLabel}</div>` : ''}
+      <div class="price">₱${Number(p.price || 0).toFixed(2)}</div>
+      <svg id="labelBarcode"></svg>
+    </div>
+    <div class="actions">
+      <button onclick="window.print()" style="background:#16a34a;color:#fff;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;margin-right:8px;">Print</button>
+      <button onclick="window.close()" style="background:#f3f4f6;color:#111;border:none;padding:8px 20px;border-radius:6px;cursor:pointer;font-size:13px;">Close</button>
+    </div>
+  </div>
+  <script>
+    JsBarcode("#labelBarcode", "${code}", { format: "CODE128", displayValue: true, fontSize: 12, height: 50, margin: 4 });
+  </script>
+</body>
+</html>
+  `);
+  printWin.document.close();
+  printWin.focus();
+}
+window.printStaffProductBarcode = printStaffProductBarcode;
+
 // ─── POS Variant Modal ─────────────────────────────────
 let posCurrentProduct = null;
 let posSelectedVariants = {};
 
-function selectPosProduct(productId) {
+function selectPosProduct(productId, presetOptions) {
   const p = posProducts.find(pr => pr.product_id === productId);
   if (!p) return;
   const disc          = p.discount;
@@ -1261,13 +1503,17 @@ function selectPosProduct(productId) {
     return;
   }
 
+  const baseImage = (p.image_urls && p.image_urls[0]) || p.image_url || '';
   const modalHtml = `
-    <div style="display:flex;align-items:center;justify-content:space-between;padding:1rem 1rem 0.75rem;border-bottom:1px solid var(--border);margin-bottom:1rem;">
-      <div>
-        <strong style="font-size:14px;">${p.product_name}</strong>
-        <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Select variant to add to order</div>
+    <div style="position:relative;padding:1rem 1rem 0.75rem;border-bottom:1px solid var(--border);margin-bottom:1rem;">
+      <button onclick="closeGenericModal()" style="position:absolute;top:0.75rem;right:1rem;background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;font-size:20px;" title="Close">&times;</button>
+      <div style="display:flex;flex-direction:column;align-items:center;text-align:center;gap:8px;">
+        <img id="posVarImage" src="${baseImage}" onerror="this.style.visibility='hidden'" style="width:160px;height:160px;border-radius:12px;object-fit:cover;background:var(--surface-2);"/>
+        <div style="min-width:0;">
+          <strong style="font-size:15px;display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:280px;">${p.product_name}</strong>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Select variant to add to order</div>
+        </div>
       </div>
-      <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);padding:4px;line-height:1;font-size:20px;" title="Close">&times;</button>
     </div>
     <div style="padding:0 1rem 1rem;">
     ${groups.map(g => `
@@ -1276,20 +1522,58 @@ function selectPosProduct(productId) {
         <div style="display:flex;flex-wrap:wrap;gap:6px;" id="posVarGroup_${g.label.replace(/\s/g,'_')}">
           ${(g.choices || []).map(c => `
             <button type="button"
-              onclick="selectPosVariantOpt('${g.label}', '${c}', this)"
+              onclick="selectPosVariantOpt('${g.label}', '${_choiceVal(c).replace(/'/g,"\\'")}', this)"
               style="padding:6px 12px;border-radius:6px;border:1.5px solid var(--border);
                      background:var(--surface);color:var(--text-primary);font-size:12px;cursor:pointer;">
-              ${c}
+              ${_choiceVal(c)}
             </button>
           `).join('')}
         </div>
       </div>
     `).join('')}
+    <div id="posVarPrice" style="font-size:15px;font-weight:700;color:var(--g-400);font-family:'JetBrains Mono',monospace;margin-bottom:6px;"></div>
     <div id="posVarStock" style="font-size:12px;color:var(--text-muted);margin-bottom:12px;min-height:18px;"></div>
     <button id="posVarAddBtn" onclick="confirmPosVariant(this)" class="btn btn-solid-green" style="width:100%;" disabled>Add to Order</button>
     </div>
   `;
   showGenericModal(modalHtml);
+
+  if (presetOptions) {
+    // Deferred a tick so the option buttons exist in the DOM showGenericModal
+    // just wrote. Pre-selects whatever the scanned barcode determined (one
+    // group for a choice-level barcode, every group for a combo-level one)
+    // so staff only need to confirm the remaining groups, if any, then
+    // click Add to Order — the barcode did the picking instead of taps.
+    setTimeout(() => _applyPosVariantPreset(presetOptions), 0);
+  }
+}
+
+function _applyPosVariantPreset(presetOptions) {
+  Object.entries(presetOptions).forEach(([label, value]) => {
+    const group = document.getElementById('posVarGroup_' + label.replace(/\s/g, '_'));
+    if (!group) return;
+    const btn = Array.from(group.querySelectorAll('button')).find(b => b.textContent.trim() === String(value));
+    if (btn) selectPosVariantOpt(label, value, btn);
+  });
+}
+
+// Updates the live price (and, where a variant overrides it, the thumbnail)
+// as soon as every group has a selection — doesn't wait for the stock
+// check, since price/image don't depend on a network round-trip.
+function _posVarUpdatePricePreview() {
+  if (!posCurrentProduct) return;
+  const groups = posCurrentProduct.option_groups || [];
+  const priceEl = document.getElementById('posVarPrice');
+  if (!priceEl) return;
+  if (Object.keys(posSelectedVariants).length < groups.length) { priceEl.textContent = ''; return; }
+
+  const { price, image } = resolveVariantPricing(posCurrentProduct, posSelectedVariants);
+  const disc = posCurrentProduct.discount;
+  const finalPrice = disc ? price * (1 - disc.percentage / 100) : price;
+  priceEl.textContent = disc ? `${peso(finalPrice)} (was ${peso(price)})` : peso(finalPrice);
+
+  const imgEl = document.getElementById('posVarImage');
+  if (imgEl && image) { imgEl.src = image; imgEl.style.visibility = 'visible'; }
 }
 
 function selectPosVariantOpt(label, value, btn) {
@@ -1308,6 +1592,7 @@ function selectPosVariantOpt(label, value, btn) {
     btn.style.fontWeight  = '700';
   }
   checkPosVariantStock();
+  _posVarUpdatePricePreview();
   _posVarUpdateBtn();
 }
 
@@ -1422,14 +1707,19 @@ async function confirmPosVariant(btn) {
 
   const variantLabel = Object.entries(posSelectedVariants).map(([k,v]) => `${k}: ${v}`).join(', ');
   const disc2 = posCurrentProduct.discount;
+  // Resolved variant price (combo override -> per-choice override -> base
+  // product price), THEN the product's discount applied on top — same order
+  // as the live preview in the modal.
+  const { price: variantPrice } = resolveVariantPricing(posCurrentProduct, posSelectedVariants);
+  const variantEffectivePrice = disc2 ? variantPrice * (1 - disc2.percentage / 100) : variantPrice;
   addToOrder(
     posCurrentProduct.product_id,
     `${posCurrentProduct.product_name} (${variantLabel})`,
-    posCurrentProduct.effectivePrice,
+    variantEffectivePrice,
     availableStock || posCurrentProduct.quantity,
     { ...posSelectedVariants },
     {
-      original_price: disc2 ? posCurrentProduct.price : null,
+      original_price: disc2 ? variantPrice : null,
       discount_name:  disc2 ? disc2.discount_name     : null,
       discount_pct:   disc2 ? disc2.percentage        : null,
     }
@@ -1457,21 +1747,48 @@ window.confirmPosVariant     = confirmPosVariant;
 // product table and returned by /api/products, swap the match below to
 // check that field first (falling back to product_id) — no other change
 // needed here.
+// Matches a scanned code against every barcode level: a product's own base
+// barcode, every option_groups choice's barcode, and every variant_overrides
+// combo's barcode — in that order of specificity (combo first, since it's
+// the most precise match; choice next; base/product_id last). Falls back to
+// product_id only for a product that has no base barcode of its own, same
+// as the original behavior before per-variant barcodes existed.
+function _findBarcodeMatch(code) {
+  const lc = code.toLowerCase();
+  for (const p of posProducts) {
+    for (const ov of (p.variant_overrides || [])) {
+      if (ov.barcode && ov.barcode.toLowerCase() === lc) return { product: p, options: ov.options || null };
+    }
+    for (const g of (p.option_groups || [])) {
+      for (const c of (g.choices || [])) {
+        if (typeof c === 'object' && c !== null && c.barcode && c.barcode.toLowerCase() === lc) {
+          return { product: p, options: { [g.label]: _choiceVal(c) } };
+        }
+      }
+    }
+  }
+  const byBase = posProducts.find(p => (p.barcode || '').toLowerCase() === lc);
+  if (byBase) return { product: byBase, options: null };
+  const byId = posProducts.find(p => !p.barcode && (p.product_id || '').toLowerCase() === lc);
+  if (byId) return { product: byId, options: null };
+  return null;
+}
+
 function handleBarcodeScan(rawCode) {
   const code = (rawCode || '').trim();
   const wrap = document.getElementById('posBarcodeWrap');
   const statusEl = document.getElementById('posBarcodeStatus');
   if (!code) return;
 
-  const match = posProducts.find(p => (p.barcode || p.product_id || '').toLowerCase() === code.toLowerCase());
-
-  if (!match) {
+  const found = _findBarcodeMatch(code);
+  if (!found) {
     flashBarcodeWrap(wrap, 'miss');
     if (statusEl) statusEl.textContent = 'Not found';
     showToast(`No product matches "${code}".`, 'error');
     focusBarcodeInput();
     return;
   }
+  const { product: match, options: presetOptions } = found;
 
   const branchStock = (match.branch_stock || []).find(b => b.branch_id === staffBranchId);
   const stockQty     = branchStock ? branchStock.quantity : match.quantity || 0;
@@ -1487,7 +1804,9 @@ function handleBarcodeScan(rawCode) {
   if (statusEl) statusEl.textContent = `Added: ${match.product_name}`;
   // Reuses the same path as clicking the product card — handles the
   // variant-picker modal automatically when the product has option groups.
-  selectPosProduct(match.product_id);
+  // A choice- or combo-level barcode pre-selects that exact variant in the
+  // modal so staff only need to confirm (and finish any remaining groups).
+  selectPosProduct(match.product_id, presetOptions);
   focusBarcodeInput();
 }
 
@@ -2487,6 +2806,9 @@ function renderInvProducts(products) {
             <button class="btn-icon" onclick="event.stopPropagation();viewStaffProductDetails('${p.product_id}')" title="View Product Details">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
+            <button class="btn-icon" onclick="event.stopPropagation();openStaffBarcodeModal('${p.product_id}')" title="${p.barcode ? 'Barcode' : 'No barcode yet — click to generate'}" ${!p.barcode ? 'style="color:#f59e0b;"' : ''}>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
+            </button>
             ${(level === 'critical' || level === 'out')
               ? `<button class="btn-icon" onclick="event.stopPropagation();openRequestModalForProduct('${p.product_id}')" title="Generate Stock Request" style="color:#ef4444;">
                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
@@ -2522,7 +2844,7 @@ function viewStaffProductDetails(productId) {
          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
            ${groups.map(g => `
              <div style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;">
-               <strong>${g.label}:</strong> ${(g.choices || []).join(', ') || '—'}
+               <strong>${g.label}:</strong> ${(g.choices || []).map(_choiceVal).join(', ') || '—'}
              </div>`).join('')}
          </div>
        </div>`
@@ -2786,7 +3108,8 @@ function viewStaffOrderItems(order) {
               '<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">' + k + ': ' + v + '</span>'
             ).join(' ')
           : '';
-        const imgUrl = i.product?.image_url;
+        // Resolve the variant photo actually charged, falling back to base photo.
+        const imgUrl = resolveVariantPricing(i.product, i.selected_options).image;
         const imgHtml = imgUrl
           ? '<img src="' + imgUrl + '" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="' + (i.product?.product_name || '') + '"/>'
           : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
@@ -2975,7 +3298,8 @@ function viewStaffOrderItems(order) {
               '<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">' + k + ': ' + v + '</span>'
             ).join(' ')
           : '';
-        const imgUrl = i.product?.image_url;
+        // Resolve the variant photo actually charged, falling back to base photo.
+        const imgUrl = resolveVariantPricing(i.product, i.selected_options).image;
         const imgHtml = imgUrl
           ? '<img src="' + imgUrl + '" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="' + (i.product?.product_name || '') + '"/>'
           : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
@@ -3889,7 +4213,7 @@ function loadReqRowVariantsByProduct(product, rowId) {
       <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
       <select class="form-input form-select req-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
         <option value="">Any</option>
-        ${(g.choices||[]).map(c => `<option value="${c}">${c}</option>`).join('')}
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
   `).join('');

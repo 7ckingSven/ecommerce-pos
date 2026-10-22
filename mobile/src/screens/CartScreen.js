@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, TextInput, StyleSheet,
@@ -11,10 +11,12 @@ import { getCart, updateCartItem, removeFromCart, updateCartItemOptions } from '
 import { isLoggedIn } from '../services/authService';
 import { useCart } from '../utils/CartContext';
 import api from '../services/api';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
+import { resolveVariantPricing, getDiscountedVariantPrice, _choiceVal } from '../utils/variantPricing';
 
 // Persists which cart items are checked so the selection survives
 // navigating away, closing the app, or a fresh cold start.
@@ -54,6 +56,8 @@ function getCartItemMaxQty(product, branchId, selectedOptions) {
 }
 
 export default function CartScreen({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const insets = useSafeAreaInsets();
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
@@ -188,11 +192,16 @@ export default function CartScreen({ navigation }) {
   }
 
   // ─── Total (selected items only) ─────────────────────
+  // Uses the same variant-aware resolution as the per-row render below —
+  // previously this only ever looked at p.price + the product-level
+  // discount, so a per-choice/per-combo price override never made it into
+  // the cart total even though the row itself (once fixed) showed it.
   const total = selectedItems.reduce(
     (s, i) => {
     const p = Array.isArray(i.product) ? i.product[0] : i.product;
-    const disc = Array.isArray(p?.discount) ? p.discount[0] : p?.discount;
-    const fp = disc ? Number(p?.price || 0) * (1 - Number(disc.percentage || 0) / 100) : Number(p?.price || 0);
+    const { price: variantPrice } = resolveVariantPricing(p, i.selected_options || {});
+    const discounted = getDiscountedVariantPrice(p, variantPrice);
+    const fp = discounted !== null ? discounted : variantPrice;
     return s + fp * i.quantity;
   }, 0
   );
@@ -395,13 +404,14 @@ export default function CartScreen({ navigation }) {
               const isSelected = !!selected[item.cart_id];
               // Safely get product — handle array or object from Supabase
               const product    = Array.isArray(item.product) ? item.product[0] : item.product;
-              const price      = Number(product?.price || 0);
 
-              // Discounted price if applicable
+              // Variant-aware price/image — resolves any per-choice/per-combo
+              // override for this item's selected_options before the
+              // product-level discount is applied on top.
+              const { price: variantPrice, image: variantImage } = resolveVariantPricing(product, item.selected_options || {});
+              const discountedVariantPrice = getDiscountedVariantPrice(product, variantPrice);
               const disc       = Array.isArray(product?.discount) ? product.discount[0] : product?.discount;
-              const finalPrice = disc
-                ? price * (1 - Number(disc.percentage || 0) / 100)
-                : price;
+              const finalPrice = discountedVariantPrice !== null ? discountedVariantPrice : variantPrice;
               const finalSub   = finalPrice * item.quantity;
               const maxQty     = getCartItemMaxQty(product, item.branch_id, item.selected_options);
 
@@ -415,9 +425,10 @@ export default function CartScreen({ navigation }) {
                     {isSelected && <Feather name="check" size={12} color={COLORS.white}/>}
                   </TouchableOpacity>
 
-                  {/* Product Image */}
-                  {product?.image_url
-                    ? <Image source={{ uri: product.image_url }} style={styles.itemImg} resizeMode="cover"/>
+                  {/* Product Image — the selected variant's photo when it has
+                      its own override, otherwise the base product photo */}
+                  {(variantImage || product?.image_url)
+                    ? <Image source={{ uri: variantImage || product.image_url }} style={styles.itemImg} resizeMode="cover"/>
                     : <View style={styles.itemImgPlaceholder}>
                         <Feather name="shopping-bag" size={22} color={COLORS.primary}/>
                       </View>
@@ -454,14 +465,15 @@ export default function CartScreen({ navigation }) {
                       </TouchableOpacity>
                     )}
 
-                    {/* Price */}
-                    {disc ? (
+                    {/* Price — variantPrice already reflects any
+                        per-choice/per-combo override for this item */}
+                    {discountedVariantPrice !== null ? (
                       <View style={styles.priceRow}>
-                        <Text style={styles.itemPriceOriginal}>₱{price.toFixed(2)}</Text>
+                        <Text style={styles.itemPriceOriginal}>₱{variantPrice.toFixed(2)}</Text>
                         <Text style={styles.itemPriceDiscount}>₱{finalPrice.toFixed(2)}</Text>
                       </View>
                     ) : (
-                      <Text style={styles.itemPrice}>₱{price.toFixed(2)}</Text>
+                      <Text style={styles.itemPrice}>₱{variantPrice.toFixed(2)}</Text>
                     )}
 
                     {/* Quantity Controls */}
@@ -563,15 +575,16 @@ export default function CartScreen({ navigation }) {
                 <Text style={styles.optGroupLabel}>{group.label}</Text>
                 <View style={styles.optChoicesRow}>
                   {group.choices.map((choice, ci) => {
-                    const isSelected = editOptions[group.label] === choice;
+                    const val        = _choiceVal(choice);
+                    const isSelected = editOptions[group.label] === val;
                     return (
                       <TouchableOpacity
                         key={ci}
                         style={[styles.optChip, isSelected && styles.optChipSelected]}
-                        onPress={() => setEditOptions(prev => ({ ...prev, [group.label]: choice }))}
+                        onPress={() => setEditOptions(prev => ({ ...prev, [group.label]: val }))}
                       >
                         <Text style={[styles.optChipText, isSelected && styles.optChipTextSelected]}>
-                          {choice}
+                          {val}
                         </Text>
                       </TouchableOpacity>
                     );
@@ -611,7 +624,7 @@ export default function CartScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container:           { flex: 1, backgroundColor: COLORS.grayBg },
   centered:            { justifyContent: 'center', alignItems: 'center' },
 
@@ -622,18 +635,18 @@ const styles = StyleSheet.create({
   headerSub:           { fontSize: 12, color: COLORS.grayLight, marginTop: 2 },
 
   // Select All
-  selectAllRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.white, paddingHorizontal: SPACING.md, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
+  selectAllRow:        { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.surface, paddingHorizontal: SPACING.md, paddingBottom: 10, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   selectAllText:       { flex: 1, fontSize: 13, fontWeight: '600', color: COLORS.dark },
   selectAllCount:      { fontSize: 12, color: COLORS.textMuted },
 
   // Checkbox
-  checkbox:            { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: COLORS.grayBorder, backgroundColor: COLORS.white, alignItems: 'center', justifyContent: 'center' },
+  checkbox:            { width: 22, height: 22, borderRadius: 6, borderWidth: 2, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface, alignItems: 'center', justifyContent: 'center' },
   checkboxChecked:     { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   checkboxPartial:     { width: 10, height: 10, borderRadius: 2, backgroundColor: COLORS.primary },
 
   // Cart List
   list:                { padding: SPACING.md, gap: SPACING.sm, paddingBottom: 0 },
-  cartItem:            { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.white, borderRadius: RADIUS.md, padding: SPACING.sm, ...SHADOW.sm, borderWidth: 1.5, borderColor: 'transparent' },
+  cartItem:            { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: COLORS.surface, borderRadius: RADIUS.md, padding: SPACING.sm, ...SHADOW.sm, borderWidth: 1.5, borderColor: 'transparent' },
   cartItemSelected:    { borderColor: COLORS.primary },
 
   // Item
@@ -651,11 +664,18 @@ const styles = StyleSheet.create({
   // Qty Controls
   qtyRow:              { flexDirection: 'row', alignItems: 'center', gap: 6 },
   qtyBtn:              { width: 26, height: 26, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg, borderWidth: 1, borderColor: COLORS.grayBorder, alignItems: 'center', justifyContent: 'center' },
+  // qtyInput/qtyBtnDisabled were referenced but never defined — a
+  // pre-existing bug (the input rendered with RN's bare default styling,
+  // black text, no border). Harmless-looking on a white card, but the
+  // default black text is unreadable on a dark card, same issue as
+  // HomeScreen's branchTag bug.
+  qtyInput:            { width: 36, height: 26, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface, color: COLORS.dark, fontSize: 13, fontWeight: '600', textAlign: 'center', paddingVertical: 0 },
+  qtyBtnDisabled:      { opacity: 0.5 },
   qtyVal:              { fontSize: 13, fontWeight: '700', color: COLORS.dark, minWidth: 20, textAlign: 'center' },
   removeBtn:           { marginLeft: 4, padding: 4 },
 
   // Footer
-  footer:              { backgroundColor: COLORS.white, padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.grayBorder, gap: SPACING.sm },
+  footer:              { backgroundColor: COLORS.surface, padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.grayBorder, gap: SPACING.sm },
   footerInfo:          { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   footerCount:         { fontSize: 12, color: COLORS.textMuted },
   totalRow:            { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -669,14 +689,14 @@ const styles = StyleSheet.create({
   optionEditBtn:    { flexDirection:'row', alignItems:'center', gap:4, marginTop:4, backgroundColor:'rgba(22,163,74,0.08)', borderRadius:6, paddingHorizontal:8, paddingVertical:4, alignSelf:'flex-start', borderWidth:1, borderColor:'rgba(22,163,74,0.2)' },
   optionEditText:   { fontSize:11, color: COLORS.primary, fontWeight:'600', flex:1 },
   optModalOverlay:  { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
-  optModalCard:     { backgroundColor: COLORS.white, borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, maxHeight:'80%' },
+  optModalCard:     { backgroundColor: COLORS.surface, borderTopLeftRadius:20, borderTopRightRadius:20, padding:20, maxHeight:'80%' },
   optModalHeader:   { flexDirection:'row', justifyContent:'space-between', alignItems:'center', marginBottom:8 },
   optModalTitle:    { fontSize:16, fontWeight:'700', color: COLORS.dark },
   optModalProduct:  { fontSize:13, color: COLORS.textMuted, marginBottom:16 },
   optGroup:         { marginBottom:16 },
   optGroupLabel:    { fontSize:13, fontWeight:'700', color: COLORS.dark, marginBottom:8 },
   optChoicesRow:    { flexDirection:'row', flexWrap:'wrap', gap:8 },
-  optChip:          { borderRadius:999, paddingHorizontal:14, paddingVertical:7, borderWidth:1.5, borderColor: COLORS.grayBorder, backgroundColor: COLORS.white },
+  optChip:          { borderRadius:999, paddingHorizontal:14, paddingVertical:7, borderWidth:1.5, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface },
   optChipSelected:  { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   optChipText:      { fontSize:13, color: COLORS.dark, fontWeight:'500' },
   optChipTextSelected: { color: COLORS.white, fontWeight:'700' },

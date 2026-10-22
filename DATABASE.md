@@ -26,6 +26,9 @@ user ──< mfa_device
 customer ──< cart >── product
 customer ──< order >──< order_item >── product
 otp_codes (keyed by email — no FK to customer)
+
+price_history (product_id, changed_by — no declared FK, joined by hand)
+login_sessions ──< user / staff / branch (Admin + Staff login audit trail)
 ```
 
 > **Source of truth note:** this document was reconciled against a live `pg_dump`-style export of the actual Supabase schema. A few tables and columns existed in production but weren't previously documented here — those are now included below (`sales_transaction`, `variant_stock`, and several columns on `order`, `product`, `payment`, `customer`, `user`). Anywhere this doc previously described something incorrectly (e.g. `otp_codes` keying, `cart.status` values), it's been corrected to match what the database actually enforces.
@@ -117,8 +120,10 @@ Stores the product catalog with variants, weight, and pricing.
 | `quantity` | INT | NOT NULL, DEFAULT 0 | Legacy total stock field (`branch_stock` is the real source of truth; see below) |
 | `image_url` | VARCHAR | NULLABLE | Main product image URL (Supabase Storage) |
 | `image_urls` | TEXT[] | DEFAULT '{}' | Array of additional product image URLs |
-| `option_groups` | JSONB | DEFAULT '[]' | Variants: `[{"label":"Size","choices":["S","M","L"]}]` — the active, structured variant system |
+| `option_groups` | JSONB | DEFAULT '[]' | Variants: `[{"label":"Size","choices":[...]}]`. A choice can be a plain string (`"S"`) or, once it has an image, a price override, or its own barcode set, an object: `{"value":"Red","image":"<url>","priceOverride":199.00,"barcode":"123456789012"}` — all three extra fields are optional and added in place, no separate column |
 | `variants` | TEXT[] | DEFAULT '{}' | Legacy flat variant list, predates `option_groups`; not used by the current UI |
+| `variant_overrides` | JSONB | DEFAULT '[]' | Per-**combination** overrides (Option B — for a product with 2+ option groups, e.g. Color+Size together): `[{"options":{"Color":"Red","Size":"M"},"price":"199.00","image":"<url>","barcode":"123456789012"}]`. `price`/`image`/`barcode` are each optional per entry. Resale price only — never touches `base_price`/cost |
+| `barcode` | TEXT | UNIQUE, NULLABLE | Auto-generated 12-digit numeric code (internal store code, not a registered GS1 prefix) for the base/no-variant product — printable as Code128/EAN-13 and scannable in POS. Per-choice and per-combo variants get their own codes stored inline on `option_groups`/`variant_overrides` above instead of a separate column |
 | `available_at` | VARCHAR | DEFAULT 'both', CHECK | `triple_e`, `fiel_collins`, or `both` — a legacy manual branch-availability flag. **Not used for actual visibility anymore** — `branch_stock.quantity > 0` is what controls whether a product shows on the mobile app (see `branch_stock` below). Column still exists in the schema but the application no longer reads it for that purpose |
 | `net_weight` | DECIMAL(10,2) | DEFAULT 0 | Product weight/volume for shipping |
 | `net_weight_unit` | VARCHAR(10) | DEFAULT 'kg' | Unit: `kg`, `gram`, `mL`, `L` |
@@ -370,6 +375,43 @@ Stores trusted browsers for web (admin/staff) login — once a browser passes em
 
 ---
 
+### 20. `price_history`
+Logs every change to a product's resale `price` — one row per edit, written automatically whenever `admin_update_product()` saves a different `price` than what was there before. Added 2026-10-22.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `product_id` | UUID | NOT NULL | The product whose price changed — not a declared FK; `product_id`/`product_name` are joined back by hand in the read endpoint instead of a PostgREST embed |
+| `old_price` | DECIMAL(10,2) | NOT NULL | Resale price before the edit |
+| `new_price` | DECIMAL(10,2) | NOT NULL | Resale price after the edit |
+| `changed_by` | UUID | NULLABLE | `staff.staff_id` who made the edit — not a declared FK, same reason as `product_id` |
+| `changed_by_role` | VARCHAR | NULLABLE | `admin` or `staff`, from the session at the time of the edit |
+| `created_at` | TIMESTAMP | NOT NULL, DEFAULT now() | When the price change was logged |
+
+> **Note on this table's SQL below:** reconstructed from how `app.py` writes/reads it (no `product`/`staff` FK, `created_at` ordering) — the original `CREATE TABLE` text from when it was run isn't preserved in this session, so double-check column types against your actual schema if anything here looks off.
+
+---
+
+### 21. `login_sessions`
+Login/logout audit trail for Admin + Staff web accounts (not customers). Added 2026-10-21.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `user_id` | UUID | NOT NULL, **FK** → user.user_id | The account that logged in |
+| `staff_id` | UUID | NULLABLE, **FK** → staff.staff_id | Staff profile, if applicable |
+| `role` | TEXT | NOT NULL | `admin` or `staff` |
+| `branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | Assigned branch — null for admin |
+| `login_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | When this session started |
+| `logout_at` | TIMESTAMPTZ | NULLABLE | When this session ended — null while still open |
+| `last_seen_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | Last activity heartbeat for this session |
+| `ip_address` | TEXT | NULLABLE | Client IP at login |
+| `user_agent` | TEXT | NULLABLE | Browser user-agent at login |
+
+> **Note:** purely additive — no existing table was altered to add this. Surfaced in Admin → User Management as a "Login Activity" view (`GET /api/admin/login-sessions`).
+
+---
+
 ## SQL — All Schema Changes Applied
 
 ```sql
@@ -469,6 +511,51 @@ ALTER TABLE public.purchase_order
     'received'::character varying,
     'cancelled'::character varying
   ]::text[]));
+
+-- login_sessions table (new, 2026-10-21) — login/logout audit trail for
+-- Admin + Staff web accounts. Purely additive; no existing table touched.
+CREATE TABLE public.login_sessions (
+  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  user_id       UUID NOT NULL REFERENCES public."user"(user_id),
+  staff_id      UUID REFERENCES public.staff(staff_id),
+  role          TEXT NOT NULL,                 -- 'admin' | 'staff'
+  branch_id     UUID REFERENCES public.branch(branch_id),  -- null for admin
+  login_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  logout_at     TIMESTAMPTZ,                   -- null while the session is open
+  last_seen_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  ip_address    TEXT,
+  user_agent    TEXT
+);
+CREATE INDEX idx_login_sessions_login_at ON public.login_sessions (login_at DESC);
+-- As of Oct 30, 2026 Supabase stopped auto-granting Data API (PostgREST)
+-- access to new tables on existing projects — without this grant the
+-- Flask app's supabase-py client gets a permission-denied error:
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.login_sessions TO anon, authenticated, service_role;
+
+-- product — barcode generation (2026-10-22)
+ALTER TABLE product ADD COLUMN IF NOT EXISTS barcode TEXT UNIQUE;
+CREATE INDEX IF NOT EXISTS idx_product_barcode ON product (barcode);
+-- Per-choice/per-combo barcodes (v2) need no further schema change — they
+-- live inline on the existing option_groups/variant_overrides JSONB below.
+
+-- product — per-choice/per-combo price + image overrides (Option B),
+-- and price-history logging (2026-10-22). Column type/default reconstructed
+-- from app.py's usage; the original migration text wasn't preserved in
+-- this session, so verify against the actual schema if unsure.
+ALTER TABLE product ADD COLUMN IF NOT EXISTS variant_overrides JSONB DEFAULT '[]';
+
+-- price_history table (new, 2026-10-22) — one row per resale-price edit.
+-- No FK to product/staff: both are joined back by hand in the read
+-- endpoint instead, so an embed hint can't 400 if the FK isn't present.
+CREATE TABLE price_history (
+  id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id       UUID NOT NULL,
+  old_price        DECIMAL(10,2) NOT NULL,
+  new_price        DECIMAL(10,2) NOT NULL,
+  changed_by       UUID,
+  changed_by_role  VARCHAR,
+  created_at       TIMESTAMP NOT NULL DEFAULT now()
+);
 ```
 
 > **Note on completeness:** the tables/columns documented above that aren't reflected in the migration log — `sales_transaction`, `variant_stock`, `product.staff_id`/`available_at`/`variants`, `order.cart_id`/`ref_no`/`address_note`/`cancel_reason`/`cancelled_by`/`is_offline_sync`/`processing_started_at`/`dispatch_date`/`delivery_attempts`, `payment`'s `cash_on_delivery` method, `customer.address_note`, `user.active_session_token`, `staff.position` — were already present in production before this changelog started being kept during the panel-revision work this term. Their original creation SQL isn't tracked here; they're documented above purely from the live schema audit.
@@ -481,7 +568,9 @@ ALTER TABLE public.purchase_order
 |---|---|
 | **Branch visibility** | Products only show on mobile if `branch_stock.quantity > 0` for that branch (`product.available_at` is a legacy column no longer used for this) |
 | **VAT** | 12% VAT Inclusive applied on POS walk-in receipts |
-| **Shipping tiers** | Koronadal (FREE if ≥₱500 or ≤3kg) → South Cotabato (₱50 base) → Region XII (₱120 base) → Outside (₱200 base) + weight surcharge |
+| **Shipping tiers (reworked 2026-10-22)** | 4-zone model modeled on real courier (J&T) pricing — same-region cheapest, same-island mid-tier, inter-island priciest — plus a light-item bracket under 500g so a small item isn't charged the same as something near 5kg: **South Cotabato** — always free, any weight. **Region XII (SOCCSKSARGEN)** — ₱70 flat under 500g, else ₱120 base + ₱30/kg over 5kg. **Rest of Mindanao mainland** (Region IX/X/XI, CARAGA, BARMM) — ₱90 flat under 500g, else ₱150 base + ₱32/kg over 5kg. **Luzon/Visayas** (inter-island) — ₱120 flat under 500g, else ₱200 base + ₱35/kg over 5kg. Computed server-side in `_compute_shipping_fee()` (never trusts the client-sent amount), mirrored in mobile's `CheckoutScreen.js calculateShipping()` |
+| **Price history logging** | Every time an admin/staff edit actually changes a product's resale `price`, `price_history` gets one new row (old price, new price, who, when) — logged only when the value actually changed, not on every save. Read via `GET /api/admin/price-history` (optionally filtered to one product), surfaced in the admin Products table's "Price History" button |
+| **Barcode scope** | `POST /api/admin/products/<id>/generate-barcode` takes a `scope`: `"product"` writes `product.barcode`; `"choice"` writes onto one `option_groups[].choices[]` entry (by group index + choice value); `"combo"` writes onto (or creates) one `variant_overrides[]` entry (matched by its `options` object). Lets a product, one variant choice, and one specific variant combination each carry their own distinct scannable code |
 | **GCash verification** | No manually-typed reference numbers. GCash payments (staff POS and mobile checkout) go through a PayMongo Payment Intent; `payment.ref_no` is only set after PayMongo confirms the intent status is `succeeded`, and `payment.status` is set to `paid` at that point |
 | **Payment methods** | `walk_in_cash`, `cash_on_delivery` (COD, online orders), or `gcash` |
 | **Order status flow** | pending → processing → out_for_delivery → completed (customer marks received) or cancelled |

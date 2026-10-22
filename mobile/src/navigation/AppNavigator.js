@@ -22,7 +22,7 @@ import ProfileScreen       from '../screens/ProfileScreen';
 
 import { View, Text, StyleSheet, Alert } from 'react-native';
 import { BlurView } from '@react-native-community/blur';
-import { COLORS } from '../utils/constants';
+import { ThemeProvider, useTheme } from '../utils/ThemeContext';
 import { SafeAreaProvider, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { CartProvider } from '../utils/CartContext';
 import { useCart } from '../utils/CartContext';
@@ -43,10 +43,13 @@ const Stack = createStackNavigator();
 // bar — so instead of each screen's own colored header showing through,
 // you'd see a flash/sliver of that default white, which read as "the
 // status bar doesn't match the header" on every screen in the app.
-const SCREEN_BG = { backgroundColor: COLORS.primary };
+// Built from the live theme now (not a module-scope constant) so it
+// re-renders with the right green shade whenever dark mode toggles.
 
 // ─── Home Stack ───────────────────────────────────────
 function HomeStack() {
+  const { colors: COLORS } = useTheme();
+  const SCREEN_BG = { backgroundColor: COLORS.primary };
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: SCREEN_BG }}>
       <Stack.Screen name="HomeMain"       component={HomeScreen}/>
@@ -58,6 +61,8 @@ function HomeStack() {
 
 // ─── Cart Stack ───────────────────────────────────────
 function CartStack() {
+  const { colors: COLORS } = useTheme();
+  const SCREEN_BG = { backgroundColor: COLORS.primary };
   return (
     <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: SCREEN_BG }}>
       <Stack.Screen name="CartMain"  component={CartScreen}/>
@@ -66,8 +71,24 @@ function CartStack() {
   );
 }
 
+// ─── Orders Stack ─────────────────────────────────────
+// "Buy Again" (OrdersScreen) navigates to ProductDetail — it needs its own
+// stack (like Home/Cart) so that screen exists to navigate to, and so the
+// back button from it returns to the order list instead of jumping tabs.
+function OrdersStack() {
+  const { colors: COLORS } = useTheme();
+  const SCREEN_BG = { backgroundColor: COLORS.primary };
+  return (
+    <Stack.Navigator screenOptions={{ headerShown: false, cardStyle: SCREEN_BG }}>
+      <Stack.Screen name="OrdersMain"      component={OrdersScreen}/>
+      <Stack.Screen name="ProductDetail"   component={ProductDetailScreen}/>
+    </Stack.Navigator>
+  );
+}
+
 // ─── Badge Component ─────────────────────────────────
 function TabBadge({ count, color }) {
+  const { colors: COLORS } = useTheme();
   if (!count || count <= 0) return null;
   return (
     <View style={{
@@ -86,6 +107,8 @@ function TabBadge({ count, color }) {
 
 // ─── Main Tabs ────────────────────────────────────────
 function MainTabs({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const SCREEN_BG = { backgroundColor: COLORS.primary };
   const insets = useSafeAreaInsets();
   const { cartCount } = useCart();
   const [orderCount, setOrderCount] = React.useState(0);
@@ -145,11 +168,11 @@ function MainTabs({ navigation }) {
         tabBarBackground: () => (
           <BlurView
             style={StyleSheet.absoluteFill}
-            blurType="light"
+            blurType={isDark ? 'dark' : 'light'}
             blurAmount={20}
-            reducedTransparencyFallbackColor={COLORS.white}
+            reducedTransparencyFallbackColor={COLORS.surface}
           >
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(255,255,255,0.70)' }]}/>
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: isDark ? 'rgba(15,23,42,0.75)' : 'rgba(255,255,255,0.70)' }]}/>
           </BlurView>
         ),
         tabBarStyle: {
@@ -199,7 +222,7 @@ function MainTabs({ navigation }) {
     >
       <Tab.Screen name="Home"    component={HomeStack}/>
       <Tab.Screen name="Cart"    component={CartStack}/>
-      <Tab.Screen name="Orders"  component={OrdersScreen}/>
+      <Tab.Screen name="Orders"  component={OrdersStack}/>
       <Tab.Screen name="Profile" component={ProfileScreen}/>
     </Tab.Navigator>
   );
@@ -214,6 +237,7 @@ function MainTabs({ navigation }) {
 // could introduce the exact same mismatch in the other direction.
 export default function AppNavigator() {
   return (
+    <ThemeProvider>
     <SafeAreaProvider>
     <CartProvider>
     <NavigationContainer>
@@ -239,5 +263,6 @@ export default function AppNavigator() {
     </NavigationContainer>
     </CartProvider>
     </SafeAreaProvider>
+    </ThemeProvider>
   );
 }

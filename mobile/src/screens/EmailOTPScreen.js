@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import api from '../services/api';
 
 export default function EmailOTPScreen({ navigation, route }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const { email } = route.params;
   const [otp,      setOtp]      = useState('');
   const [loading,  setLoading]  = useState(false);
@@ -156,8 +159,8 @@ export default function EmailOTPScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex:            { flex: 1, backgroundColor: COLORS.dark },
+const makeStyles = (COLORS) => StyleSheet.create({
+  flex:            { flex: 1, backgroundColor: COLORS.authBg },
   container:       { flexGrow: 1, padding: SPACING.md, paddingTop: SPACING.xxl },
   backBtn:         { marginBottom: SPACING.lg },
   iconWrap:        {
@@ -168,7 +171,7 @@ const styles = StyleSheet.create({
     ...SHADOW.md,
   },
   title:           { fontSize: 24, fontWeight: '700', color: COLORS.white, textAlign: 'center', marginBottom: 8 },
-  subtitle:        { fontSize: 13, color: COLORS.grayLight, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.md },
+  subtitle:        { fontSize: 13, color: COLORS.authMuted, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.md },
   emailText:       { color: COLORS.primary, fontWeight: '600' },
   timerWrap:       {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
@@ -180,7 +183,7 @@ const styles = StyleSheet.create({
   timerExpired:    { backgroundColor: 'rgba(239,68,68,0.1)' },
   timerText:       { fontSize: 13, fontWeight: '600', color: COLORS.primary },
   timerTextExpired:{ color: '#ef4444' },
-  card:            { backgroundColor: COLORS.white, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
+  card:            { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
   label:           { fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 6 },
   otpInput:        {
     borderWidth: 1.5, borderColor: COLORS.grayBorder,
@@ -191,7 +194,7 @@ const styles = StyleSheet.create({
   },
   hint:            { fontSize: 11, color: COLORS.textMuted, marginBottom: SPACING.md },
   btn:             { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: 14, alignItems: 'center', marginBottom: SPACING.md },
-  btnDisabled:     { backgroundColor: COLORS.grayLight },
+  btnDisabled:     { backgroundColor: COLORS.authMuted },
   btnInner:        { flexDirection: 'row', alignItems: 'center', gap: 8 },
   btnText:         { color: COLORS.white, fontWeight: '700', fontSize: 14 },
   resendRow:       { flexDirection: 'row', justifyContent: 'center', alignItems: 'center' },

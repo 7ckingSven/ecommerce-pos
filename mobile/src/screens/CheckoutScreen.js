@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet, ScrollView,
@@ -10,10 +10,12 @@ import Feather from 'react-native-vector-icons/Feather';
 import { placeOrder, getProfile, updateProfile, createGcashIntent, getGcashStatus } from '../services/orderService';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 import { getCustomerId, getCustomer } from '../services/authService';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetworkBanner from '../components/NetworkBanner';
+import { resolveVariantPricing, getDiscountedVariantPrice } from '../utils/variantPricing';
 
 const ALL_PAYMENT_METHODS = [
   { id: 'cash_on_delivery', label: 'Cash on Delivery', icon: 'truck',      sub: 'Pay when your order arrives' },
@@ -36,6 +38,8 @@ function getAvailablePaymentMethods(addr) {
 }
 
 export default function CheckoutScreen({ route, navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const { cartItems, total, branchId } = route.params;
 
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
@@ -114,21 +118,37 @@ export default function CheckoutScreen({ route, navigation }) {
       p.includes('xii') || p.includes('soccsksargen') ||
       p.includes('region 12') || p.includes('region xii')
     );
+    // Rest of Mindanao mainland — Region IX (Zamboanga Peninsula), Region X
+    // (Northern Mindanao), Region XI (Davao Region), CARAGA, BARMM. Only
+    // checked after inSC/inR12 are ruled out below, so the loose 'mindanao'
+    // catch-all can't misfire on a South Cotabato/Region XII address even
+    // though those are geographically part of Mindanao too.
+    const inMindanao = parts.some(p =>
+      p.includes('mindanao') || p.includes('region ix') || p.includes('region 9') ||
+      p.includes('zamboanga') || p.includes('region x') || p.includes('region 10') ||
+      p.includes('davao') || p.includes('caraga') || p.includes('region xiii') ||
+      p.includes('region 13') || p.includes('barmm') || p.includes('bangsamoro') ||
+      p.includes('armm')
+    );
 
-    console.log('Shipping calc:', { inSC, inR12, totalWeight, parts });
+    console.log('Shipping calc:', { inSC, inR12, inMindanao, totalWeight, parts });
 
     // Within South Cotabato (Koronadal included — it's a component city of
     // the province) — always free shipping, regardless of weight/subtotal.
     if (inSC) return 0;
 
-    if (inR12) {
-      const base  = 120;
-      const extra = totalWeight > 5 ? Math.ceil((totalWeight - 5) * 30) : 0;
-      return base + extra;
-    }
-    // Outside Region XII
-    const base  = 200;
-    const extra = totalWeight > 5 ? Math.ceil((totalWeight - 5) * 35) : 0;
+    // Four zones modeled on real courier (J&T) pricing — same-region
+    // cheapest, same-island mid-tier, inter-island priciest — plus a
+    // light-item bracket under 500g so a small item isn't charged the same
+    // flat base fee as something near 5kg.
+    let light, base, overKg, rate;
+    if (inR12)            { light = 70;  base = 120; overKg = 5; rate = 30; }
+    else if (inMindanao)  { light = 90;  base = 150; overKg = 5; rate = 32; }
+    else                  { light = 120; base = 200; overKg = 5; rate = 35; } // Luzon/Visayas
+
+    if (totalWeight <= 0.5) return light;
+
+    const extra = totalWeight > overKg ? Math.ceil((totalWeight - overKg) * rate) : 0;
     return base + extra;
   }
 
@@ -266,9 +286,16 @@ export default function CheckoutScreen({ route, navigation }) {
     setLoading(true);
     try {
       const items = cartItems.map(i => {
-        const disc       = Array.isArray(i.product?.discount) ? i.product.discount[0] : i.product?.discount;
-        const origPrice  = Number(i.product?.price || 0);
-        const finalPrice = disc ? origPrice * (1 - disc.percentage / 100) : origPrice;
+        // Resolve the variant's own price (per-choice/per-combo override)
+        // before applying the discount — this is what was actually shown
+        // to the customer, and the backend trusts this client-computed
+        // price as-is (same as it already did pre-variant for the
+        // discounted price), so getting it right here is what makes the
+        // order_item row (and every Orders view downstream) reflect the
+        // real charged amount instead of silently falling back to base price.
+        const { price: variantPrice } = resolveVariantPricing(i.product, i.selected_options || {});
+        const discounted = getDiscountedVariantPrice(i.product, variantPrice);
+        const finalPrice = discounted !== null ? discounted : variantPrice;
         return {
           product_id:       i.product_id || i.product?.product_id,
           cart_id:          (i.cart_id && i.cart_id !== 'buy_now') ? i.cart_id : null,
@@ -450,15 +477,18 @@ export default function CheckoutScreen({ route, navigation }) {
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Order Summary</Text>
           {cartItems.map((item, idx) => {
-            const disc          = Array.isArray(item.product?.discount) ? item.product.discount[0] : item.product?.discount;
-            const origPrice     = Number(item.product?.price || 0);
-            const finalPrice    = disc ? origPrice * (1 - Number(disc.percentage) / 100) : origPrice;
-            const origSubtotal  = origPrice * item.quantity;
-            const finalSubtotal = finalPrice * item.quantity;
+            // Same variant-aware resolution used in submitOrder — keeps
+            // what's shown here consistent with what actually gets charged.
+            const { price: variantPrice, image: variantImage } = resolveVariantPricing(item.product, item.selected_options || {});
+            const discountedVariantPrice = getDiscountedVariantPrice(item.product, variantPrice);
+            const finalPrice     = discountedVariantPrice !== null ? discountedVariantPrice : variantPrice;
+            const origSubtotal   = variantPrice * item.quantity;
+            const finalSubtotal  = finalPrice * item.quantity;
+            const itemImage      = variantImage || item.product?.image_url;
             return (
               <View key={idx} style={styles.orderItem}>
-                {item.product?.image_url
-                  ? <Image source={{ uri: item.product.image_url }} style={styles.checkoutItemImg}/>
+                {itemImage
+                  ? <Image source={{ uri: itemImage }} style={styles.checkoutItemImg}/>
                   : <View style={styles.checkoutItemImgPlaceholder}/>
                 }
                 <View style={styles.orderItemLeft}>
@@ -473,7 +503,7 @@ export default function CheckoutScreen({ route, navigation }) {
                   <Text style={styles.orderItemQty}>x{item.quantity}</Text>
                 </View>
                 <View style={{ alignItems: 'flex-end' }}>
-                  {disc ? (
+                  {discountedVariantPrice !== null ? (
                     <>
                       <Text style={styles.orderItemOriginal}>₱{origSubtotal.toFixed(2)}</Text>
                       <Text style={[styles.orderItemPrice, { color: '#ef4444' }]}>₱{finalSubtotal.toFixed(2)}</Text>
@@ -742,14 +772,14 @@ export default function CheckoutScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container:          { flex: 1, backgroundColor: COLORS.grayBg },
   header:             { backgroundColor: COLORS.primary, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: SPACING.md, paddingBottom: SPACING.md },
   headerTitle:        { fontSize: 18, fontWeight: '700', color: COLORS.white },
   content:            { padding: SPACING.md, gap: SPACING.md },
 
   // Card
-  card:               { backgroundColor: COLORS.white, borderRadius: RADIUS.md, padding: SPACING.md, ...SHADOW.sm, gap: SPACING.sm },
+  card:               { backgroundColor: COLORS.surface, borderRadius: RADIUS.md, padding: SPACING.md, ...SHADOW.sm, gap: SPACING.sm },
   cardTitleRow:       { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 4 },
   cardTitle:          { fontSize: 15, fontWeight: '700', color: COLORS.dark },
 
@@ -802,7 +832,7 @@ const styles = StyleSheet.create({
 
   // GCash Payment Modal
   gcashModalOverlay:      { flex:1, backgroundColor:'rgba(0,0,0,0.6)', justifyContent:'center', alignItems:'center', padding:SPACING.lg },
-  gcashModalCard:         { width:'100%', maxWidth:400, maxHeight:'85%', backgroundColor:COLORS.white, borderRadius:RADIUS.xl, overflow:'hidden', ...SHADOW.sm },
+  gcashModalCard:         { width:'100%', maxWidth:400, maxHeight:'85%', backgroundColor: COLORS.surface, borderRadius:RADIUS.xl, overflow:'hidden', ...SHADOW.sm },
   gcashModalCardWebview:  { height:'85%' },
   gcashModalHeader:       { padding:SPACING.md, borderBottomWidth:1, borderBottomColor:COLORS.grayBorder },
   gcashModalTitle:        { fontSize:15, fontWeight:'700', color:COLORS.dark, textAlign:'center' },
@@ -814,7 +844,7 @@ const styles = StyleSheet.create({
   gcashModalConfirmBtnText: { color:COLORS.white, fontWeight:'700', fontSize:14 },
 
   // Footer
-  footer:             { backgroundColor: COLORS.white, padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.grayBorder, gap: SPACING.sm },
+  footer:             { backgroundColor: COLORS.surface, padding: SPACING.md, borderTopWidth: 1, borderTopColor: COLORS.grayBorder, gap: SPACING.sm },
   footerTotal:        { flexDirection: 'row', justifyContent: 'space-between' },
   footerTotalLabel:   { fontSize: 13, color: COLORS.textSecondary },
   footerTotalVal:     { fontSize: 18, fontWeight: '700', color: COLORS.dark },
@@ -824,7 +854,7 @@ const styles = StyleSheet.create({
 
   // Address Modal
   modalOverlay:       { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard:          { backgroundColor: COLORS.white, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: SPACING.lg, gap: SPACING.md },
+  modalCard:          { backgroundColor: COLORS.surface, borderTopLeftRadius: RADIUS.xl, borderTopRightRadius: RADIUS.xl, padding: SPACING.lg, gap: SPACING.md },
   modalHeader:        { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   modalTitle:         { fontSize: 17, fontWeight: '700', color: COLORS.dark },
   modalLabel:         { fontSize: 12, fontWeight: '600', color: COLORS.dark },

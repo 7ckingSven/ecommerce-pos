@@ -1,13 +1,16 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import api from '../services/api';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 
 export default function VerifyOTPScreen({ navigation, route }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const { email }         = route.params;
   const [otp,     setOtp] = useState(['', '', '', '', '', '']);
   const [loading, setLoading] = useState(false);
@@ -157,21 +160,21 @@ export default function VerifyOTPScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex:           { flex: 1, backgroundColor: COLORS.dark },
+const makeStyles = (COLORS) => StyleSheet.create({
+  flex:           { flex: 1, backgroundColor: COLORS.authBg },
   container:      { flex: 1, padding: SPACING.md, paddingTop: SPACING.xl },
   backBtn:        { marginBottom: SPACING.lg },
   iconWrap:       { alignItems: 'center', marginBottom: SPACING.xl },
   iconCircle:     { width: 80, height: 80, borderRadius: 40, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md, ...SHADOW.md },
   title:          { fontSize: 24, fontWeight: '700', color: COLORS.white, marginBottom: 4 },
-  sub:            { fontSize: 13, color: COLORS.grayLight },
+  sub:            { fontSize: 13, color: COLORS.authMuted },
   email:          { fontSize: 14, color: COLORS.primary, fontWeight: '600', marginTop: 4 },
   otpRow:         { flexDirection: 'row', justifyContent: 'center', gap: 10, marginBottom: SPACING.md },
-  otpInput:       { width: 46, height: 56, borderRadius: RADIUS.sm, borderWidth: 2, borderColor: COLORS.grayBorder, backgroundColor: COLORS.white, textAlign: 'center', fontSize: 22, fontWeight: '700', color: COLORS.dark },
+  otpInput:       { width: 46, height: 56, borderRadius: RADIUS.sm, borderWidth: 2, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface, textAlign: 'center', fontSize: 22, fontWeight: '700', color: COLORS.dark },
   otpInputFilled: { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
-  timer:          { textAlign: 'center', fontSize: 13, color: COLORS.grayLight, marginBottom: SPACING.lg },
+  timer:          { textAlign: 'center', fontSize: 13, color: COLORS.authMuted, marginBottom: SPACING.lg },
   btn:            { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: 14, alignItems: 'center', marginBottom: SPACING.md },
-  btnDisabled:    { backgroundColor: COLORS.grayLight },
+  btnDisabled:    { backgroundColor: COLORS.authMuted },
   btnInner:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   btnText:        { color: COLORS.white, fontWeight: '700', fontSize: 14, letterSpacing: 1 },
   resendBtn:      { alignItems: 'center', padding: SPACING.sm },

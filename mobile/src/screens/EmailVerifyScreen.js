@@ -1,13 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import api from '../services/api';
 
 export default function EmailVerifyScreen({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const [email,   setEmail]   = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -105,8 +108,8 @@ export default function EmailVerifyScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex:       { flex: 1, backgroundColor: COLORS.dark },
+const makeStyles = (COLORS) => StyleSheet.create({
+  flex:       { flex: 1, backgroundColor: COLORS.authBg },
   container:  { flexGrow: 1, padding: SPACING.md, paddingTop: SPACING.xxl },
   backBtn:    { marginBottom: SPACING.lg },
   iconWrap:   {
@@ -117,8 +120,8 @@ const styles = StyleSheet.create({
     ...SHADOW.md,
   },
   title:      { fontSize: 24, fontWeight: '700', color: COLORS.white, textAlign: 'center', marginBottom: 8 },
-  subtitle:   { fontSize: 13, color: COLORS.grayLight, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.xl },
-  card:       { backgroundColor: COLORS.white, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
+  subtitle:   { fontSize: 13, color: COLORS.authMuted, textAlign: 'center', lineHeight: 20, marginBottom: SPACING.xl },
+  card:       { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
   label:      { fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 6 },
   inputRow:   {
     flexDirection: 'row', alignItems: 'center',
@@ -133,10 +136,10 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary, borderRadius: RADIUS.sm,
     padding: 14, alignItems: 'center',
   },
-  btnDisabled: { backgroundColor: COLORS.grayLight },
+  btnDisabled: { backgroundColor: COLORS.authMuted },
   btnInner:   { flexDirection: 'row', alignItems: 'center', gap: 8 },
   btnText:    { color: COLORS.white, fontWeight: '700', fontSize: 14 },
   loginRow:   { flexDirection: 'row', justifyContent: 'center', marginTop: SPACING.lg },
-  loginText:  { fontSize: 13, color: COLORS.grayLight },
+  loginText:  { fontSize: 13, color: COLORS.authMuted },
   loginLink:  { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
 });

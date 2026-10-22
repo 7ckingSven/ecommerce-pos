@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, Image, TouchableOpacity, TextInput, StyleSheet,
   ScrollView, Alert, ActivityIndicator, FlatList, Dimensions, StatusBar,
@@ -8,10 +8,12 @@ import { useFocusEffect } from '@react-navigation/native';
 import { isLoggedIn } from '../services/authService';
 import { addToCart } from '../services/cartService';
 import api from '../services/api';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import NetworkBanner from '../components/NetworkBanner';
+import { resolveVariantPricing, getDiscountedVariantPrice, _choiceVal } from '../utils/variantPricing';
 
 // Same critical-stock reserve threshold used on the Home screen and
 // backend-side (app.py's CRITICAL_STOCK_LEVEL) — at or below this many
@@ -20,16 +22,9 @@ import NetworkBanner from '../components/NetworkBanner';
 // and still push stock down past the shop's reserve buffer.
 const CRITICAL_STOCK_LEVEL = 5;
 
-// ─── Discount Helper ──────────────────────────────────
-function getDiscountedPrice(product) {
-  const disc = Array.isArray(product.discount) ? product.discount[0] : product.discount;
-  if (!disc || !disc.percentage) return null;
-  const pct = Number(disc.percentage);
-  if (!pct || pct <= 0 || pct > 100) return null;
-  return Number(product.price) * (1 - pct / 100);
-}
-
 export default function ProductDetailScreen({ route, navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const { product, branchId, fromSearch } = route.params;
   // Get branch-specific stock
   const branchStock = branchId
@@ -57,15 +52,34 @@ export default function ProductDetailScreen({ route, navigation }) {
   const pendingActionRef    = useRef(null); // 'addToCart' | 'buyNow' | null
   const handleAddToCartRef  = useRef(null);
   const handleBuyNowRef     = useRef(null);
+  const flatListRef         = useRef(null);
   const { width } = Dimensions.get('window');
   const images = product.image_urls?.length
     ? product.image_urls
     : product.image_url ? [product.image_url] : [];
 
-  const discountedPrice = getDiscountedPrice(product);
-  const hasDiscount     = discountedPrice !== null;
-  const effectivePrice  = hasDiscount ? discountedPrice : product.price;
+  // Variant-aware price/image — resolves per-choice/per-combo overrides
+  // (variant_overrides -> option_groups choice -> base price/photo), then
+  // the product's own discount (if any) is applied on top of that resolved
+  // price, same order of operations as the staff POS's confirmPosVariant.
+  const { price: variantPrice, image: variantImage } = resolveVariantPricing(product, selectedOptions);
+  const discountedVariantPrice = getDiscountedVariantPrice(product, variantPrice);
+  const hasDiscount     = discountedVariantPrice !== null;
+  const effectivePrice  = hasDiscount ? discountedVariantPrice : variantPrice;
   const disc            = product.discount;
+
+  // Jump the photo carousel to the selected variant's own photo (if it has
+  // one and it's part of the product's existing gallery) so the picture
+  // shown matches what was picked, not just whatever the carousel was left on.
+  useEffect(() => {
+    if (variantImage && images.length > 1) {
+      const idx = images.indexOf(variantImage);
+      if (idx >= 0 && idx !== activeIdx) {
+        setActiveIdx(idx);
+        flatListRef.current?.scrollToIndex({ index: idx, animated: true });
+      }
+    }
+  }, [variantImage]);
   // Branch-specific stock (branchQty, computed above) — not product.quantity,
   // which is the aggregate across all branches. Treated as unavailable at
   // or below the critical reserve level, not just literal zero.
@@ -177,8 +191,7 @@ export default function ProductDetailScreen({ route, navigation }) {
       }
     }
     // Buy Now — go directly to Checkout with only this product
-    // Does NOT add to cart — cart stays untouched
-    const effectivePrice = hasDiscount ? discountedPrice : product.price;
+    // Does NOT add to cart — cart stays untouched.
     // Normalize discount — ensure it's a plain object not array
     const normalizedDiscount = Array.isArray(product.discount)
       ? product.discount[0] || null
@@ -198,6 +211,11 @@ export default function ProductDetailScreen({ route, navigation }) {
         discount:     normalizedDiscount,
         net_weight:   product.net_weight || 0,
         net_weight_unit: product.net_weight_unit || 'kg',
+        // Needed so Checkout can re-resolve the same variant price/image —
+        // this screen's own effectivePrice already reflects them, but
+        // Checkout recomputes independently (it has its own cart items too).
+        option_groups:     product.option_groups || [],
+        variant_overrides: product.variant_overrides || [],
       },
     }];
     const buyNowTotal = effectivePrice * quantity;
@@ -285,8 +303,9 @@ export default function ProductDetailScreen({ route, navigation }) {
             <Feather name="shopping-bag" size={60} color={COLORS.primary}/>
           </View>
         ) : (
-          <View style={{ width:'100%', height:280, backgroundColor: COLORS.white }}>
+          <View style={{ width:'100%', height:280, backgroundColor: COLORS.surface }}>
             <FlatList
+              ref={flatListRef}
               data={images}
               keyExtractor={(_, i) => String(i)}
               horizontal
@@ -296,6 +315,7 @@ export default function ProductDetailScreen({ route, navigation }) {
                 const idx = Math.round(e.nativeEvent.contentOffset.x / width);
                 setActiveIdx(idx);
               }}
+              onScrollToIndexFailed={() => {}}
               renderItem={({ item }) => (
                 // "contain" instead of "cover" — shows the whole product
                 // image letterboxed rather than cropping off whichever
@@ -357,17 +377,18 @@ export default function ProductDetailScreen({ route, navigation }) {
             {Number(product.total_sold || 0).toLocaleString()} sold
           </Text>
 
-          {/* Price Block */}
+          {/* Price Block — variantPrice already reflects any per-choice/
+              per-combo override for the currently selected options */}
           {hasDiscount ? (
             <View style={styles.priceBlock}>
-              <Text style={styles.originalPrice}>₱{Number(product.price).toFixed(2)}</Text>
-              <Text style={styles.discountedPrice}>₱{discountedPrice.toFixed(2)}</Text>
+              <Text style={styles.originalPrice}>₱{variantPrice.toFixed(2)}</Text>
+              <Text style={styles.discountedPrice}>₱{discountedVariantPrice.toFixed(2)}</Text>
               <View style={styles.savingsBadge}>
-                <Text style={styles.savingsText}>Save ₱{(product.price - discountedPrice).toFixed(2)}</Text>
+                <Text style={styles.savingsText}>Save ₱{(variantPrice - discountedVariantPrice).toFixed(2)}</Text>
               </View>
             </View>
           ) : (
-            <Text style={styles.price}>₱{Number(product.price).toFixed(2)}</Text>
+            <Text style={styles.price}>₱{variantPrice.toFixed(2)}</Text>
           )}
 
           {/* Stock */}
@@ -446,15 +467,16 @@ export default function ProductDetailScreen({ route, navigation }) {
                   </Text>
                   <View style={styles.optionChoicesRow}>
                     {group.choices.map((choice, ci) => {
-                      const isSelected = selectedOptions[group.label] === choice;
+                      const val        = _choiceVal(choice);
+                      const isSelected = selectedOptions[group.label] === val;
                       return (
                         <TouchableOpacity
                           key={ci}
                           style={[styles.optionChip, isSelected && styles.optionChipSelected]}
-                          onPress={() => setSelectedOptions(prev => ({ ...prev, [group.label]: choice }))}
+                          onPress={() => setSelectedOptions(prev => ({ ...prev, [group.label]: val }))}
                         >
                           <Text style={[styles.optionChipText, isSelected && styles.optionChipTextSelected]}>
-                            {choice}
+                            {val}
                           </Text>
                         </TouchableOpacity>
                       );
@@ -465,14 +487,14 @@ export default function ProductDetailScreen({ route, navigation }) {
             </View>
           )}
 
-          {/* Total — uses effective (discounted) price */}
+          {/* Total — uses effective (variant + discount) price */}
           {inStock && (
             <View style={styles.totalRow}>
               <View>
                 <Text style={styles.totalLabel}>Total</Text>
                 {hasDiscount && quantity > 1 && (
                   <Text style={styles.totalOriginal}>
-                    Original: ₱{(product.price * quantity).toFixed(2)}
+                    Original: ₱{(variantPrice * quantity).toFixed(2)}
                   </Text>
                 )}
               </View>
@@ -541,13 +563,20 @@ export default function ProductDetailScreen({ route, navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container:             { flex:1, backgroundColor: COLORS.grayBg },
   backBtn:               { position:'absolute', left: SPACING.md, zIndex:10, backgroundColor:'rgba(0,0,0,0.4)', borderRadius: RADIUS.full, padding:8 },
 
   // Image
   productImg:            { width:'100%', height:280 },
   productImgPlaceholder: { width:'100%', height:280, backgroundColor: COLORS.primaryBg, alignItems:'center', justifyContent:'center' },
+
+  // Carousel dots — referenced above but never defined (pre-existing bug):
+  // the pagination indicator silently rendered as nothing at all, in both
+  // themes, whenever a product had more than one photo.
+  dotsWrap:              { position:'absolute', bottom:10, left:0, right:0, flexDirection:'row', justifyContent:'center', gap:6 },
+  dot:                   { width:6, height:6, borderRadius:3, backgroundColor:'rgba(255,255,255,0.5)' },
+  dotActive:             { backgroundColor: COLORS.white, width:16 },
 
   content:               { padding: SPACING.md },
 
@@ -587,17 +616,22 @@ const styles = StyleSheet.create({
   qtyWrap:               { marginBottom: SPACING.md },
   qtyLabel:              { fontSize:13, fontWeight:'600', color: COLORS.dark, marginBottom:8 },
   qtyRow:                { flexDirection:'row', alignItems:'center', gap: SPACING.md },
-  qtyBtn:                { width:36, height:36, borderRadius: RADIUS.sm, backgroundColor: COLORS.white, borderWidth:1.5, borderColor: COLORS.grayBorder, alignItems:'center', justifyContent:'center', ...SHADOW.sm },
+  qtyBtn:                { width:36, height:36, borderRadius: RADIUS.sm, backgroundColor: COLORS.surface, borderWidth:1.5, borderColor: COLORS.grayBorder, alignItems:'center', justifyContent:'center', ...SHADOW.sm },
   qtyVal:                { fontSize:18, fontWeight:'700', color: COLORS.dark, minWidth:30, textAlign:'center' },
+  // qtyInput/qtyBtnDisabled were referenced but never defined — same
+  // pre-existing bug as CartScreen.js (the TextInput that replaced qtyVal
+  // never got its own style, so it fell back to RN's default black text).
+  qtyInput:              { width:48, height:36, borderRadius: RADIUS.sm, borderWidth:1.5, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface, color: COLORS.dark, fontSize:18, fontWeight:'700', textAlign:'center', paddingVertical:0 },
+  qtyBtnDisabled:        { opacity: 0.5 },
 
   // Total
-  totalRow:              { flexDirection:'row', justifyContent:'space-between', alignItems:'center', backgroundColor: COLORS.white, padding: SPACING.md, borderRadius: RADIUS.md, ...SHADOW.sm, marginBottom: SPACING.xl },
+  totalRow:              { flexDirection:'row', justifyContent:'space-between', alignItems:'center', backgroundColor: COLORS.surface, padding: SPACING.md, borderRadius: RADIUS.md, ...SHADOW.sm, marginBottom: SPACING.xl },
   totalLabel:            { fontSize:14, fontWeight:'600', color: COLORS.textSecondary },
   totalOriginal:         { fontSize:11, color: COLORS.textMuted, textDecorationLine:'line-through', marginTop:2 },
   totalVal:              { fontSize:20, fontWeight:'700', color: COLORS.dark },
 
   // Footer
-  footer:                { padding: SPACING.md, backgroundColor: COLORS.white, borderTopWidth:1, borderTopColor: COLORS.grayBorder },
+  footer:                { padding: SPACING.md, backgroundColor: COLORS.surface, borderTopWidth:1, borderTopColor: COLORS.grayBorder },
   buttonRow:             { flexDirection:'row', gap: SPACING.md },
   btn:                   { flex:1, flexDirection:'row', alignItems:'center', justifyContent:'center', borderRadius: RADIUS.sm, padding:14, gap:6 },
   btnCart:               { backgroundColor: COLORS.primary },
@@ -617,7 +651,7 @@ const styles = StyleSheet.create({
   optionGroupLabel:       { fontSize: 13, fontWeight: '700', color: COLORS.dark, marginBottom: 8 },
   optionChoicesRow:       { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
   optionChip:             {
-    backgroundColor: COLORS.white,
+    backgroundColor: COLORS.surface,
     borderRadius: RADIUS.full,
     paddingHorizontal: 16,
     paddingVertical: 8,

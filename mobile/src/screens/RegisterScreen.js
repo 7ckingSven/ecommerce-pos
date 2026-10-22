@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView, Platform,
@@ -6,11 +6,14 @@ import {
 import Feather from 'react-native-vector-icons/Feather';
 import { register } from '../services/authService';
 import api from '../services/api';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import PSGCAddressPicker, { psgcToAddressString } from '../components/PSGCAddressPicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function RegisterScreen({ navigation, route }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const verifiedEmail = route?.params?.verifiedEmail || '';
   const [step,        setStep]        = useState(1);
   const [loading,     setLoading]     = useState(false);
@@ -147,7 +150,7 @@ export default function RegisterScreen({ navigation, route }) {
               ]}>
                 {step > i
                   ? <Feather name="check" size={13} color={COLORS.white}/>
-                  : <Feather name={stepIcons[i]} size={13} color={step === i+1 ? COLORS.primaryLight : COLORS.grayLight}/>
+                  : <Feather name={stepIcons[i]} size={13} color={step === i+1 ? COLORS.primaryLight : COLORS.authMuted}/>
                 }
               </View>
               <Text style={[styles.stepLabel, step === i+1 && styles.stepLabelActive]}>{label}</Text>
@@ -328,7 +331,7 @@ export default function RegisterScreen({ navigation, route }) {
 
           {/* Button */}
           <TouchableOpacity
-            style={[styles.btn, (step === 3 && (!agreed || !form.password || form.password !== form.confirmPassword)) && { backgroundColor: COLORS.grayLight }]}
+            style={[styles.btn, (step === 3 && (!agreed || !form.password || form.password !== form.confirmPassword)) && { backgroundColor: COLORS.authMuted }]}
             onPress={step < 3 ? nextStep : handleRegister}
             disabled={loading || checkingDuplicate || (step === 3 && (!agreed || !form.password || form.password !== form.confirmPassword))}
             activeOpacity={0.85}
@@ -357,7 +360,7 @@ export default function RegisterScreen({ navigation, route }) {
       {/* Legal Modal */}
       {legalModal && (
         <View style={{ position:'absolute', inset:0, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:16, zIndex:999 }}>
-          <View style={{ backgroundColor: COLORS.white, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' }}>
+          <View style={{ backgroundColor: COLORS.surface, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' }}>
             <View style={{ flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding:16, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder }}>
               <Text style={{ fontSize:16, fontWeight:'700', color: COLORS.dark }}>
                 {legalModal === 'terms' ? 'Terms & Conditions' : 'Privacy Policy'}
@@ -398,8 +401,8 @@ export default function RegisterScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex:             { flex: 1, backgroundColor: COLORS.dark },
+const makeStyles = (COLORS) => StyleSheet.create({
+  flex:             { flex: 1, backgroundColor: COLORS.authBg },
   container:        { flexGrow: 1, padding: SPACING.md },
   header:           { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom: SPACING.lg },
   backBtn:          { width:36, height:36, alignItems:'center', justifyContent:'center' },
@@ -409,9 +412,9 @@ const styles = StyleSheet.create({
   stepDot:          { width:32, height:32, borderRadius:16, backgroundColor: COLORS.darkMid, borderWidth:1.5, borderColor: COLORS.gray, alignItems:'center', justifyContent:'center' },
   stepDotDone:      { backgroundColor: COLORS.primary, borderColor: COLORS.primary },
   stepDotCurrent:   { borderColor: COLORS.primaryLight },
-  stepLabel:        { fontSize:10, color: COLORS.grayLight },
+  stepLabel:        { fontSize:10, color: COLORS.authMuted },
   stepLabelActive:  { color: COLORS.primaryLight, fontWeight:'600' },
-  card:             { backgroundColor: COLORS.white, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
+  card:             { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
   stepTitle:        { fontSize:18, fontWeight:'700', color: COLORS.dark, marginBottom: SPACING.md },
   fieldWrap:        { marginBottom: SPACING.md },
   label:            { fontSize:12, fontWeight:'600', color: COLORS.dark, marginBottom:6 },

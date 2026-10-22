@@ -18,48 +18,15 @@
  *   });
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Modal,
   StyleSheet, Animated, Dimensions,
 } from 'react-native';
-import { COLORS, RADIUS, SPACING } from '../utils/constants';
+import { RADIUS, SPACING } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 
 const { width } = Dimensions.get('window');
-
-// ─── Alert Type Config ────────────────────────────────────────────────────────
-const TYPE_CONFIG = {
-  success: {
-    icon:      '✅',
-    color:     COLORS.primary,
-    bgColor:   '#f0fdf4',
-    iconColor: COLORS.primary,
-  },
-  error: {
-    icon:      '❌',
-    color:     COLORS.error,
-    bgColor:   '#fef2f2',
-    iconColor: COLORS.error,
-  },
-  warning: {
-    icon:      '⚠️',
-    color:     COLORS.warning,
-    bgColor:   '#fffbeb',
-    iconColor: COLORS.warning,
-  },
-  confirm: {
-    icon:      '❓',
-    color:     '#3b82f6',
-    bgColor:   '#eff6ff',
-    iconColor: '#3b82f6',
-  },
-  info: {
-    icon:      'ℹ️',
-    color:     '#6b7280',
-    bgColor:   '#f9fafb',
-    iconColor: '#6b7280',
-  },
-};
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
 export function useCustomAlert() {
@@ -78,6 +45,45 @@ export function useCustomAlert() {
 
 // ─── Component ────────────────────────────────────────────────────────────────
 export default function CustomAlert({ config, onHide }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
+
+  // Alert Type Config — built here (not module-scope) since the tinted
+  // backgrounds need a dark-mode variant; icon/accent colors reuse the
+  // reactive status tokens from constants.js so they still flip correctly.
+  const TYPE_CONFIG = useMemo(() => ({
+    success: {
+      icon:      '✅',
+      color:     COLORS.primary,
+      bgColor:   isDark ? 'rgba(34,197,94,0.15)'  : '#f0fdf4',
+      iconColor: COLORS.primary,
+    },
+    error: {
+      icon:      '❌',
+      color:     COLORS.error,
+      bgColor:   isDark ? 'rgba(248,113,113,0.15)' : '#fef2f2',
+      iconColor: COLORS.error,
+    },
+    warning: {
+      icon:      '⚠️',
+      color:     COLORS.warning,
+      bgColor:   isDark ? 'rgba(251,191,36,0.15)'  : '#fffbeb',
+      iconColor: COLORS.warning,
+    },
+    confirm: {
+      icon:      '❓',
+      color:     '#3b82f6',
+      bgColor:   isDark ? 'rgba(59,130,246,0.15)'  : '#eff6ff',
+      iconColor: '#3b82f6',
+    },
+    info: {
+      icon:      'ℹ️',
+      color:     COLORS.gray,
+      bgColor:   isDark ? 'rgba(148,163,184,0.15)' : '#f9fafb',
+      iconColor: COLORS.gray,
+    },
+  }), [COLORS, isDark]);
+
   const scaleAnim  = useRef(new Animated.Value(0.8)).current;
   const opacityAnim = useRef(new Animated.Value(0)).current;
 
@@ -170,7 +176,7 @@ export default function CustomAlert({ config, onHide }) {
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   overlay: {
     flex:            1,
     backgroundColor: 'rgba(0,0,0,0.5)',
@@ -179,7 +185,7 @@ const styles = StyleSheet.create({
     padding:         SPACING.lg,
   },
   modal: {
-    backgroundColor: '#fff',
+    backgroundColor: COLORS.surface,
     borderRadius:    RADIUS.lg,
     padding:         SPACING.lg,
     width:           Math.min(width - 48, 340),

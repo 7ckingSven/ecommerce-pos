@@ -1,11 +1,14 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import {
   View, Image, Text, StyleSheet, Animated,
 } from 'react-native';
-import { COLORS, APP_NAME, APP_SUBTITLE } from '../utils/constants';
+import { APP_NAME, APP_SUBTITLE } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import { version as APP_VERSION } from '../../package.json';
 
 export default function SplashScreen({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const fadeAnim  = new Animated.Value(0);
   const scaleAnim = new Animated.Value(0.8);
 
@@ -57,10 +60,10 @@ export default function SplashScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container: {
     flex:            1,
-    backgroundColor: COLORS.dark,
+    backgroundColor: COLORS.authBg,
     alignItems:      'center',
     justifyContent:  'center',
   },
@@ -87,7 +90,7 @@ const styles = StyleSheet.create({
   },
   appSub: {
     fontSize:  13,
-    color:     COLORS.grayLight,
+    color:     COLORS.authMuted,
     textAlign: 'center',
   },
   footer: {
@@ -96,12 +99,12 @@ const styles = StyleSheet.create({
   },
   footerText: {
     fontSize: 11,
-    color:    COLORS.grayLight,
+    color:    COLORS.authMuted,
     opacity:  0.6,
   },
   versionText: {
     fontSize:  10,
-    color:     COLORS.grayLight,
+    color:     COLORS.authMuted,
     opacity:   0.5,
     marginTop: 4,
     textAlign: 'center',

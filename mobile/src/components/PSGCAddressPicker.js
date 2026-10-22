@@ -1,15 +1,20 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import {
   View, Text, TouchableOpacity, Modal, FlatList,
   TextInput, StyleSheet, ActivityIndicator,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
-import { COLORS, SPACING, RADIUS } from '../utils/constants';
+import { SPACING, RADIUS } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 
 const PSGC_BASE = 'https://psgc.gitlab.io/api';
 
 // ─── Dropdown Picker ──────────────────────────────────
+// Module-scope sibling of PSGCAddressPicker below, so it needs its own
+// useTheme()/makeStyles() call rather than closing over the parent's.
 function Dropdown({ label, value, placeholder, options, onSelect, loading, disabled }) {
+  const { colors: COLORS } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const [visible, setVisible] = useState(false);
   const [search,  setSearch]  = useState('');
 
@@ -89,6 +94,9 @@ function Dropdown({ label, value, placeholder, options, onSelect, loading, disab
 
 // ─── Main PSGC Address Picker ────────────────────────
 export default function PSGCAddressPicker({ value = {}, onChange }) {
+  const { colors: COLORS } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
+
   const [regions,   setRegions]   = useState([]);
   const [provinces, setProvinces] = useState([]);
   const [cities,    setCities]    = useState([]);
@@ -350,15 +358,15 @@ export function addressStringToParts(addr) {
   };
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   fieldWrap:           { marginBottom: SPACING.sm },
   label:               { fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 6 },
-  dropdownBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.white, paddingHorizontal: 12, paddingVertical: 12, minHeight: 44 },
+  dropdownBtn:         { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.surface, paddingHorizontal: 12, paddingVertical: 12, minHeight: 44 },
   dropdownDisabled:    { backgroundColor: COLORS.grayBg, opacity: 0.6 },
   dropdownText:        { fontSize: 14, color: COLORS.dark, flex: 1 },
   dropdownPlaceholder: { color: COLORS.textMuted },
   modalOverlay:        { flex: 1, backgroundColor: 'rgba(0,0,0,0.5)', justifyContent: 'flex-end' },
-  modalCard:           { backgroundColor: COLORS.white, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%', paddingBottom: 20 },
+  modalCard:           { backgroundColor: COLORS.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, maxHeight: '80%', paddingBottom: 20 },
   modalHeader:         { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: SPACING.md, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   modalTitle:          { fontSize: 16, fontWeight: '700', color: COLORS.dark },
   searchWrap:          { flexDirection: 'row', alignItems: 'center', margin: SPACING.sm, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: COLORS.grayBg, borderRadius: RADIUS.sm, borderWidth: 1, borderColor: COLORS.grayBorder },
@@ -368,6 +376,6 @@ const styles = StyleSheet.create({
   optionText:          { fontSize: 14, color: COLORS.dark, flex: 1 },
   optionTextSelected:  { color: COLORS.primary, fontWeight: '600' },
   emptyText:           { textAlign: 'center', color: COLORS.textMuted, padding: SPACING.lg },
-  inputRow:            { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.white, paddingHorizontal: 12, paddingVertical: 10 },
+  inputRow:            { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.surface, paddingHorizontal: 12, paddingVertical: 10 },
   textInput:           { flex: 1, fontSize: 14, color: COLORS.dark },
 });

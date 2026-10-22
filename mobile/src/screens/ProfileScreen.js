@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { useFocusEffect } from '@react-navigation/native';
 import {
   View, Text, TouchableOpacity, StyleSheet,
@@ -10,13 +10,16 @@ import Feather from 'react-native-vector-icons/Feather';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { getCustomer, logout, isLoggedIn } from '../services/authService';
 import api from '../services/api';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import PSGCAddressPicker, { psgcToAddressString, addressStringToParts } from '../components/PSGCAddressPicker';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
 
 function InfoRow({ icon, label, value }) {
+  const { colors: COLORS } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   return (
     <View style={styles.infoRow}>
       <View style={styles.infoIcon}>
@@ -46,6 +49,8 @@ function formatGender(gender) {
 }
 
 export default function ProfileScreen({ navigation }) {
+  const { colors: COLORS, isDark, themeMode, setThemeMode } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const insets = useSafeAreaInsets();
   const [customer,     setCustomer]     = useState(null);
   const [loading,      setLoading]      = useState(true);
@@ -488,10 +493,37 @@ export default function ProfileScreen({ navigation }) {
           </TouchableOpacity>
         </View>
 
-
+        {/* Appearance — F6 dark mode toggle. 'System' (default) follows the
+            phone's own light/dark setting; 'Light'/'Dark' pin the app to
+            one regardless of the device setting. Persisted in ThemeContext
+            via AsyncStorage, so the choice survives an app restart. */}
+        <View style={styles.card}>
+          <View style={styles.cardHeader}>
+            <Text style={styles.cardTitle}>Appearance</Text>
+            <Feather name={isDark ? 'moon' : 'sun'} size={16} color={COLORS.primary}/>
+          </View>
+          <View style={styles.genderRow}>
+            {[
+              { key: 'system', label: 'System', icon: 'smartphone' },
+              { key: 'light',  label: 'Light',  icon: 'sun' },
+              { key: 'dark',   label: 'Dark',   icon: 'moon' },
+            ].map(opt => (
+              <TouchableOpacity
+                key={opt.key}
+                style={[styles.genderBtn, themeMode === opt.key && styles.genderBtnActive]}
+                onPress={() => setThemeMode(opt.key)}
+              >
+                <Feather name={opt.icon} size={13} color={themeMode === opt.key ? COLORS.primary : COLORS.textSecondary} style={{ marginBottom: 2 }}/>
+                <Text style={[styles.genderBtnText, themeMode === opt.key && styles.genderBtnTextActive]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+        </View>
 
         {/* Legal */}
-        <View style={{ backgroundColor: COLORS.white, borderRadius: 12, marginBottom: 16, overflow:'hidden' }}>
+        <View style={{ backgroundColor: COLORS.surface, borderRadius: 12, marginBottom: 16, overflow:'hidden' }}>
           <Text style={{ fontSize:11, fontWeight:'700', color: COLORS.textMuted, textTransform:'uppercase', letterSpacing:1, padding:12, paddingBottom:4 }}>Legal</Text>
           {[
             { label:'Privacy Policy',      icon:'shield',    type:'privacy' },
@@ -748,7 +780,7 @@ export default function ProfileScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container:          { flex:1, backgroundColor: COLORS.grayBg },
   // Header — COLORS.primary so it matches the bottom nav's active-tab
   // green (and HomeScreen's header) instead of drifting to its own shade.
@@ -764,7 +796,7 @@ const styles = StyleSheet.create({
   email:              { fontSize:13, color: COLORS.textMuted, marginTop:4 },
 
   // Card
-  card:               { backgroundColor: COLORS.white, borderRadius: RADIUS.md, padding: SPACING.md, ...SHADOW.sm, gap: SPACING.sm },
+  card:               { backgroundColor: COLORS.surface, borderRadius: RADIUS.md, padding: SPACING.md, ...SHADOW.sm, gap: SPACING.sm },
   cardHeader:         { flexDirection:'row', alignItems:'center', justifyContent:'space-between', marginBottom: SPACING.sm },
   cardTitle:          { fontSize:14, fontWeight:'700', color: COLORS.dark },
   editBtn:            { flexDirection:'row', alignItems:'center', gap:4, backgroundColor: COLORS.primaryBg, paddingHorizontal:10, paddingVertical:5, borderRadius: RADIUS.full, borderWidth:1, borderColor: COLORS.primaryBorder },
@@ -799,11 +831,11 @@ const styles = StyleSheet.create({
   // Legal Modal (Privacy Policy / Terms & Conditions) — centered on the
   // real screen since this is a top-level Modal, not scroll content.
   legalOverlay:       { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding:16 },
-  legalSheet:         { backgroundColor: COLORS.white, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' },
+  legalSheet:         { backgroundColor: COLORS.surface, borderRadius:16, width:'100%', maxHeight:'80%', overflow:'hidden' },
 
   // Modal
   modalOverlay:       { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
-  modalSheet:         { backgroundColor: COLORS.white, borderTopLeftRadius:20, borderTopRightRadius:20, maxHeight:'90%', paddingBottom: SPACING.xl },
+  modalSheet:         { backgroundColor: COLORS.surface, borderTopLeftRadius:20, borderTopRightRadius:20, maxHeight:'90%', paddingBottom: SPACING.xl },
   modalHeader:        { flexDirection:'row', alignItems:'center', justifyContent:'space-between', padding: SPACING.md, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
   modalTitle:         { fontSize:16, fontWeight:'700', color: COLORS.dark },
   modalBody:          { padding: SPACING.md, gap: SPACING.sm },

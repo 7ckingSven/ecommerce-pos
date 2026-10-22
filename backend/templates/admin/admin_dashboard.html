@@ -9,6 +9,7 @@
   <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
 </head>
 <body>
 
@@ -126,7 +127,7 @@
     <!-- ─── OVERVIEW SECTION ───────────────────────── -->
     <section class="section active" id="section-overview">
       <div class="stat-grid">
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToProducts()" title="View all products" role="button" tabindex="0">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/><line x1="3" y1="6" x2="21" y2="6"/></svg>
           </div>
@@ -136,7 +137,7 @@
             <span class="stat-sub">Active products</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToOrders('')" title="View all orders" role="button" tabindex="0">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/></svg>
           </div>
@@ -146,7 +147,7 @@
             <span class="stat-sub">All time</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToSales()" title="View Sales Reports" role="button" tabindex="0">
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="1" x2="12" y2="23"/><path d="M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
           </div>
@@ -156,7 +157,7 @@
             <span class="stat-sub">Revenue</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToBranchInventory('Triple E')" title="View Triple E's inventory" role="button" tabindex="0">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </div>
@@ -166,7 +167,7 @@
             <span class="stat-sub">Branch Revenue</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToBranchInventory('Fiel Collince')" title="View Fiel Collince's inventory" role="button" tabindex="0">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </div>
@@ -176,7 +177,7 @@
             <span class="stat-sub">Branch Revenue</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToInventory('low_stock')" title="View low-stock items" role="button" tabindex="0">
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
           </div>
@@ -186,7 +187,7 @@
             <span class="stat-sub">6–10 units remaining</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToInventory('critical_stock')" title="View critical-level items" role="button" tabindex="0">
           <div class="stat-icon stat-icon--red">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           </div>
@@ -196,7 +197,7 @@
             <span class="stat-sub">≤5 units — urgent restock</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToOrders('pending')" title="View pending orders" role="button" tabindex="0">
           <div class="stat-icon" style="background:rgba(239,68,68,0.1);">
             <svg viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           </div>
@@ -206,7 +207,7 @@
             <span class="stat-sub">Need attention</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToSales()" title="View Sales Reports" role="button" tabindex="0">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
           </div>
@@ -216,7 +217,7 @@
             <span class="stat-sub">Sales today</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToInventory('out_of_stock')" title="View out-of-stock items" role="button" tabindex="0">
           <div class="stat-icon stat-icon--red">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="4.93" y1="4.93" x2="19.07" y2="19.07"/></svg>
           </div>
@@ -226,7 +227,7 @@
             <span class="stat-sub">Products at 0 units</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToDiscounts()" title="View Discounts" role="button" tabindex="0">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
           </div>
@@ -236,7 +237,7 @@
             <span class="stat-sub">Running now</span>
           </div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="dashGoToPurchaseOrders()" title="View Purchase Orders / Stock Requests" role="button" tabindex="0">
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
           </div>
@@ -347,6 +348,14 @@
           <select class="filter-select" onchange="filterByBranch(this.value)" id="productBranchFilter">
             <option value="">All Branches</option>
           </select>
+          <button class="btn btn-cancel" onclick="openPriceHistoryModal()" title="View price changes across all products">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            Price History
+          </button>
+          <button class="btn btn-cancel" onclick="bulkGenerateBarcodes()" title="Assign a barcode to every product that doesn't have one yet">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
+            Generate Barcodes
+          </button>
           <button class="btn btn-solid-green" onclick="openProductModal()">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
             Add Product
@@ -1233,6 +1242,16 @@
           <span class="field-hint">Enter the product's net weight or volume. Used to calculate shipping fee. Products missing this are flagged in the products table.</span>
         </div>
 
+        <!-- Barcode — shown only in Edit mode (auto-generated at creation) -->
+        <div class="form-group" id="pBarcodeBlock" style="display:none;">
+          <label class="form-label">Barcode <span style="font-weight:400;color:var(--text-muted);">(auto-generated — type to override)</span></label>
+          <div style="display:flex;gap:8px;">
+            <input type="text" id="pBarcode" class="form-input" placeholder="Auto-generated on save" style="flex:1;font-family:'JetBrains Mono',monospace;" oninput="_prodCheckField('pBarcode')"/>
+            <button type="button" class="btn btn-cancel" onclick="regenerateProductBarcode()" style="font-size:12px;padding:0 12px;white-space:nowrap;">Generate New</button>
+          </div>
+          <span class="field-hint">Leave as-is to keep the current code. Type a value to set a specific one, or click "Generate New" for a fresh random code (saved immediately). Printable labels are under the product's Barcode action in the table.</span>
+        </div>
+
         <!-- Option Groups -->
         <div class="form-group">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1241,7 +1260,13 @@
           </div>
           <div id="optionGroupsWrap" style="display:flex;flex-direction:column;gap:12px;"></div>
           <input type="hidden" id="pOptionGroups" value="[]"/>
-          <span class="field-hint">Add groups like Size, Color, Material. Each group has its own choices.</span>
+          <span class="field-hint">Add groups like Size, Color, Material. Each group has its own choices. Each choice can optionally override the price and/or photo used when a customer picks it.</span>
+        </div>
+
+        <div class="form-group">
+          <!-- Populated by renderVariantOverridesGrid() in admin.js — only shown once a product has 2+ option groups -->
+          <div id="variantOverridesWrap" style="display:none;"></div>
+          <input type="hidden" id="pVariantOverrides" value="[]"/>
         </div>
 
         <div class="modal-footer">

@@ -1,14 +1,17 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, ActivityIndicator, KeyboardAvoidingView, Platform,
 } from 'react-native';
 import Feather from 'react-native-vector-icons/Feather';
 import api from '../services/api';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 
 export default function ForgotPasswordScreen({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const [email,   setEmail]   = useState('');
   const [loading, setLoading] = useState(false);
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
@@ -115,15 +118,15 @@ export default function ForgotPasswordScreen({ navigation }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex:           { flex: 1, backgroundColor: COLORS.dark },
+const makeStyles = (COLORS) => StyleSheet.create({
+  flex:           { flex: 1, backgroundColor: COLORS.authBg },
   container:      { flexGrow: 1, padding: SPACING.md, paddingTop: SPACING.xl },
   backBtn:        { marginBottom: SPACING.lg },
   iconWrap:       { alignItems: 'center', marginBottom: SPACING.xl },
   iconCircle:     { width: 80, height: 80, borderRadius: 40, backgroundColor: COLORS.primaryBg, alignItems: 'center', justifyContent: 'center', marginBottom: SPACING.md, ...SHADOW.md },
   title:          { fontSize: 24, fontWeight: '700', color: COLORS.white, marginBottom: SPACING.sm },
-  sub:            { fontSize: 13, color: COLORS.grayLight, textAlign: 'center', lineHeight: 20, paddingHorizontal: SPACING.lg },
-  card:           { backgroundColor: COLORS.white, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
+  sub:            { fontSize: 13, color: COLORS.authMuted, textAlign: 'center', lineHeight: 20, paddingHorizontal: SPACING.lg },
+  card:           { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
   fieldWrap:      { marginBottom: SPACING.md },
   label:          { fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 6 },
   inputRow:       { flexDirection: 'row', alignItems: 'center', borderWidth: 1.5, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg },
@@ -131,7 +134,7 @@ const styles = StyleSheet.create({
   input:          { fontSize: 14, color: COLORS.dark, padding: 12 },
   inputFlex:      { flex: 1, paddingLeft: 0 },
   btn:            { backgroundColor: COLORS.primary, borderRadius: RADIUS.sm, padding: 14, alignItems: 'center', marginBottom: SPACING.md },
-  btnDisabled:    { backgroundColor: COLORS.grayLight },
+  btnDisabled:    { backgroundColor: COLORS.authMuted },
   btnInner:       { flexDirection: 'row', alignItems: 'center', gap: 8 },
   btnText:        { color: COLORS.white, fontWeight: '700', fontSize: 14, letterSpacing: 1 },
   backToLogin:    { alignItems: 'center' },

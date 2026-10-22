@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
   View, Text, TextInput, TouchableOpacity, StyleSheet,
   ScrollView, Alert, ActivityIndicator, KeyboardAvoidingView,
@@ -8,8 +8,9 @@ import Feather from 'react-native-vector-icons/Feather';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { login, isLoggedIn, getCustomer } from '../services/authService';
 import { API_BASE_URL } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import { getMessaging, getToken } from '@react-native-firebase/messaging';
-import { COLORS, SPACING, RADIUS, SHADOW, APP_NAME, APP_SUBTITLE } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW, APP_NAME, APP_SUBTITLE } from '../utils/constants';
 
 // Once a device has completed a successful login, we flag it so this screen
 // greets them with "Welcome Back" on future visits. First-time users (or
@@ -17,6 +18,8 @@ import { COLORS, SPACING, RADIUS, SHADOW, APP_NAME, APP_SUBTITLE } from '../util
 const HAS_LOGGED_IN_KEY = 'has_logged_in_before';
 
 export default function LoginScreen({ navigation, route }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const [loginInput, setLoginInput] = useState('');
   const [password,   setPassword]   = useState('');
   const [showPass,   setShowPass]   = useState(false);
@@ -241,14 +244,14 @@ export default function LoginScreen({ navigation, route }) {
   );
 }
 
-const styles = StyleSheet.create({
-  flex:         { flex: 1, backgroundColor: COLORS.dark },
+const makeStyles = (COLORS) => StyleSheet.create({
+  flex:         { flex: 1, backgroundColor: COLORS.authBg },
   container:    { flexGrow: 1, padding: SPACING.md, paddingTop: SPACING.xxl },
   logoWrap:     { alignItems: 'center', marginBottom: SPACING.lg },
   logoImg:      { width: 80, height: 80, borderRadius: RADIUS.lg, marginBottom: SPACING.sm, ...SHADOW.md },
   appName:      { fontSize: 18, fontWeight: '700', color: COLORS.white, textAlign: 'center' },
-  appSub:       { fontSize: 12, color: COLORS.grayLight, textAlign: 'center', marginTop: 2 },
-  card:         { backgroundColor: COLORS.white, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
+  appSub:       { fontSize: 12, color: COLORS.authMuted, textAlign: 'center', marginTop: 2 },
+  card:         { backgroundColor: COLORS.surface, borderRadius: RADIUS.xl, padding: SPACING.lg, ...SHADOW.lg },
   cardTitle:    { fontSize: 22, fontWeight: '700', color: COLORS.dark, marginBottom: 4 },
   cardSub:      { fontSize: 13, color: COLORS.textSecondary, marginBottom: SPACING.lg },
   fieldWrap:    { marginBottom: SPACING.md },
@@ -266,7 +269,7 @@ const styles = StyleSheet.create({
     backgroundColor: COLORS.primary, borderRadius: RADIUS.sm,
     padding: 14, alignItems: 'center', marginBottom: SPACING.md,
   },
-  btnDisabled:  { backgroundColor: COLORS.grayLight },
+  btnDisabled:  { backgroundColor: COLORS.authMuted },
   btnInner:     { flexDirection: 'row', alignItems: 'center', gap: 8 },
   btnText:      { color: COLORS.white, fontWeight: '700', fontSize: 14, letterSpacing: 1 },
   forgotBtn:    { alignSelf: 'flex-end', marginBottom: SPACING.md, marginTop: -SPACING.sm },
@@ -274,5 +277,5 @@ const styles = StyleSheet.create({
   registerRow:  { flexDirection: 'row', justifyContent: 'center' },
   registerText: { fontSize: 13, color: COLORS.textSecondary },
   registerLink: { fontSize: 13, color: COLORS.primary, fontWeight: '600' },
-  footer:       { textAlign: 'center', fontSize: 11, color: COLORS.grayLight, marginTop: SPACING.lg },
+  footer:       { textAlign: 'center', fontSize: 11, color: COLORS.authMuted, marginTop: SPACING.lg },
 });

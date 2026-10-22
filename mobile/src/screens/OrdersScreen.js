@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import {
   View, Text, TouchableOpacity, StyleSheet,
   FlatList, ActivityIndicator, Modal, ScrollView, Image, Alert, StatusBar,
@@ -12,10 +12,12 @@ import api from '../services/api';
 import { getCustomerId } from '../services/authService';
 import { isLoggedIn } from '../services/authService';
 import { supabase } from '../services/supabase';
-import { COLORS, SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { SPACING, RADIUS, SHADOW } from '../utils/constants';
+import { useTheme } from '../utils/ThemeContext';
 import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
+import { resolveVariantPricing } from '../utils/variantPricing';
 
 // ─── Delivery Estimate Helper ────────────────────────
 function getDeliveryEstimate(order) {
@@ -41,7 +43,7 @@ function getDeliveryEstimate(order) {
   };
 }
 
-function statusColor(s) {
+function statusColor(s, COLORS) {
   const map = { pending:'#eab308', processing:'#3b82f6', out_for_delivery:'#8b5cf6', completed: COLORS.primary, cancelled:'#ef4444' };
   return map[s] || COLORS.textMuted;
 }
@@ -104,6 +106,8 @@ function sortOrdersHierarchy(list) {
 }
 
 export default function OrdersScreen({ navigation }) {
+  const { colors: COLORS, isDark } = useTheme();
+  const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
   const insets = useSafeAreaInsets();
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
 
@@ -119,6 +123,30 @@ export default function OrdersScreen({ navigation }) {
   const [cancelReasonOther, setCancelReasonOther] = useState('');
   const [cancelling,       setCancelling]       = useState(false);
   const [, forceTick]     = useState(0); // re-render periodically to tick down the cancel window
+  const [buyingAgainId, setBuyingAgainId] = useState(null); // order_item_id currently being re-fetched for Buy Again
+  const [buyAgainPickerOrder, setBuyAgainPickerOrder] = useState(null); // order whose items are shown in the Buy Again picker (multi-item orders only)
+
+  // "Buy Again" (completed orders only) — the order_item's own nested
+  // product is a slim snapshot (just name/images/price/option_groups, taken
+  // from the orders API's select — see api_get_orders in app.py) good enough
+  // to redisplay the order, but missing fields ProductDetailScreen needs
+  // (branch_stock, discount, description, current price). So this re-fetches
+  // the CURRENT product by id instead of forwarding that stale snapshot —
+  // which also means Buy Again correctly shows today's price/stock, not
+  // what was paid last time.
+  async function handleBuyAgain(orderItem, branchId) {
+    if (!orderItem?.product_id) return;
+    setBuyingAgainId(orderItem.order_item_id || orderItem.product_id);
+    try {
+      const res = await api.get(`/products/${orderItem.product_id}`);
+      setSelectedOrder(null);
+      navigation.navigate('ProductDetail', { product: res.data, branchId: branchId || null });
+    } catch (e) {
+      showAlert({ type: 'error', title: 'Unavailable', message: 'This product could not be loaded — it may have been removed.' });
+    } finally {
+      setBuyingAgainId(null);
+    }
+  }
 
   // Load once whenever the Orders screen gains focus, then open a Realtime
   // subscription scoped to this customer's own orders — a status change made
@@ -316,32 +344,37 @@ export default function OrdersScreen({ navigation }) {
       </View>
       <NetworkBanner />
 
-      {/* Tab Bar - always stays at top of content (header above now handles the status-bar/notch area) */}
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={{ paddingHorizontal:16, gap:8, alignItems:'center', paddingVertical:6 }}
-        style={{ maxHeight: 46, minHeight: 46 }}
-      >
-        {TABS.map(tab => {
-          const count = tab.key==='all' ? orders.length : orders.filter(o=>o.status===tab.key).length;
-          return (
-            <TouchableOpacity
-              key={tab.key}
-              onPress={() => setActiveTab(tab.key)}
-              style={{ paddingHorizontal:14, paddingVertical:6, borderRadius:999, height:34,
-                justifyContent:'center', borderWidth:1.5,
-                backgroundColor: activeTab===tab.key ? COLORS.primary : COLORS.white,
-                borderColor: activeTab===tab.key ? COLORS.primary : COLORS.grayBorder }}
-            >
-              <Text numberOfLines={1} style={{ fontSize:12, fontWeight:'600',
-                color: activeTab===tab.key ? '#fff' : COLORS.textSecondary }}>
-                {tab.label}{count>0 ? ` (${count})` : ''}
-              </Text>
-            </TouchableOpacity>
-          );
-        })}
-      </ScrollView>
+      {/* Tab Bar — flat segmented style: plain text, thin vertical dividers
+          between items, active tab in bold primary color with an underline.
+          No per-item box/border, just a tinted bar behind the whole row. */}
+      <View style={{ backgroundColor: COLORS.primaryBg }}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={{ paddingHorizontal:16, alignItems:'center' }}
+          style={{ maxHeight: 44, minHeight: 44 }}
+        >
+          {TABS.map((tab, idx) => {
+            const count = tab.key==='all' ? orders.length : orders.filter(o=>o.status===tab.key).length;
+            const active = activeTab === tab.key;
+            return (
+              <React.Fragment key={tab.key}>
+                {idx > 0 && <View style={styles.tabFlatDivider}/>}
+                <TouchableOpacity
+                  onPress={() => setActiveTab(tab.key)}
+                  style={styles.tabFlat}
+                  activeOpacity={0.7}
+                >
+                  <Text numberOfLines={1} style={[styles.tabFlatText, active && styles.tabFlatTextActive]}>
+                    {tab.label}{count>0 ? ` (${count})` : ''}
+                  </Text>
+                  {active && <View style={styles.tabFlatUnderline}/>}
+                </TouchableOpacity>
+              </React.Fragment>
+            );
+          })}
+        </ScrollView>
+      </View>
 
       {/* Content - fills remaining space */}
       {filteredOrders.length === 0 ? (
@@ -371,8 +404,8 @@ export default function OrdersScreen({ navigation }) {
                   <Text style={styles.orderId}>Order #{item.order_id?.slice(0,8).toUpperCase()}</Text>
                   <Text style={styles.orderDate}>{item.date || item.created_at ? new Date(item.date || item.created_at).toLocaleDateString('en-PH', { year:'numeric', month:'short', day:'numeric' }) : '—'}</Text>
                 </View>
-                <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status) + '20' }]}>
-                  <Text style={[styles.statusText, { color: statusColor(item.status) }]}>
+                <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status, COLORS) + '20' }]}>
+                  <Text style={[styles.statusText, { color: statusColor(item.status, COLORS) }]}>
                     {item.status === 'out_for_delivery' ? 'Out for Delivery' : item.status?.replace(/_/g,' ').toUpperCase()}
                   </Text>
                 </View>
@@ -380,23 +413,29 @@ export default function OrdersScreen({ navigation }) {
 
               {/* Items */}
               <View style={styles.divider}/>
-              {(item.order_item || []).map((oi, idx) => (
-                <View key={idx} style={styles.orderItem}>
-                  {oi.product?.image_url
-                    ? <Image source={{ uri: oi.product.image_url }} style={styles.orderItemImg}/>
-                    : <View style={styles.orderItemImgPlaceholder}><Feather name="image" size={14} color={COLORS.textMuted}/></View>
-                  }
-                  <View style={{ flex:1 }}>
-                    <Text style={styles.orderItemName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
-                    {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
-                      <Text style={styles.orderItemOptions} numberOfLines={1}>
-                        {Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
-                      </Text>
-                    )}
+              {(item.order_item || []).map((oi, idx) => {
+                // oi.price is the price actually charged (resolved at checkout
+                // time); the photo shown here is resolved the same way so it
+                // matches whichever variant choice/combo was ordered.
+                const itemImage = resolveVariantPricing(oi.product, oi.selected_options || {}).image;
+                return (
+                  <View key={idx} style={styles.orderItem}>
+                    {itemImage
+                      ? <Image source={{ uri: itemImage }} style={styles.orderItemImg}/>
+                      : <View style={styles.orderItemImgPlaceholder}><Feather name="image" size={14} color={COLORS.textMuted}/></View>
+                    }
+                    <View style={{ flex:1 }}>
+                      <Text style={styles.orderItemName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
+                      {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
+                        <Text style={styles.orderItemOptions} numberOfLines={1}>
+                          {Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                        </Text>
+                      )}
+                    </View>
+                    <Text style={styles.orderItemQtyPrice}>x{oi.qty || oi.quantity || 0} · ₱{(Number(oi.price || 0) * Number(oi.qty || oi.quantity || 0)).toFixed(2)}</Text>
                   </View>
-                  <Text style={styles.orderItemQtyPrice}>x{oi.qty || oi.quantity || 0} · ₱{(Number(oi.price || 0) * Number(oi.qty || oi.quantity || 0)).toFixed(2)}</Text>
-                </View>
-              ))}
+                );
+              })}
               <View style={styles.divider}/>
 
               {/* Footer */}
@@ -415,6 +454,29 @@ export default function OrdersScreen({ navigation }) {
                     <Text style={{ fontSize: 11, color: COLORS.primary }}>FREE shipping</Text>
                   )}
                   <Text style={styles.orderTotal}>₱{Number(item.total || 0).toFixed(2)}</Text>
+                  {/* "Buy Again" — a single item re-fetches it fresh (current
+                      price/stock, not the order's stale snapshot) and opens
+                      it directly; more than one opens a picker so you choose
+                      which product to buy again. See handleBuyAgain above. */}
+                  {item.status === 'completed' && (() => {
+                    const eligible = (item.order_item || []).filter(oi => oi.product_id);
+                    if (eligible.length === 0) return null;
+                    const single = eligible.length === 1;
+                    const busy = single && buyingAgainId === (eligible[0].order_item_id || eligible[0].product_id);
+                    return (
+                      <TouchableOpacity
+                        style={[styles.buyAgainBtn, { alignSelf: 'flex-end' }, busy && { opacity: 0.6 }]}
+                        activeOpacity={0.8}
+                        disabled={busy}
+                        onPress={() => single ? handleBuyAgain(eligible[0], item.branch_id) : setBuyAgainPickerOrder(item)}
+                      >
+                        {busy
+                          ? <ActivityIndicator size="small" color={COLORS.primary} />
+                          : <Text style={styles.buyAgainBtnText}>Buy Again</Text>
+                        }
+                      </TouchableOpacity>
+                    );
+                  })()}
                 </View>
               </View>
               {/* Delivery Estimate */}
@@ -515,7 +577,7 @@ export default function OrdersScreen({ navigation }) {
                       {i > 0 && (
                         <View style={[styles.trackerLine, { backgroundColor: isCancelled ? '#ef4444' : (curIdx >= stepIdx ? COLORS.primary : COLORS.grayBorder) }]}/>
                       )}
-                      <View style={[styles.trackerDot, { backgroundColor: isDone || isCancelled ? color : COLORS.white, borderColor: color }]}>
+                      <View style={[styles.trackerDot, { backgroundColor: isDone || isCancelled ? color : COLORS.surface, borderColor: color }]}>
                         <Feather name={isCancelled && i === 0 ? 'x' : step.icon} size={12} color={isDone ? COLORS.white : color}/>
                       </View>
                       <Text style={[styles.trackerLabel, { color: isCurrent ? COLORS.primary : COLORS.textMuted, fontWeight: isCurrent ? '700' : '400' }]}>
@@ -558,28 +620,31 @@ export default function OrdersScreen({ navigation }) {
               {/* Items */}
               <View style={styles.detailSection}>
                 <Text style={styles.detailSectionTitle}>Items Ordered</Text>
-                {(selectedOrder?.order_item || []).map((oi, idx) => (
-                  <View key={idx} style={styles.detailItemRow}>
-                    {oi.product?.image_url
-                      ? <Image source={{ uri: oi.product.image_url }} style={styles.detailItemImg}/>
-                      : <View style={styles.detailItemImgPlaceholder}><Feather name="image" size={16} color={COLORS.textMuted}/></View>
-                    }
-                    <View style={{ flex:1 }}>
-                      <Text style={styles.detailItemName}>{oi.product?.product_name || '—'}</Text>
-                      <Text style={styles.detailItemQty}>x{oi.qty || oi.quantity}</Text>
-                      {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
-                        <View style={{ flexDirection:'row', flexWrap:'wrap', gap:4, marginTop:4 }}>
-                          {Object.entries(oi.selected_options).map(([k,v], i) => (
-                            <View key={i} style={styles.optionChip}>
-                              <Text style={styles.optionChipText}>{k}: {v}</Text>
-                            </View>
-                          ))}
-                        </View>
-                      )}
+                {(selectedOrder?.order_item || []).map((oi, idx) => {
+                  const itemImage = resolveVariantPricing(oi.product, oi.selected_options || {}).image;
+                  return (
+                    <View key={idx} style={styles.detailItemRow}>
+                      {itemImage
+                        ? <Image source={{ uri: itemImage }} style={styles.detailItemImg}/>
+                        : <View style={styles.detailItemImgPlaceholder}><Feather name="image" size={16} color={COLORS.textMuted}/></View>
+                      }
+                      <View style={{ flex:1 }}>
+                        <Text style={styles.detailItemName}>{oi.product?.product_name || '—'}</Text>
+                        <Text style={styles.detailItemQty}>x{oi.qty || oi.quantity}</Text>
+                        {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
+                          <View style={{ flexDirection:'row', flexWrap:'wrap', gap:4, marginTop:4 }}>
+                            {Object.entries(oi.selected_options).map(([k,v], i) => (
+                              <View key={i} style={styles.optionChip}>
+                                <Text style={styles.optionChipText}>{k}: {v}</Text>
+                              </View>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                      <Text style={styles.detailItemPrice}>₱{(Number(oi.price || 0) * Number(oi.qty || oi.quantity || 0)).toFixed(2)}</Text>
                     </View>
-                    <Text style={styles.detailItemPrice}>₱{(Number(oi.price || 0) * Number(oi.qty || oi.quantity || 0)).toFixed(2)}</Text>
-                  </View>
-                ))}
+                  );
+                })}
                 {selectedOrder?.shipping_fee != null && (
                   <View style={[styles.detailItemRow, { borderBottomWidth: 0 }]}>
                     <View style={{ flex: 1 }}>
@@ -747,20 +812,82 @@ export default function OrdersScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ─── Buy Again — item picker (multi-item orders only) ─── */}
+      <Modal
+        visible={!!buyAgainPickerOrder}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setBuyAgainPickerOrder(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Buy Again</Text>
+              <TouchableOpacity onPress={() => setBuyAgainPickerOrder(null)}>
+                <Feather name="x" size={20} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {((buyAgainPickerOrder?.order_item || []).filter(oi => oi.product_id)).map((oi, idx) => {
+                const itemImage = resolveVariantPricing(oi.product, oi.selected_options || {}).image;
+                const busy = buyingAgainId === (oi.order_item_id || oi.product_id);
+                return (
+                  <TouchableOpacity
+                    key={idx}
+                    style={[styles.buyAgainPickRow, busy && { opacity: 0.6 }]}
+                    activeOpacity={0.8}
+                    disabled={busy}
+                    onPress={() => {
+                      const branchId = buyAgainPickerOrder.branch_id;
+                      setBuyAgainPickerOrder(null);
+                      handleBuyAgain(oi, branchId);
+                    }}
+                  >
+                    {itemImage
+                      ? <Image source={{ uri: itemImage }} style={styles.buyAgainPickImg}/>
+                      : <View style={styles.buyAgainPickImgPlaceholder}><Feather name="image" size={16} color={COLORS.textMuted}/></View>
+                    }
+                    <View style={{ flex:1 }}>
+                      <Text style={styles.buyAgainPickName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
+                      {oi.selected_options && Object.keys(oi.selected_options).length > 0 && (
+                        <Text style={styles.buyAgainPickOptions} numberOfLines={1}>
+                          {Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(' · ')}
+                        </Text>
+                      )}
+                    </View>
+                    {busy
+                      ? <ActivityIndicator size="small" color={COLORS.primary} />
+                      : <Feather name="chevron-right" size={18} color={COLORS.textMuted}/>
+                    }
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
+
       <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const makeStyles = (COLORS) => StyleSheet.create({
   container:        { flex:1, backgroundColor: COLORS.grayBg },
   // Header — COLORS.primary so it matches the bottom nav's active-tab
   // green (and HomeScreen's header) instead of drifting to its own shade.
   header:           { backgroundColor: COLORS.primary, paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.md, shadowColor: '#14532d', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.2, shadowRadius: 4, elevation: 4 },
   headerTitle:      { fontSize:18, fontWeight:'700', color: COLORS.white },
+
+  // Flat segmented tab bar
+  tabFlat:          { paddingHorizontal:10, paddingVertical:10, alignItems:'center' },
+  tabFlatText:      { fontSize:13, fontWeight:'500', color: COLORS.textMuted },
+  tabFlatTextActive:{ color: COLORS.primary, fontWeight:'700' },
+  tabFlatUnderline: { height:3, borderRadius: RADIUS.full, backgroundColor: COLORS.primary, alignSelf:'stretch', marginTop:4 },
+  tabFlatDivider:   { width:1, height:16, backgroundColor: COLORS.grayBorder },
   headerSub:        { fontSize:12, color: COLORS.grayLight, marginTop:2 },
   list:             { padding: SPACING.md, gap: SPACING.sm },
-  orderCard:        { backgroundColor: COLORS.white, borderRadius: RADIUS.md, padding: SPACING.md, ...SHADOW.sm, gap: SPACING.sm },
+  orderCard:        { backgroundColor: COLORS.surface, borderRadius: RADIUS.md, padding: SPACING.md, ...SHADOW.sm, gap: SPACING.sm },
   orderHeader:      { flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start' },
   orderId:          { fontSize:13, fontWeight:'700', color: COLORS.dark },
   orderDate:        { fontSize:11, color: COLORS.textMuted, marginTop:2 },
@@ -792,10 +919,17 @@ const styles = StyleSheet.create({
 
   // Order Detail Modal
   modalOverlay:         { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'flex-end' },
-  modalCard:            { backgroundColor: COLORS.white, borderTopLeftRadius:20, borderTopRightRadius:20, maxHeight:'90%', padding: SPACING.md },
+  modalCard:            { backgroundColor: COLORS.surface, borderTopLeftRadius:20, borderTopRightRadius:20, maxHeight:'90%', padding: SPACING.md },
   modalHeader:          { flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start', marginBottom: SPACING.md, paddingBottom: SPACING.sm, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
   modalTitle:           { fontSize:16, fontWeight:'700', color: COLORS.dark },
   modalOrderId:         { fontSize:12, color: COLORS.textMuted, marginTop:2 },
+
+  // Buy Again — item picker rows
+  buyAgainPickRow:            { flexDirection:'row', alignItems:'center', gap:12, paddingVertical:12, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
+  buyAgainPickImg:            { width:44, height:44, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg },
+  buyAgainPickImgPlaceholder: { width:44, height:44, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg, alignItems:'center', justifyContent:'center' },
+  buyAgainPickName:           { fontSize:13, fontWeight:'600', color: COLORS.dark },
+  buyAgainPickOptions:        { fontSize:11, color: COLORS.textMuted, marginTop:2 },
   detailSection:        { marginBottom: SPACING.md, paddingBottom: SPACING.sm, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
   detailSectionTitle:   { fontSize:13, fontWeight:'700', color: COLORS.dark, marginBottom: SPACING.sm },
   detailRow:            { flexDirection:'row', justifyContent:'space-between', marginBottom:6 },
@@ -810,6 +944,8 @@ const styles = StyleSheet.create({
   receivedBtnText:   { color:COLORS.white, fontWeight:'700', fontSize:14 },
   optionChip:           { backgroundColor:'rgba(22,163,74,0.1)', borderRadius:4, paddingHorizontal:6, paddingVertical:2 },
   optionChipText:       { fontSize:10, color: COLORS.primary, fontWeight:'600' },
+  buyAgainBtn:          { flexDirection:'row', alignItems:'center', gap:5, alignSelf:'flex-start', borderWidth:1.5, borderColor: COLORS.primary, borderRadius: RADIUS.full, paddingVertical:5, paddingHorizontal:12, marginTop:8 },
+  buyAgainBtnText:      { fontSize:11, color: COLORS.primary, fontWeight:'700' },
   orderItemOptions:     { fontSize:11, color: COLORS.primary, marginTop:2 },
   detailItemRow:        { flexDirection:'row', justifyContent:'space-between', alignItems:'center', paddingVertical:6, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
   detailItemName:       { fontSize:13, color: COLORS.dark, fontWeight:'500' },
@@ -833,7 +969,7 @@ const styles = StyleSheet.create({
   cancelBtnText:         { color:'#ef4444', fontWeight:'700', fontSize:14 },
   cancelWindowText:      { fontSize:11, color: COLORS.textMuted, textAlign:'center', marginTop:6 },
   cancelModalOverlay:    { flex:1, backgroundColor:'rgba(0,0,0,0.5)', justifyContent:'center', alignItems:'center', padding: SPACING.lg },
-  cancelModalCard:       { backgroundColor: COLORS.white, borderRadius: RADIUS.md, padding: SPACING.lg, width:'100%', gap: SPACING.sm },
+  cancelModalCard:       { backgroundColor: COLORS.surface, borderRadius: RADIUS.md, padding: SPACING.lg, width:'100%', gap: SPACING.sm },
   cancelModalTitle:      { fontSize:16, fontWeight:'700', color: COLORS.dark },
   cancelModalSub:        { fontSize:12, color: COLORS.textMuted, lineHeight:17 },
   cancelReasonInput:     { borderWidth:1, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, padding:10, fontSize:13, color: COLORS.dark, minHeight:70, textAlignVertical:'top' },

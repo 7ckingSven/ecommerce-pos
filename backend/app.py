@@ -1776,7 +1776,7 @@ def api_get_cart():
         # button never disables no matter how high the quantity goes
         # (branch-level AND per-variant).
         res = supabase_retry(lambda: supabase.table('cart').select(
-            '*, branch_id, product(product_id, product_name, price, image_url, brand, category, net_weight, net_weight_unit, option_groups, discount(discount_name, percentage), branch_stock(branch_id, quantity), variant_stock(branch_id, quantity, options))'
+            '*, branch_id, product(product_id, product_name, price, image_url, image_urls, brand, category, net_weight, net_weight_unit, option_groups, variant_overrides, discount(discount_name, percentage), branch_stock(branch_id, quantity), variant_stock(branch_id, quantity, options))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -1867,7 +1867,7 @@ def api_get_orders():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         res = supabase_retry(lambda: supabase.table('order').select(
-            '*, order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url, price)), payment(*), branch(branch_name)'
+            '*, order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url, image_urls, price, option_groups, variant_overrides)), payment(*), branch(branch_name)'
         ).eq('customer_id', customer_id).order('created_at', desc=True).execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -2072,10 +2072,17 @@ def _is_within_south_cotabato(address):
 def _compute_shipping_fee(address, cart_items):
     """Recomputes the shipping fee from scratch server-side — never trusts
     the client-sent amount — mirroring the mobile app's CheckoutScreen.js
-    calculateShipping() zone + weight formula exactly:
-      - Within South Cotabato: always free.
-      - Region XII (SOCCSKSARGEN) otherwise: PHP 120 base, +PHP 30/kg over 5kg.
-      - Anywhere else: PHP 200 base, +PHP 35/kg over 5kg.
+    calculateShipping() zone + weight formula exactly. Four zones, modeled
+    on real courier (J&T) pricing — same-region cheapest, same-island
+    mid-tier, inter-island priciest — plus a light-item bracket under 500g
+    so a small item isn't charged the same as something near 5kg:
+      - Within South Cotabato: always free, any weight.
+      - Region XII (SOCCSKSARGEN) otherwise: PHP 70 flat under 500g,
+        else PHP 120 base +PHP 30/kg over 5kg.
+      - Rest of Mindanao mainland (Region IX/X/XI, CARAGA, BARMM): PHP 90
+        flat under 500g, else PHP 150 base +PHP 32/kg over 5kg.
+      - Luzon/Visayas (inter-island): PHP 120 flat under 500g, else
+        PHP 200 base +PHP 35/kg over 5kg.
     """
     product_ids = list({item.get('product_id') for item in cart_items if item.get('product_id')})
     weight_by_id = {}
@@ -2095,13 +2102,30 @@ def _compute_shipping_fee(address, cart_items):
     parts  = (address or '').lower().split('|')
     in_sc  = any('south cotabato' in p or 'southcotabato' in p for p in parts)
     in_r12 = any(('xii' in p) or ('soccsksargen' in p) or ('region 12' in p) or ('region xii' in p) for p in parts)
+    # Rest of Mindanao mainland — Region IX (Zamboanga Peninsula), Region X
+    # (Northern Mindanao), Region XI (Davao Region), CARAGA, BARMM. Checked
+    # only after in_sc/in_r12 have already been ruled out above, so a loose
+    # 'mindanao' catch-all here can't misfire on a South Cotabato/Region XII
+    # address even though those are geographically part of Mindanao too.
+    in_mindanao = any(
+        ('mindanao' in p) or ('region ix' in p) or ('region 9' in p) or ('zamboanga' in p) or
+        ('region x' in p) or ('region 10' in p) or ('davao' in p) or ('caraga' in p) or
+        ('region xiii' in p) or ('region 13' in p) or ('barmm' in p) or ('bangsamoro' in p) or
+        ('armm' in p)
+        for p in parts
+    )
 
     if in_sc:
         return 0.0
     if in_r12:
-        base, over_kg, rate = 120, 5, 30
+        light, base, over_kg, rate = 70, 120, 5, 30
+    elif in_mindanao:
+        light, base, over_kg, rate = 90, 150, 5, 32
     else:
-        base, over_kg, rate = 200, 5, 35
+        light, base, over_kg, rate = 120, 200, 5, 35
+
+    if total_weight <= 0.5:
+        return float(light)
 
     extra = math.ceil((total_weight - over_kg) * rate) if total_weight > over_kg else 0
     return float(base + extra)
@@ -3367,6 +3391,120 @@ def admin_get_products():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def _generate_unique_barcode():
+    """Generates a 12-digit numeric code (prints fine as Code128/EAN-13 via
+    JsBarcode on the label), unique across EVERY barcode in the system — the
+    product-level barcode column, every option_groups choice's own barcode,
+    and every variant_overrides combo's own barcode — since POS scanning
+    (handleBarcodeScan in staff.js) matches a scanned code against all three
+    levels across the whole catalog, not just one product. Not a registered
+    GS1 prefix — an internal store code, not meant for real retail
+    distribution."""
+    res = supabase.table('product').select('barcode, option_groups, variant_overrides').execute()
+    existing = set()
+    for p in (res.data or []):
+        if p.get('barcode'):
+            existing.add(p['barcode'])
+        for g in (p.get('option_groups') or []):
+            for c in (g.get('choices') or []):
+                if isinstance(c, dict) and c.get('barcode'):
+                    existing.add(c['barcode'])
+        for o in (p.get('variant_overrides') or []):
+            if isinstance(o, dict) and o.get('barcode'):
+                existing.add(o['barcode'])
+
+    for _ in range(12):
+        candidate = ''.join(str(random.randint(0, 9)) for _ in range(12))
+        if candidate not in existing:
+            return candidate
+    raise Exception('Could not generate a unique barcode after 12 attempts.')
+
+@app.route('/api/admin/products/generate-barcodes', methods=['POST'])
+@staff_required
+def admin_bulk_generate_barcodes():
+    """Backfills a BASE (no-variant) barcode for every existing product that
+    doesn't have one yet — run once right after the barcode column is added
+    (or any time products were imported/created before this feature
+    existed). Products that already have a barcode are left untouched. Does
+    not touch per-choice/per-combo variant barcodes — those are generated
+    one at a time from the Barcode modal, same as price/image overrides are
+    set one at a time, since each one is a deliberate per-variant action.
+    Open to staff as well as admin — same reasoning as POS scanning itself
+    being a staff-facing feature."""
+    try:
+        res = supabase.table('product').select('product_id').or_('barcode.is.null,barcode.eq.').execute()
+        missing = res.data or []
+        updated = 0
+        for p in missing:
+            barcode = _generate_unique_barcode()
+            supabase.table('product').update({'barcode': barcode}).eq('product_id', p['product_id']).execute()
+            updated += 1
+        return jsonify({'updated': updated, 'total_checked': len(missing)}), 200
+    except Exception as e:
+        print(f"Bulk generate barcodes error: {e}")
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/products/<product_id>/generate-barcode', methods=['POST'])
+@staff_required
+def admin_generate_product_barcode(product_id):
+    """Assigns a fresh barcode to one product — or to one specific variant
+    of it, chosen by JSON body:
+      {}                                                — base/no-variant barcode (product.barcode)
+      {"scope":"choice","group_index":0,"choice_value":"Red"}  — one option_groups choice's own barcode
+      {"scope":"combo","options":{"Color":"Red","Size":"M"}}   — one variant_overrides combination's own barcode
+    Works both for a variant still missing a code and to deliberately
+    replace an existing one (e.g. a mis-printed label). Open to staff as
+    well as admin, so a variant/label can be (re)printed from Inventory
+    without needing an admin on hand."""
+    try:
+        body  = request.get_json(silent=True) or {}
+        scope = body.get('scope', 'product')
+
+        res = supabase.table('product').select('barcode, option_groups, variant_overrides').eq('product_id', product_id).execute()
+        if not res.data:
+            return jsonify({'error': 'Product not found.'}), 404
+        option_groups     = res.data[0].get('option_groups') or []
+        variant_overrides = res.data[0].get('variant_overrides') or []
+
+        barcode = _generate_unique_barcode()
+
+        if scope == 'product':
+            upd = supabase.table('product').update({'barcode': barcode}).eq('product_id', product_id).execute()
+            if not upd.data:
+                return jsonify({'error': 'Product not found.'}), 404
+
+        elif scope == 'choice':
+            group_index  = body.get('group_index')
+            choice_value = body.get('choice_value')
+            if group_index is None or not (0 <= group_index < len(option_groups)):
+                return jsonify({'error': 'Invalid option group.'}), 400
+            choices = option_groups[group_index].get('choices') or []
+            target  = next((c for c in choices if isinstance(c, dict) and c.get('value') == choice_value), None)
+            if target is None:
+                return jsonify({'error': 'Choice not found.'}), 400
+            target['barcode'] = barcode
+            supabase.table('product').update({'option_groups': option_groups}).eq('product_id', product_id).execute()
+
+        elif scope == 'combo':
+            options = body.get('options') or {}
+            if not options:
+                return jsonify({'error': 'Missing combination options.'}), 400
+            entry = next((o for o in variant_overrides if isinstance(o, dict) and o.get('options') == options), None)
+            if entry is None:
+                entry = {'options': options, 'price': '', 'image': '', 'barcode': barcode}
+                variant_overrides.append(entry)
+            else:
+                entry['barcode'] = barcode
+            supabase.table('product').update({'variant_overrides': variant_overrides}).eq('product_id', product_id).execute()
+
+        else:
+            return jsonify({'error': 'Invalid scope.'}), 400
+
+        return jsonify({'barcode': barcode}), 200
+    except Exception as e:
+        print(f"Generate product barcode error: {e}")
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/products', methods=['POST'])
 @admin_required
 def admin_add_product():
@@ -3420,8 +3558,21 @@ def admin_add_product():
         except Exception:
             option_groups = []
 
+        # variant_overrides — per-combination price/image overrides (Option B).
+        # Resale price only; never touches base_price/cost. See variant_overrides
+        # resolution helper (resolveVariantPricing) in admin.js / staff.js.
+        variant_overrides_raw = request.form.get('variant_overrides', '[]')
+        try:
+            variant_overrides = json.loads(variant_overrides_raw) if variant_overrides_raw else []
+        except Exception:
+            variant_overrides = []
+
         net_weight      = float(request.form.get('net_weight', 0) or 0)
         net_weight_unit = request.form.get('net_weight_unit', 'kg')
+
+        # Barcode — auto-generated unless the admin typed one in manually.
+        barcode_raw = request.form.get('barcode', '').strip()
+        barcode     = barcode_raw if barcode_raw else _generate_unique_barcode()
 
         res = supabase.table('product').insert({
             'staff_id':      session.get('staff_id'),
@@ -3439,8 +3590,10 @@ def admin_add_product():
             'image_urls':    image_urls,
             'variants':      variants,
             'option_groups': option_groups,
+            'variant_overrides': variant_overrides,
             'net_weight':      net_weight,
             'net_weight_unit': net_weight_unit,
+            'barcode':         barcode,
         }).execute()
 
         return jsonify(res.data[0]), 201
@@ -3464,29 +3617,67 @@ def admin_update_product(product_id):
         except Exception:
             option_groups = []
 
+        # variant_overrides — per-combination price/image overrides (Option B).
+        # Resale price only; never touches base_price/cost. See variant_overrides
+        # resolution helper (resolveVariantPricing) in admin.js / staff.js.
+        variant_overrides_raw = request.form.get('variant_overrides', '[]')
+        try:
+            variant_overrides = json.loads(variant_overrides_raw) if variant_overrides_raw else []
+        except Exception:
+            variant_overrides = []
+
         net_weight      = float(request.form.get('net_weight', 0) or 0)
         net_weight_unit = request.form.get('net_weight_unit', 'kg')
 
         base_price_raw = request.form.get('base_price', '').strip()
         base_price     = float(base_price_raw) if base_price_raw else None
 
+        # Price-history logging — only when the resale price actually changes.
+        new_price = float(request.form.get('price', 0))
+        try:
+            existing_res = supabase.table('product').select('price').eq('product_id', product_id).execute()
+            old_price = existing_res.data[0]['price'] if existing_res.data else None
+        except Exception:
+            old_price = None
+        if old_price is not None and float(old_price) != new_price:
+            try:
+                supabase.table('price_history').insert({
+                    'product_id':      product_id,
+                    'old_price':       old_price,
+                    'new_price':       new_price,
+                    'changed_by':      session.get('staff_id'),
+                    'changed_by_role': session.get('role', 'admin'),
+                }).execute()
+            except Exception as e:
+                print(f'price_history insert failed: {e}')
+
         updates = {
             'product_name': request.form.get('product_name'),
             'brand':        request.form.get('brand'),
             'category':     request.form.get('category'),
             'sub_category': request.form.get('sub_category', '').strip() or None,
-            'price':        float(request.form.get('price', 0)),
+            'price':        new_price,
             'base_price':   base_price,
             'quantity':     int(request.form.get('quantity', 0)),
             'status':       request.form.get('status'),
             'description':  request.form.get('description'),
             'discount_id':  discount_id,
             'option_groups': option_groups,
+            'variant_overrides': variant_overrides,
             'net_weight':      net_weight,
             'net_weight_unit': net_weight_unit,
             'variants':        variants,
             'updated_at':   'now()',
         }
+
+        # Barcode — manual override only. Left blank, the product's existing
+        # barcode (auto-generated at creation, or backfilled) is untouched;
+        # typed in, it replaces it. Generating a fresh one for a product
+        # that's missing it is a separate action (the "Generate" button),
+        # not something a routine product-details save should trigger.
+        barcode_raw = request.form.get('barcode', '').strip()
+        if barcode_raw:
+            updates['barcode'] = barcode_raw
 
         # Handle multiple images
         images = request.files.getlist('images')
@@ -3519,6 +3710,54 @@ def admin_update_product(product_id):
         traceback.print_exc()
         print(f"PUT product error: {type(e).__name__}: {str(e)}")
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/price-history', methods=['GET'])
+@admin_required
+def admin_get_price_history():
+    """Read path for the price_history rows admin_update_product() has been
+    writing on every resale-price change. Optional ?product_id=... filters
+    to one product (used by the per-row "Price History" button); omitted,
+    it returns the most recent changes across every product (the Products
+    page header's "Price History" button).
+    Enriches each row with the product name and the staff member's name by
+    hand (two follow-up lookups) instead of a PostgREST embed, since
+    price_history's FK relationships to product/staff weren't part of the
+    original migration and an embed hint would 400 if they're not present.
+    """
+    try:
+        product_id = request.args.get('product_id')
+        limit = request.args.get('limit', default=200, type=int)
+        if limit <= 0:
+            limit = 200
+        if limit > 500:
+            limit = 500
+
+        query = supabase.table('price_history').select('*').order('created_at', desc=True).limit(limit)
+        if product_id:
+            query = query.eq('product_id', product_id)
+        rows = query.execute().data or []
+
+        product_ids = list({r['product_id'] for r in rows if r.get('product_id')})
+        staff_ids   = list({r['changed_by'] for r in rows if r.get('changed_by')})
+
+        product_map = {}
+        if product_ids:
+            p_res = supabase.table('product').select('product_id, product_name').in_('product_id', product_ids).execute()
+            product_map = {p['product_id']: p['product_name'] for p in (p_res.data or [])}
+
+        staff_map = {}
+        if staff_ids:
+            s_res = supabase.table('staff').select('staff_id, fname, lname').in_('staff_id', staff_ids).execute()
+            staff_map = {s['staff_id']: f"{s['fname']} {s['lname']}" for s in (s_res.data or [])}
+
+        for r in rows:
+            r['product_name']   = product_map.get(r.get('product_id'), '—')
+            r['changed_by_name'] = staff_map.get(r.get('changed_by'), '—')
+
+        return jsonify(rows), 200
+    except Exception as e:
+        print(f"Admin get price history error: {e}")
+        return jsonify({'error': 'Failed to fetch price history.'}), 500
 
 @app.route('/api/admin/products/<product_id>', methods=['DELETE'])
 @admin_required
@@ -3730,7 +3969,7 @@ def admin_get_orders():
         _auto_advance_processing_orders()
 
         res = supabase.table('order').select(
-            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url, image_urls, option_groups, variant_overrides)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).execute()
 
         # Get branch lookup
@@ -4558,7 +4797,7 @@ def staff_get_orders():
             return jsonify([]), 200
 
         query = supabase.table('order').select(
-            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
+            'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url, image_urls, option_groups, variant_overrides)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
         ).order('created_at', desc=True).limit(limit).eq('branch_id', branch_id)
 
         import time
