@@ -3,7 +3,7 @@ import math
 import random
 import secrets
 import traceback
-from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response
+from flask import Flask, render_template, request, redirect, url_for, flash, session, jsonify, send_file, make_response, Response, stream_with_context
 from flask_cors import CORS
 # Resend email API (replaces Flask-Mail)
 import requests as resend_requests
@@ -383,6 +383,134 @@ def staff_required(f):
         _touch_login_session()
         return f(*args, **kwargs)
     return decorated
+
+# ══════════════════════════════════════════════════════
+# LIVE UPDATES — Server-Sent Events (SSE)
+# ══════════════════════════════════════════════════════
+# Panel-requested revision: admin/staff dashboards should reflect changes
+# (new/updated orders, stock movements, product edits) across open browser
+# tabs/devices without a manual refresh.
+#
+# Design note: this is Postgres LISTEN/NOTIFY, not Supabase Realtime
+# subscribed from the browser. Every table currently has RLS *enabled* but
+# with a single "enable_all" policy (USING true, for ALL commands) — i.e.
+# no real row-level restriction exists yet. Handing a Supabase key to the
+# browser for client-side Realtime would expose the entire database
+# (including the `user` table's password hashes, and every branch's orders)
+# to anyone who opens the dashboard. Retrofitting correct per-table RLS is
+# real work and not something to rush before a defense.
+#
+# Instead: a SQL trigger calls pg_notify() on change, one background thread
+# in Flask LISTENs for it, and that thread fans the event out to every
+# connected browser over SSE. The SSE payload only ever says
+# `{"table": "order"}` (etc.) — never actual row data — so each browser
+# just re-fetches through the EXISTING authenticated REST endpoints, which
+# already enforce the correct admin/staff/branch scoping. No new attack
+# surface, no RLS changes required.
+#
+# Note on the single-session enforcement above (_session_token_valid /
+# _touch_login_session): that check only runs once, when the SSE connection
+# is first opened — not on every message. If a session gets superseded
+# (signed in elsewhere) while a tab's SSE stream is already open, that
+# stream keeps running until the browser's own reconnect cycle hits it.
+# Not a data risk (the channel never carries row data, and every REST
+# endpoint it triggers a re-fetch against still re-checks the session
+# normally) — just means a superseded session's tab may keep "nudging"
+# itself to refresh for a little while after being logged out elsewhere.
+#
+# Setup required (one-time, see supabase_realtime_triggers.sql):
+#   1. Run that SQL in the Supabase SQL editor (trigger function + triggers
+#      on order/inventory/product).
+#   2. Add DATABASE_URL to .env — the *direct* Postgres connection string
+#      from Supabase: Settings → Database → Connection string →
+#      "Direct connection" (NOT the Transaction pooler; pgbouncer in
+#      transaction mode does not reliably deliver LISTEN/NOTIFY).
+# Without DATABASE_URL set, the app runs exactly as before — live updates
+# just stay silently disabled (see _pg_listen_loop below).
+
+import threading
+import queue
+import select
+import psycopg2
+
+DATABASE_URL = os.getenv('DATABASE_URL')
+
+# One Queue per currently-connected browser SSE stream (one per open tab).
+# Protected by _sse_lock since the listener thread and each request thread
+# touch this concurrently.
+_sse_clients = set()
+_sse_lock = threading.Lock()
+
+def _sse_broadcast(payload):
+    """Push `payload` (a small dict, e.g. {"table": "order"}) to every
+    currently-connected SSE client."""
+    with _sse_lock:
+        clients = list(_sse_clients)
+    for client_q in clients:
+        try:
+            client_q.put_nowait(payload)
+        except queue.Full:
+            pass  # a slow/stuck client shouldn't block the others
+
+def _pg_listen_loop():
+    """Runs forever in a background daemon thread. Holds one LISTEN
+    connection to Postgres and re-broadcasts every notification to all
+    connected SSE clients. Reconnects automatically if the connection
+    drops (e.g. Supabase restarting the DB)."""
+    if not DATABASE_URL:
+        print('DATABASE_URL not set — live updates (SSE) disabled.')
+        return
+    while True:
+        try:
+            conn = psycopg2.connect(DATABASE_URL)
+            conn.autocommit = True
+            cur = conn.cursor()
+            cur.execute('LISTEN data_changes;')
+            print('Live updates: listening for data_changes notifications.')
+            while True:
+                if select.select([conn], [], [], 30) == ([], [], []):
+                    continue  # just an idle timeout, loop and keep waiting
+                conn.poll()
+                while conn.notifies:
+                    notify = conn.notifies.pop(0)
+                    try:
+                        payload = json.loads(notify.payload)
+                    except Exception:
+                        continue
+                    _sse_broadcast(payload)
+        except Exception as e:
+            print(f'Live updates listener error, reconnecting in 5s: {e}')
+            _time.sleep(5)
+
+threading.Thread(target=_pg_listen_loop, daemon=True).start()
+
+@app.route('/api/events')
+@staff_required
+def sse_events():
+    """SSE stream for live dashboard updates. Pushes {"table": "..."}
+    whenever order/inventory/product change — carries no row data, so there
+    is nothing here that needs branch/role filtering. The browser maps the
+    table name to the section(s) it affects and re-fetches through the
+    normal, already-authorized REST endpoints (see admin.js/staff.js)."""
+    def gen():
+        client_q = queue.Queue(maxsize=50)
+        with _sse_lock:
+            _sse_clients.add(client_q)
+        try:
+            yield 'retry: 3000\n\n'
+            while True:
+                try:
+                    payload = client_q.get(timeout=20)
+                    yield f'data: {json.dumps(payload)}\n\n'
+                except queue.Empty:
+                    yield ': keepalive\n\n'  # keeps proxies from closing the connection
+        finally:
+            with _sse_lock:
+                _sse_clients.discard(client_q)
+    return Response(stream_with_context(gen()), mimetype='text/event-stream', headers={
+        'Cache-Control': 'no-cache',
+        'X-Accel-Buffering': 'no',
+    })
 
 # ══════════════════════════════════════════════════════
 # WEB ROUTES — Staff & Public Pages
@@ -5561,4 +5689,8 @@ def staff_add_inventory():
 if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    # threaded=True is required for the /api/events SSE stream: each open
+    # SSE connection blocks for as long as the tab stays open, so without
+    # threading the single-worker dev server would stall every other
+    # request the moment one browser tab connects.
+    app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

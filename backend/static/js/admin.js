@@ -413,9 +413,20 @@ function forceRefreshSection(btn) {
   setTimeout(unlockSidebar, 1000);
 }
 
-// Refresh current section when user returns to tab
+// Refresh current section when user returns to tab — but only if they were
+// actually away long enough for the data to plausibly be stale. Without this,
+// every quick alt-tab (checking a message, copying a value) triggers a full
+// refetch + full table re-render, which feels janky on heavier sections.
+const TAB_STALE_THRESHOLD_MS = 30000; // 30s
+let _tabHiddenAt = null;
 document.addEventListener('visibilitychange', () => {
-  if (!document.hidden) {
+  if (document.hidden) {
+    _tabHiddenAt = Date.now();
+    return;
+  }
+  const wasHiddenLongEnough = _tabHiddenAt !== null && (Date.now() - _tabHiddenAt) >= TAB_STALE_THRESHOLD_MS;
+  _tabHiddenAt = null;
+  if (wasHiddenLongEnough) {
     const section = localStorage.getItem('admin-section') || 'overview';
     if (loaders[section]) {
       const expandedRows  = saveExpandedRows();
@@ -439,6 +450,61 @@ document.addEventListener('visibilitychange', () => {
     }
   }
 });
+
+// ─── Live Updates (SSE) ─────────────────────────────────
+// Panel-requested: a change made by another user/device (a staff sale,
+// another admin editing a product) should reflect here without a manual
+// refresh. The server only ever sends {"table": "..."}, never row data —
+// it's mapped to the section(s) below and re-fetched through the normal
+// authenticated REST endpoints, same pattern as the visibilitychange
+// handler above. See app.py's /api/events route: every table currently
+// has an allow-all RLS policy, so nothing with real data is sent over
+// this channel on purpose.
+const SSE_TABLE_SECTIONS = {
+  order:     ['orders', 'overview', 'sales'],
+  inventory: ['inventory', 'overview', 'sales', 'purchase_orders'],
+  product:   ['products', 'inventory'],
+};
+let _sseSource = null;
+function _connectLiveUpdates() {
+  if (_sseSource) return;
+  _sseSource = new EventSource('/api/events');
+  _sseSource.onmessage = (e) => {
+    let payload;
+    try { payload = JSON.parse(e.data); } catch (err) { return; }
+    const affected = SSE_TABLE_SECTIONS[payload.table];
+    if (!affected) return;
+    affected.forEach(invalidateSection);
+    const activeSection = localStorage.getItem('admin-section') || 'overview';
+    if (affected.includes(activeSection) && loaders[activeSection]) {
+      const expandedRows  = saveExpandedRows();
+      const filterStates  = saveFilterStates();
+      // Same fixed-reference wrap as forceRefreshSection()/visibilitychange
+      // above — never read the live renderInventory/renderOrders identifier.
+      window.renderInventory = function(data) {
+        _trueRenderInventory(data);
+        restoreExpandedRows(expandedRows);
+        restoreFilterStates(filterStates);
+        window.renderInventory = _trueRenderInventory;
+      };
+      window.renderOrders = function(data) {
+        _trueRenderOrders(data);
+        restoreFilterStates(filterStates);
+        window.renderOrders = _trueRenderOrders;
+      };
+      _loadedSections.add(activeSection);
+      loaders[activeSection]();
+    }
+  };
+  _sseSource.onerror = () => {
+    // EventSource reconnects on its own per spec; nothing to do here.
+  };
+}
+if (document.readyState !== 'loading') {
+  _connectLiveUpdates();
+} else {
+  document.addEventListener('DOMContentLoaded', _connectLiveUpdates);
+}
 
 function showSection(name, el) {
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
