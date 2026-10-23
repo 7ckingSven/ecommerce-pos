@@ -429,36 +429,48 @@ def staff_required(f):
 # just stay silently disabled (see _pg_listen_loop below).
 
 import threading
-import queue
 import select
 import psycopg2
 
 DATABASE_URL = os.getenv('DATABASE_URL')
 
-# One Queue per currently-connected browser SSE stream (one per open tab).
-# Protected by _sse_lock since the listener thread and each request thread
-# touch this concurrently.
-_sse_clients = set()
-_sse_lock = threading.Lock()
+# ─── Live Updates (polling, not SSE) ────────────────────────────────────
+# This used to be a true SSE push: an open connection + a generator that
+# blocked on a per-client queue. That doesn't work on Gunicorn's sync
+# workers — a worker serving an open SSE stream is blocked for as long as
+# the browser tab stays open, so on a small instance (few workers) a single
+# open tab starves every other request. Worse, because that worker never
+# returns to Gunicorn's main loop, its --timeout eventually decides the
+# worker is hung and SIGKILLs it, which is exactly the repeating
+# "CRITICAL WORKER TIMEOUT" / SIGKILL / reboot loop this was diagnosed
+# from in the Render logs.
+#
+# Cheap polling avoids all of that: every request is fast, stateless, and
+# returns immediately, so no worker is ever held open. The Postgres LISTEN
+# thread below just bumps a version counter per table in memory; the
+# frontend polls /api/events/poll every few seconds and re-fetches
+# whichever section(s) changed since its last poll (admin.js/staff.js).
+_events_lock = threading.Lock()
+_events_seq = 0        # monotonically increasing; bumped on every notify
+_table_last_seq = {}   # table name -> _events_seq value at its last change
 
-def _sse_broadcast(payload):
-    """Push `payload` (a small dict, e.g. {"table": "order"}) to every
-    currently-connected SSE client."""
-    with _sse_lock:
-        clients = list(_sse_clients)
-    for client_q in clients:
-        try:
-            client_q.put_nowait(payload)
-        except queue.Full:
-            pass  # a slow/stuck client shouldn't block the others
+def _record_table_change(payload):
+    """Called from the Postgres listener thread with e.g. {"table": "order"}."""
+    global _events_seq
+    table = payload.get('table')
+    if not table:
+        return
+    with _events_lock:
+        _events_seq += 1
+        _table_last_seq[table] = _events_seq
 
 def _pg_listen_loop():
     """Runs forever in a background daemon thread. Holds one LISTEN
-    connection to Postgres and re-broadcasts every notification to all
-    connected SSE clients. Reconnects automatically if the connection
-    drops (e.g. Supabase restarting the DB)."""
+    connection to Postgres and records every notification so pollers can
+    pick it up. Reconnects automatically if the connection drops (e.g.
+    Supabase restarting the DB)."""
     if not DATABASE_URL:
-        print('DATABASE_URL not set — live updates (SSE) disabled.')
+        print('DATABASE_URL not set — live updates (polling) disabled.')
         return
     while True:
         try:
@@ -477,40 +489,31 @@ def _pg_listen_loop():
                         payload = json.loads(notify.payload)
                     except Exception:
                         continue
-                    _sse_broadcast(payload)
+                    _record_table_change(payload)
         except Exception as e:
             print(f'Live updates listener error, reconnecting in 5s: {e}')
             _time.sleep(5)
 
 threading.Thread(target=_pg_listen_loop, daemon=True).start()
 
-@app.route('/api/events')
+@app.route('/api/events/poll')
 @staff_required
-def sse_events():
-    """SSE stream for live dashboard updates. Pushes {"table": "..."}
-    whenever order/inventory/product change — carries no row data, so there
-    is nothing here that needs branch/role filtering. The browser maps the
-    table name to the section(s) it affects and re-fetches through the
-    normal, already-authorized REST endpoints (see admin.js/staff.js)."""
-    def gen():
-        client_q = queue.Queue(maxsize=50)
-        with _sse_lock:
-            _sse_clients.add(client_q)
-        try:
-            yield 'retry: 3000\n\n'
-            while True:
-                try:
-                    payload = client_q.get(timeout=20)
-                    yield f'data: {json.dumps(payload)}\n\n'
-                except queue.Empty:
-                    yield ': keepalive\n\n'  # keeps proxies from closing the connection
-        finally:
-            with _sse_lock:
-                _sse_clients.discard(client_q)
-    return Response(stream_with_context(gen()), mimetype='text/event-stream', headers={
-        'Cache-Control': 'no-cache',
-        'X-Accel-Buffering': 'no',
-    })
+def events_poll():
+    """Cheap, stateless poll for live-dashboard updates. Call with
+    ?since=<cursor returned by the previous call> (0/omitted on first
+    call). Returns {"since": <new cursor>, "changed": ["order", ...]} —
+    never row data, just which table(s) changed since that cursor. The
+    browser maps each table name to the section(s) it affects and
+    re-fetches through the normal, already-authorized REST endpoints
+    (see admin.js/staff.js)."""
+    try:
+        since = int(request.args.get('since', 0))
+    except (TypeError, ValueError):
+        since = 0
+    with _events_lock:
+        current_seq = _events_seq
+        changed = [t for t, seq in _table_last_seq.items() if seq > since]
+    return jsonify({'since': current_seq, 'changed': changed})
 
 # ══════════════════════════════════════════════════════
 # WEB ROUTES — Staff & Public Pages
@@ -5689,8 +5692,7 @@ def staff_add_inventory():
 if __name__ == '__main__':
     import os
     port = int(os.environ.get('PORT', 5000))
-    # threaded=True is required for the /api/events SSE stream: each open
-    # SSE connection blocks for as long as the tab stays open, so without
-    # threading the single-worker dev server would stall every other
-    # request the moment one browser tab connects.
+    # threaded=True: harmless and still a sane default for the dev server,
+    # though live updates are now plain polling (/api/events/poll) and no
+    # longer need a dedicated thread per open connection the way SSE did.
     app.run(host='0.0.0.0', port=port, debug=False, threaded=True)

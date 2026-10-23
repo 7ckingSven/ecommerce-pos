@@ -317,48 +317,68 @@ document.addEventListener('visibilitychange', () => {
   }
 });
 
-// ─── Live Updates (SSE) ─────────────────────────────────
+// ─── Live Updates (polling, not SSE) ────────────────────────────────────
 // Panel-requested: a change made by another user/device (an admin editing
 // a product, another staff terminal's sale) should reflect here without a
-// manual refresh. The server only ever sends {"table": "..."}, never row
-// data — it's mapped to the section(s) below and re-fetched through the
-// normal authenticated REST endpoints, same pattern as the
-// visibilitychange handler above. See app.py's /api/events route: every
-// table currently has an allow-all RLS policy, so nothing with real data
-// is sent over this channel on purpose.
+// manual refresh. The server only ever reports which table(s) changed,
+// never row data — mapped to the section(s) below and re-fetched through
+// the normal authenticated REST endpoints, same pattern as the
+// visibilitychange handler above. See app.py's /api/events/poll route:
+// every table currently has an allow-all RLS policy, so nothing with real
+// data is sent over this channel on purpose.
+//
+// This used to be a live SSE push (EventSource). That doesn't work on
+// Gunicorn's sync workers in production: an open SSE connection blocks a
+// worker for as long as the tab stays open, which starved every other
+// request on a small instance and got the worker SIGKILLed by Gunicorn's
+// own --timeout on a repeating ~30s cycle. Plain polling every few
+// seconds is less instant but costs nothing — each call is a fast,
+// stateless request, same as any other API call.
 const SSE_TABLE_SECTIONS = {
   order:     ['orders', 'summary', 'pos'],
   inventory: ['inventory', 'pos', 'summary'],
   product:   ['pos', 'inventory'],
 };
-let _sseSource = null;
-function _connectLiveUpdates() {
-  if (_sseSource) return;
-  _sseSource = new EventSource('/api/events');
-  _sseSource.onmessage = (e) => {
-    let payload;
-    try { payload = JSON.parse(e.data); } catch (err) { return; }
-    const affected = SSE_TABLE_SECTIONS[payload.table];
-    if (!affected) return;
-    affected.forEach(invalidateSection);
-    const activeSection = localStorage.getItem('staff-section') || 'pos';
-    if (affected.includes(activeSection) && loaders[activeSection]) {
-      const expandedRows = saveStaffExpandedRows();
-      const filterStates = saveStaffFilterStates();
-      const origRender   = window.renderInvHistory;
-      window.renderInvHistory = function(data) {
-        if (origRender) origRender(data);
-        restoreStaffExpandedRows(expandedRows);
-        restoreStaffFilterStates(filterStates);
-        window.renderInvHistory = origRender;
-      };
-      _loadedSections.add(activeSection);
-      loaders[activeSection]();
+const LIVE_UPDATES_POLL_MS = 8000;
+let _liveUpdatesCursor = 0;
+let _liveUpdatesTimer = null;
+async function _pollLiveUpdates() {
+  try {
+    const res = await fetch(`/api/events/poll?since=${_liveUpdatesCursor}`);
+    if (res.ok) {
+      const data = await res.json();
+      _liveUpdatesCursor = data.since;
+      const changedTables = data.changed || [];
+      if (changedTables.length) {
+        const affected = new Set();
+        changedTables.forEach(table => {
+          (SSE_TABLE_SECTIONS[table] || []).forEach(s => affected.add(s));
+        });
+        affected.forEach(invalidateSection);
+        const activeSection = localStorage.getItem('staff-section') || 'pos';
+        if (affected.has(activeSection) && loaders[activeSection]) {
+          const expandedRows = saveStaffExpandedRows();
+          const filterStates = saveStaffFilterStates();
+          const origRender   = window.renderInvHistory;
+          window.renderInvHistory = function(data) {
+            if (origRender) origRender(data);
+            restoreStaffExpandedRows(expandedRows);
+            restoreStaffFilterStates(filterStates);
+            window.renderInvHistory = origRender;
+          };
+          _loadedSections.add(activeSection);
+          loaders[activeSection]();
+        }
+      }
     }
-  };
-  _sseSource.onerror = () => {
-    // EventSource reconnects on its own per spec; nothing to do here.
-  };
+  } catch (err) {
+    // Network hiccup — just try again on the next tick.
+  }
+  _liveUpdatesTimer = setTimeout(_pollLiveUpdates, LIVE_UPDATES_POLL_MS);
+}
+function _connectLiveUpdates() {
+  if (_liveUpdatesTimer) return;
+  _pollLiveUpdates();
 }
 if (document.readyState !== 'loading') {
   _connectLiveUpdates();
