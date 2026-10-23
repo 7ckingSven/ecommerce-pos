@@ -390,19 +390,20 @@ function forceRefreshSection(btn) {
 
   const expandedRows  = saveExpandedRows();
   const filterStates  = saveFilterStates();
-  const origInventory = renderInventory;
-  const origOrders    = renderOrders;
+  // Always wrap the fixed _trueRenderInventory/_trueRenderOrders captured at
+  // load time, never the live (possibly already-wrapped) identifier — see the
+  // comment by their declarations for why.
   window.renderInventory = function(data) {
-    origInventory(data);
+    _trueRenderInventory(data);
     restoreExpandedRows(expandedRows);
     restoreFilterStates(filterStates);
-    window.renderInventory = origInventory;
+    window.renderInventory = _trueRenderInventory;
     stopBtn();
   };
   window.renderOrders = function(data) {
-    origOrders(data);
+    _trueRenderOrders(data);
     restoreFilterStates(filterStates);
-    window.renderOrders = origOrders;
+    window.renderOrders = _trueRenderOrders;
     stopBtn();
   };
   invalidateSection(section);
@@ -419,18 +420,18 @@ document.addEventListener('visibilitychange', () => {
     if (loaders[section]) {
       const expandedRows  = saveExpandedRows();
       const filterStates  = saveFilterStates();
-      const origInventory = renderInventory;
-      const origOrders    = renderOrders;
+      // Same fixed-reference wrap as forceRefreshSection() above — never read
+      // the live renderInventory/renderOrders identifier here either.
       window.renderInventory = function(data) {
-        origInventory(data);
+        _trueRenderInventory(data);
         restoreExpandedRows(expandedRows);
         restoreFilterStates(filterStates);
-        window.renderInventory = origInventory;
+        window.renderInventory = _trueRenderInventory;
       };
       window.renderOrders = function(data) {
-        origOrders(data);
+        _trueRenderOrders(data);
         restoreFilterStates(filterStates);
-        window.renderOrders = origOrders;
+        window.renderOrders = _trueRenderOrders;
       };
       invalidateSection(section);
       _loadedSections.add(section);
@@ -2969,6 +2970,23 @@ function renderInventory(data) {
   renderPager('invPagination', filteredInv.length, invPage, 'changeInvPage');
 }
 
+// Captured ONCE, right here, before anything can ever wrap window.renderInventory.
+// forceRefreshSection() and the visibilitychange handler below used to read the
+// live `renderInventory` identifier instead — but a top-level `function
+// renderInventory(){}` declaration is also a property of `window`, so re-assigning
+// window.renderInventory re-assigns the bare `renderInventory` identifier too. If
+// either trigger fired again (fast double-click on refresh, or rapid tab
+// switching) before the first wrap's fetch had resolved and unwrapped itself, the
+// second wrap captured the FIRST WRAPPER as "original" instead of the true
+// function, nesting another layer. Each additional overlap added another layer,
+// and when a fetch finally resolved, the whole chain called itself synchronously
+// top to bottom — deep enough to blow the call stack (surfaced as a
+// RangeError inside peso()'s toLocaleString, simply because that's deep inside
+// the real renderOrders/renderInventory body at the bottom of the chain).
+// Always wrapping this fixed reference instead means every wrap is at most one
+// layer deep, no matter how many triggers overlap.
+const _trueRenderInventory = renderInventory;
+
 let inventorySearchVal = '';
 function filterInventorySearch(q) {
   inventorySearchVal = (q || '').toLowerCase().trim();
@@ -4116,6 +4134,10 @@ function renderOrders(orders) {
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
   renderPager('ordersPagination', orders.length, ordersPage, 'changeOrdersPage');
 }
+
+// Captured ONCE, right here — see the matching comment above
+// _trueRenderInventory for why this must never be re-read live.
+const _trueRenderOrders = renderOrders;
 
 // ─── Process Return (completed orders only) ───────────
 // Panelist-requested movement type, separate from Cancel: a return after the
