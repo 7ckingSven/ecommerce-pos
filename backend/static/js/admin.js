@@ -7821,9 +7821,57 @@ async function loadProfile() {
     });
 
     _setProfSaveBtn(false);
+    exitProfileEditMode();
   } catch (e) {
     showToast('Error loading profile.', 'error');
   }
+}
+
+// ─── Profile view/edit toggle ───────────────────────────
+function enterProfileEditMode() {
+  ['profFname','profMi','profLname','profUsername','profEmail','profPhone'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.removeAttribute('readonly');
+  });
+  const pwDivider  = document.getElementById('profPwDivider');
+  const pwSection  = document.getElementById('profPwSection');
+  const actionRow  = document.getElementById('profActionRow');
+  const editBtn    = document.getElementById('profEditBtn');
+  if (pwDivider) pwDivider.style.display = 'block';
+  if (pwSection) pwSection.style.display = 'block';
+  if (actionRow) actionRow.style.display = 'flex';
+  if (editBtn)   editBtn.style.display   = 'none';
+  _setProfSaveBtn(false);
+}
+
+function exitProfileEditMode() {
+  ['profFname','profMi','profLname','profUsername','profEmail','profPhone'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.setAttribute('readonly', 'readonly');
+  });
+  const pwDivider  = document.getElementById('profPwDivider');
+  const pwSection  = document.getElementById('profPwSection');
+  const actionRow  = document.getElementById('profActionRow');
+  const editBtn    = document.getElementById('profEditBtn');
+  if (pwDivider) pwDivider.style.display = 'none';
+  if (pwSection) pwSection.style.display = 'none';
+  if (actionRow) actionRow.style.display = 'none';
+  if (editBtn)   editBtn.style.display   = '';
+}
+
+function cancelProfileEdit() {
+  document.getElementById('profFname').value    = _profOrigInfo.fname;
+  document.getElementById('profMi').value       = _profOrigInfo.mi;
+  document.getElementById('profLname').value    = _profOrigInfo.lname;
+  document.getElementById('profUsername').value = _profOrigInfo.username;
+  document.getElementById('profEmail').value    = _profOrigInfo.email;
+  document.getElementById('profPhone').value    = _profOrigInfo.phone_number;
+  document.getElementById('profCurrentPw').value = '';
+  document.getElementById('profNewPw').value     = '';
+  document.getElementById('profConfirmPw').value = '';
+  _profClearErrors();
+  _setProfSaveBtn(false);
+  exitProfileEditMode();
 }
 
 function checkProfDirty() {
@@ -7905,6 +7953,7 @@ async function saveProfile() {
     document.getElementById('profConfirmPw').value = '';
     _profClearErrors();
     _setProfSaveBtn(false);
+    exitProfileEditMode();
   } catch (e) {
     showToast('Error saving profile.', 'error');
   } finally {

@@ -772,6 +772,14 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 }
 .form-input:focus { border-color: var(--g-600); }
 .form-input::placeholder { color: var(--text-muted); }
+.form-input[readonly] {
+  background: transparent;
+  border-color: transparent;
+  color: var(--text);
+  padding-left: 0;
+  cursor: default;
+}
+.form-input[readonly]:focus { border-color: transparent; }
 .form-select { cursor: pointer; }
 .form-textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
 .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
