@@ -4484,10 +4484,12 @@ function enterProfileEditMode() {
   });
   const pwDivider  = document.getElementById('profPwDivider');
   const pwSection  = document.getElementById('profPwSection');
+  const pwViewRow  = document.getElementById('profPwViewRow');
   const actionRow  = document.getElementById('profActionRow');
   const editBtn    = document.getElementById('profEditBtn');
   if (pwDivider) pwDivider.style.display = 'block';
   if (pwSection) pwSection.style.display = 'block';
+  if (pwViewRow) pwViewRow.style.display = 'none';
   if (actionRow) actionRow.style.display = 'flex';
   if (editBtn)   editBtn.style.display   = 'none';
   _setProfSaveBtn(false);
@@ -4500,10 +4502,12 @@ function exitProfileEditMode() {
   });
   const pwDivider  = document.getElementById('profPwDivider');
   const pwSection  = document.getElementById('profPwSection');
+  const pwViewRow  = document.getElementById('profPwViewRow');
   const actionRow  = document.getElementById('profActionRow');
   const editBtn    = document.getElementById('profEditBtn');
   if (pwDivider) pwDivider.style.display = 'none';
   if (pwSection) pwSection.style.display = 'none';
+  if (pwViewRow) pwViewRow.style.display = '';
   if (actionRow) actionRow.style.display = 'none';
   if (editBtn)   editBtn.style.display   = '';
 }
