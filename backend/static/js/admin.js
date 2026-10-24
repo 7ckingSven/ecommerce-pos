@@ -1349,7 +1349,7 @@ async function openPriceHistoryModal(productId, productName) {
         <p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Loading…</p>
       </div>
     </div>
-  `, '720px');
+  `, '720px', false);
 
   try {
     const qs  = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
@@ -1528,7 +1528,7 @@ function _renderBarcodeModalContent(p) {
         }).join('')}
       </div>
     </div>
-  `, '460px');
+  `, '460px', false);
 
   if (typeof JsBarcode !== 'undefined') {
     // Deferred a tick so the SVG nodes exist in the DOM showModal() just wrote.
@@ -4017,7 +4017,14 @@ function updateAdminOrdersBadge(orders) {
 // ─── View Order Items Modal ───────────────────────────
 
 // ─── Generic Modal ────────────────────────────────────
-function showModal(html, maxWidth) {
+// closableOnBackdrop defaults to true so existing callers (Product Details
+// quick view, Cash Remittance confirm, Process Return, PO Receipt) keep
+// their current click-outside-to-close behavior unchanged. Pass false for
+// modals that should only close via their own X/Cancel button (Price
+// History, Barcode, Order Details) — set per call, not globally, since
+// this one element is reused for every showModal() popup.
+function showModal(html, maxWidth, closableOnBackdrop) {
+  if (closableOnBackdrop === undefined) closableOnBackdrop = true;
   const overlay = document.getElementById('genericModalOverlay');
   const modal   = document.getElementById('genericModal');
   const content = document.getElementById('genericModalContent');
@@ -4028,6 +4035,10 @@ function showModal(html, maxWidth) {
   // caller asks for something wider, so one caller's width doesn't leak
   // into the next modal that reuses this same element.
   modal.style.maxWidth = maxWidth || '600px';
+  // Overriding the inline onclick="closeModal()" on this element (see
+  // admin_dashboard.html) per call — plain property assignment takes
+  // precedence over the HTML attribute.
+  overlay.onclick = closableOnBackdrop ? closeModal : null;
   overlay.style.display = 'block';
   modal.style.display   = 'block';
   document.body.style.overflow = 'hidden';
@@ -4142,7 +4153,7 @@ function viewOrderItems(order) {
         <span style="font-weight:700;color:#16a34a;font-size:16px;">₱${Number(order.total).toFixed(2)}</span>
       </div>
     </div>
-  `);
+  `, undefined, false);
 }
 
 // Orders only move forward one step at a time: pending -> processing -> out_for_delivery -> completed.
