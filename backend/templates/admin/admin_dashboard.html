@@ -6,7 +6,7 @@
   <title>Admin Dashboard — TEFC E-Commerce</title>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v=2">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.6/dist/JsBarcode.all.min.js"></script>
@@ -1155,7 +1155,7 @@
 
   <!-- Product Modal -->
   <div class="modal-overlay" id="productModalOverlay"></div>
-  <div class="modal" id="productModal" style="max-width:680px;width:95%;">
+  <div class="modal" id="productModal" style="max-width:760px;width:95%;">
     <div class="modal-header">
       <h3 class="modal-title" id="productModalTitle">Add Product</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('productModal', closeProductModal)">
@@ -1206,9 +1206,9 @@
           <input type="hidden" id="pStatus" value="inactive"/>
           <div id="pStatusDisplay" style="display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border-radius:8px;background:rgba(239,68,68,0.1);border:1px solid rgba(239,68,68,0.2);">
             <span style="width:8px;height:8px;border-radius:50%;background:#ef4444;display:inline-block;" id="pStatusDot"></span>
-            <span id="pStatusText" style="font-size:13px;font-weight:600;color:#ef4444;">Inactive</span>
+            <span id="pStatusText" style="font-size:14px;font-weight:600;color:#ef4444;">Inactive</span>
           </div>
-          <p style="font-size:11px;color:var(--text-muted);margin-top:6px;">
+          <p style="font-size:12px;color:var(--text-muted);margin-top:6px;">
             Product becomes <strong>Active</strong> automatically when stock is added via Purchase Order.
           </p>
         </div>
@@ -1249,7 +1249,7 @@
           <label class="form-label">Barcode <span style="font-weight:400;color:var(--text-muted);">(auto-generated — type to override)</span></label>
           <div style="display:flex;gap:8px;">
             <input type="text" id="pBarcode" class="form-input" placeholder="Auto-generated on save" style="flex:1;font-family:'JetBrains Mono',monospace;" oninput="_prodCheckField('pBarcode')"/>
-            <button type="button" class="btn btn-cancel" onclick="regenerateProductBarcode()" style="font-size:12px;padding:0 12px;white-space:nowrap;">Generate New</button>
+            <button type="button" class="btn btn-cancel" onclick="regenerateProductBarcode()" style="font-size:13px;padding:0 12px;white-space:nowrap;">Generate New</button>
           </div>
           <span class="field-hint">Leave as-is to keep the current code. Type a value to set a specific one, or click "Generate New" for a fresh random code (saved immediately). Printable labels are under the product's Barcode action in the table.</span>
         </div>
@@ -1258,7 +1258,7 @@
         <div class="form-group">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <label class="form-label" style="margin:0;">Option Groups <span style="font-weight:400;color:var(--text-muted);">(optional — e.g. Size, Color)</span></label>
-            <button type="button" class="btn btn-cancel" onclick="addOptionGroup()" style="font-size:12px;padding:5px 10px;">+ Add Group</button>
+            <button type="button" class="btn btn-cancel" onclick="addOptionGroup()" style="font-size:13px;padding:6px 11px;">+ Add Group</button>
           </div>
           <div id="optionGroupsWrap" style="display:flex;flex-direction:column;gap:12px;"></div>
           <input type="hidden" id="pOptionGroups" value="[]"/>
@@ -1281,7 +1281,7 @@
 
   <!-- Discount Modal -->
   <div class="modal-overlay" id="discountModalOverlay"></div>
-  <div class="modal" id="discountModal">
+  <div class="modal" id="discountModal" style="max-width:620px;">
     <div class="modal-header">
       <h3 class="modal-title" id="discountModalTitle">Add Discount</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('discountModal', closeDiscountModal)">
@@ -1319,7 +1319,7 @@
 
   <!-- Assign Discount to Products Modal -->
   <div class="modal-overlay" id="assignModalOverlay"></div>
-  <div class="modal" id="assignModal" style="max-width:560px;">
+  <div class="modal" id="assignModal" style="max-width:620px;">
     <div class="modal-header">
       <h3 class="modal-title" id="assignModalTitle">Assign Discount to Products</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('assignModal', closeAssignModal)">
@@ -1327,7 +1327,7 @@
       </button>
     </div>
     <div class="modal-body">
-      <p style="font-size:13px;color:var(--text-muted);margin-bottom:1rem;">Select products to apply this discount to. Uncheck to remove discount from a product.</p>
+      <p style="font-size:14px;color:var(--text-muted);margin-bottom:1rem;">Select products to apply this discount to. Uncheck to remove discount from a product.</p>
       <div style="display:flex;gap:8px;margin-bottom:1rem;">
         <div class="search-wrap" style="flex:1;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
@@ -1350,7 +1350,7 @@
   <!-- Inventory Modal -->
   <!-- Add Stock Modal -->
   <div class="modal-overlay" id="addStockModalOverlay"></div>
-  <div class="modal" id="addStockModal" style="max-width:560px;">
+  <div class="modal" id="addStockModal" style="max-width:640px;">
     <div class="modal-header">
       <h3 class="modal-title">Add Stock</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('addStockModal', closeAddStockModal)">
@@ -1375,8 +1375,8 @@
         <!-- Product Items Container -->
         <div id="addStockItems" style="display:flex;flex-direction:column;gap:10px;max-height:400px;overflow-y:auto;padding-right:4px;"></div>
         <!-- Add Another Product Button -->
-        <button type="button" onclick="addStockItemRow()" style="margin-top:10px;width:100%;padding:8px;border:1.5px dashed var(--border);border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;">
-          <span style="font-size:18px;">+</span> Add Another Product
+        <button type="button" onclick="addStockItemRow()" style="margin-top:10px;width:100%;padding:9px;border:1.5px dashed var(--border);border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span style="font-size:19px;">+</span> Add Another Product
         </button>
         <div class="modal-footer" style="margin-top:12px;">
           <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('addStockModal', closeAddStockModal)">Cancel</button>
@@ -1388,7 +1388,7 @@
 
   <!-- Stock Transfer Modal -->
   <div class="modal-overlay" id="transferModalOverlay"></div>
-  <div class="modal" id="transferModal">
+  <div class="modal" id="transferModal" style="max-width:620px;">
     <div class="modal-header">
       <h3 class="modal-title">Stock Transfer</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('transferModal', closeTransferModal)">
@@ -1403,7 +1403,7 @@
         </div>
         <div id="transferVariantWrap" style="display:none;">
           <div class="form-group">
-            <label class="form-label">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
+            <label class="form-label">Variant <span style="font-size:12px;color:var(--text-muted);">(optional)</span></label>
             <div id="transferVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
           </div>
         </div>
@@ -1439,7 +1439,7 @@
 
   <!-- Adjust Stock Modal -->
   <div class="modal-overlay" id="adjustModalOverlay"></div>
-  <div class="modal" id="adjustModal">
+  <div class="modal" id="adjustModal" style="max-width:620px;">
     <div class="modal-header">
       <h3 class="modal-title" style="color:#ef4444;">Adjust Stock</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('adjustModal', closeAdjustModal)">
@@ -1447,7 +1447,7 @@
       </button>
     </div>
     <div class="modal-body">
-      <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:10px 14px;margin-bottom:1rem;font-size:12px;color:#ef4444;">
+      <div style="background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.2);border-radius:8px;padding:11px 15px;margin-bottom:1rem;font-size:13px;color:#ef4444;">
         ⚠️ This will <strong>deduct</strong> stock from the selected product. Use for loss, theft, or damage write-offs.
       </div>
       <form id="adjustForm" onsubmit="submitAdjust(event)">
@@ -1457,7 +1457,7 @@
         </div>
         <div id="adjustVariantWrap" style="display:none;">
           <div class="form-group">
-            <label class="form-label">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
+            <label class="form-label">Variant <span style="font-size:12px;color:var(--text-muted);">(optional)</span></label>
             <div id="adjustVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
           </div>
         </div>
@@ -1497,7 +1497,7 @@
 
   <!-- User Modal -->
   <div class="modal-overlay" id="userModalOverlay"></div>
-  <div class="modal" id="userModal">
+  <div class="modal" id="userModal" style="max-width:640px;">
     <div class="modal-header">
       <h3 class="modal-title" id="userModalTitle">Add Staff</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('userModal', closeUserModal)">
@@ -1619,7 +1619,7 @@
 
   <!-- Create PO Modal -->
   <div class="modal-overlay" id="createPOModalOverlay"></div>
-  <div class="modal" id="createPOModal" style="max-width:920px;">
+  <div class="modal" id="createPOModal" style="max-width:1000px;">
     <div class="modal-header">
       <h3 class="modal-title">Create Purchase Order</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('createPOModal', closeCreatePOModal)">
@@ -1650,7 +1650,7 @@
       </div>
 
       <!-- Total -->
-      <div style="text-align:right;font-size:14px;font-weight:700;color:var(--text-primary);padding:8px 0;border-top:1px solid var(--border);">
+      <div style="text-align:right;font-size:15px;font-weight:700;color:var(--text-primary);padding:9px 0;border-top:1px solid var(--border);">
         Total: <span id="poTotal">₱0.00</span>
       </div>
 
@@ -1663,7 +1663,7 @@
 
   <!-- Approved Stock Requests Picker Modal -->
   <div class="modal-overlay" id="approvedRequestsModalOverlay"></div>
-  <div class="modal" id="approvedRequestsModal" style="max-width:720px;">
+  <div class="modal" id="approvedRequestsModal" style="max-width:780px;">
     <div class="modal-header">
       <h3 class="modal-title">Approved Stock Requests</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('approvedRequestsModal', closeApprovedRequestsModal)">
@@ -1671,10 +1671,10 @@
       </button>
     </div>
     <div class="modal-body">
-      <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Select one or more approved requests to pre-fill into a new PO. Unit price still needs to be entered manually.</p>
-      <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;">
+      <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">Select one or more approved requests to pre-fill into a new PO. Unit price still needs to be entered manually.</p>
+      <label style="display:flex;align-items:center;gap:8px;padding:7px 9px;margin-bottom:6px;cursor:pointer;">
         <input type="checkbox" id="approvedReqSelectAll" onchange="toggleSelectAllApprovedReq(this.checked)"/>
-        <span style="font-size:12px;font-weight:600;">Select All</span>
+        <span style="font-size:13px;font-weight:600;">Select All</span>
       </label>
       <div id="approvedRequestsList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
         <!-- rows injected by openApprovedRequestsModal() -->
@@ -1688,7 +1688,7 @@
 
   <!-- PO Detail Modal -->
   <div class="modal-overlay" id="poDetailModalOverlay"></div>
-  <div class="modal" id="poDetailModal" style="max-width:820px;">
+  <div class="modal" id="poDetailModal" style="max-width:900px;">
     <div class="modal-header">
       <h3 class="modal-title" id="poDetailTitle">Purchase Order</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('poDetailModal', closePODetailModal)">
@@ -1706,7 +1706,7 @@
   <!-- Generic Order Detail Modal -->
   <!-- Product Toggle (Activate / Deactivate) Confirmation Modal -->
   <div class="modal-overlay" id="productToggleModalOverlay"></div>
-  <div class="modal" id="productToggleModal" style="max-width:400px;">
+  <div class="modal" id="productToggleModal" style="max-width:440px;">
     <div class="modal-header">
       <h3 class="modal-title" id="productToggleModalTitle">Deactivate Product</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('productToggleModal', closeProductToggleModal)">
@@ -1714,7 +1714,7 @@
       </button>
     </div>
     <div class="modal-body">
-      <p id="productToggleModalDesc" style="font-size:13px;color:var(--text-muted);margin:0 0 1.25rem;line-height:1.6;"></p>
+      <p id="productToggleModalDesc" style="font-size:14px;color:var(--text-muted);margin:0 0 1.25rem;line-height:1.6;"></p>
       <div class="modal-footer">
         <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('productToggleModal', closeProductToggleModal)">Cancel</button>
         <button type="button" class="btn" id="productToggleConfirmBtn" onclick="confirmProductToggle()">Confirm</button>

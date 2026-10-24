@@ -4215,7 +4215,7 @@ function buildReqProductAutocomplete(container, { inputId, hiddenId, onSelect })
       (p.product_name || '').toLowerCase().includes(term)
     ).slice(0, 10);
     if (!matches.length) {
-      list.innerHTML = `<div style="padding:8px 12px;font-size:12px;color:var(--text-muted);">No products found</div>`;
+      list.innerHTML = `<div style="padding:9px 13px;font-size:13px;color:var(--text-muted);">No products found</div>`;
       positionList();
       list.style.display = 'block';
       return;
@@ -4223,8 +4223,8 @@ function buildReqProductAutocomplete(container, { inputId, hiddenId, onSelect })
     matches.forEach(p => {
       const item = document.createElement('div');
       item.className = 'ac-item';
-      item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);background:var(--card-bg);';
-      item.innerHTML = `<span style="font-weight:500;">${p.product_name}</span><span style="font-size:11px;color:var(--text-muted);margin-left:6px;">${stockLabel(p)}</span>`;
+      item.style.cssText = 'padding:8px 13px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);background:var(--card-bg);';
+      item.innerHTML = `<span style="font-weight:500;">${p.product_name}</span><span style="font-size:12px;color:var(--text-muted);margin-left:6px;">${stockLabel(p)}</span>`;
       item.addEventListener('mousedown', e => { e.preventDefault(); selectProduct(p); });
       list.appendChild(item);
     });
@@ -4290,20 +4290,20 @@ function addReqItemRow() {
   row.innerHTML = `
     ${reqRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove();_reqUpdateBtn();" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
     <div class="form-group" style="margin-bottom:8px;">
-      <label class="form-label" style="font-size:11px;">Product <span class="req">*</span></label>
+      <label class="form-label" style="font-size:12px;">Product <span class="req">*</span></label>
       ${reqProductAcHTML(inputId, hiddenId)}
     </div>
     <div class="req-variant-wrap" style="display:none;margin-bottom:8px;">
-      <label class="form-label" style="font-size:11px;">Variant <span style="font-size:10px;color:var(--text-muted);">(optional)</span></label>
+      <label class="form-label" style="font-size:12px;">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
       <div class="req-variant-selects" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
     </div>
     <div class="form-row-2" style="margin:0;">
       <div class="form-group" style="margin:0;">
-        <label class="form-label" style="font-size:11px;">Quantity Needed <span class="req">*</span></label>
+        <label class="form-label" style="font-size:12px;">Quantity Needed <span class="req">*</span></label>
         <input type="number" class="form-input req-qty" min="1" required placeholder="e.g. 20"/>
       </div>
       <div class="form-group" style="margin:0;">
-        <label class="form-label" style="font-size:11px;">Current Stock</label>
+        <label class="form-label" style="font-size:12px;">Current Stock</label>
         <input type="text" class="form-input req-current-stock" disabled placeholder="Select product first"/>
       </div>
     </div>
@@ -4340,8 +4340,8 @@ function loadReqRowVariantsByProduct(product, rowId) {
   wrap.style.display = 'block';
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
-      <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
-      <select class="form-input form-select req-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select req-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
         <option value="">Any</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>

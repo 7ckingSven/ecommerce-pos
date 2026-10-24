@@ -1340,8 +1340,8 @@ async function openPriceHistoryModal(productId, productName) {
     <div style="padding:1.5rem;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
         <div>
-          <h3 style="margin:0;font-size:16px;">Price History${titleSuffix}</h3>
-          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">Resale price changes, most recent first</p>
+          <h3 style="margin:0;font-size:17px;">Price History${titleSuffix}</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">Resale price changes, most recent first</p>
         </div>
         <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
       </div>
@@ -1349,7 +1349,7 @@ async function openPriceHistoryModal(productId, productName) {
         <p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Loading…</p>
       </div>
     </div>
-  `, '720px', false);
+  `, '780px', false);
 
   try {
     const qs  = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
@@ -1374,7 +1374,7 @@ function renderPriceHistoryRows(rows, showProductCol) {
     return;
   }
   wrap.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+    <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
       <thead>
         <tr style="text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border);">
           <th style="padding:6px 8px;">Date</th>
@@ -1399,7 +1399,7 @@ function renderPriceHistoryRows(rows, showProductCol) {
               <td style="padding:7px 8px;text-align:right;color:var(--text-muted);text-decoration:line-through;">${peso(oldP)}</td>
               <td style="padding:7px 8px;text-align:right;font-weight:600;">${peso(newP)}</td>
               <td style="padding:7px 8px;text-align:right;font-weight:700;color:${deltaColor};">${deltaStr}</td>
-              <td style="padding:7px 8px;">${r.changed_by_name || '—'}${r.changed_by_role ? `<br><span style="font-size:10.5px;color:var(--text-muted);text-transform:capitalize;">${r.changed_by_role}</span>` : ''}</td>
+              <td style="padding:7px 8px;">${r.changed_by_name || '—'}${r.changed_by_role ? `<br><span style="font-size:11.5px;color:var(--text-muted);text-transform:capitalize;">${r.changed_by_role}</span>` : ''}</td>
             </tr>`;
         }).join('')}
       </tbody>
@@ -1503,8 +1503,8 @@ function _renderBarcodeModalContent(p) {
     <div style="padding:1.25rem 1.5rem 1.5rem;">
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
         <div>
-          <h3 style="margin:0;font-size:16px;">Barcode</h3>
-          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${p.product_name}</p>
+          <h3 style="margin:0;font-size:17px;">Barcode</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">${p.product_name}</p>
         </div>
         <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
       </div>
@@ -1514,21 +1514,21 @@ function _renderBarcodeModalContent(p) {
           return `
           <div style="border:1px solid var(--border);border-radius:10px;padding:10px;">
             <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:${r.code ? '6px' : '0'};">
-              <span style="font-size:12.5px;font-weight:600;">${r.label}</span>
-              <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick='_generateBarcodeFromModal("${p.product_id}", ${JSON.stringify(r.scope)}, ${JSON.stringify(r.payload)})'>${r.code ? 'Generate New' : 'Generate'}</button>
+              <span style="font-size:13.5px;font-weight:600;">${r.label}</span>
+              <button class="btn btn-cancel" style="font-size:12px;padding:5px 11px;" onclick='_generateBarcodeFromModal("${p.product_id}", ${JSON.stringify(r.scope)}, ${JSON.stringify(r.payload)})'>${r.code ? 'Generate New' : 'Generate'}</button>
             </div>
             ${r.code ? `
               <svg id="barcodeSvg_${idx}" style="max-width:100%;"></svg>
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
-                <span style="font-family:'JetBrains Mono',monospace;font-size:12px;letter-spacing:1px;color:var(--text-muted);">${r.code}</span>
-                <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick='printProductBarcode("${p.product_id}", ${JSON.stringify(r.code)}, ${JSON.stringify(r.label)})'>Print</button>
+                <span style="font-family:'JetBrains Mono',monospace;font-size:13px;letter-spacing:1px;color:var(--text-muted);">${r.code}</span>
+                <button class="btn btn-solid-green" style="font-size:12px;padding:5px 11px;" onclick='printProductBarcode("${p.product_id}", ${JSON.stringify(r.code)}, ${JSON.stringify(r.label)})'>Print</button>
               </div>
-            ` : `<p style="color:var(--text-muted);font-size:12px;margin:0;">No barcode yet.</p>`}
+            ` : `<p style="color:var(--text-muted);font-size:13px;margin:0;">No barcode yet.</p>`}
           </div>`;
         }).join('')}
       </div>
     </div>
-  `, '460px', false);
+  `, '500px', false);
 
   if (typeof JsBarcode !== 'undefined') {
     // Deferred a tick so the SVG nodes exist in the DOM showModal() just wrote.
@@ -1680,19 +1680,19 @@ function viewAdminProductDetails(productId) {
 
   const branchRows = (p.branch_stock || []).length
     ? (p.branch_stock || []).map(bs => `
-        <div style="display:flex;justify-content:space-between;font-size:12px;padding:4px 0;border-bottom:1px dashed var(--border);">
+        <div style="display:flex;justify-content:space-between;font-size:13px;padding:5px 0;border-bottom:1px dashed var(--border);">
           <span>${bs.branch?.branch_name || 'Branch'}</span>
           <span style="font-weight:600;">${bs.quantity} units</span>
         </div>`).join('')
-    : '<div style="font-size:12px;color:var(--text-muted);">No branch stock records</div>';
+    : '<div style="font-size:13px;color:var(--text-muted);">No branch stock records</div>';
 
   const groups = p.option_groups || [];
   const variantsHtml = groups.length
     ? `<div style="margin-top:12px;">
-         <label class="form-label" style="font-size:11px;">Available Variants</label>
+         <label class="form-label" style="font-size:12px;">Available Variants</label>
          <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:4px;">
            ${groups.map(g => `
-             <div style="padding:6px 10px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:12px;">
+             <div style="padding:7px 11px;border-radius:8px;border:1px solid var(--border);background:var(--surface);font-size:13px;">
                <strong>${g.label}:</strong> ${(g.choices || []).map(_choiceVal).join(', ') || '—'}
              </div>`).join('')}
          </div>
@@ -1700,54 +1700,54 @@ function viewAdminProductDetails(productId) {
     : '';
 
   showModal(`
-    <div style="padding:1rem 1rem 0.75rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
-      <strong style="font-size:15px;">Product Details</strong>
+    <div style="padding:1.1rem 1.25rem 0.85rem;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;">
+      <strong style="font-size:16px;">Product Details</strong>
       <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:20px;line-height:1;">&times;</button>
     </div>
-    <div style="padding:1rem;">
+    <div style="padding:1.25rem;">
       ${imgHtml}
       <div style="margin-top:14px;margin-bottom:16px;">
-        <div style="font-size:20px;font-weight:800;color:var(--text);line-height:1.25;">${p.product_name}</div>
-        <div style="font-size:13px;color:var(--text-muted);margin-top:4px;">${p.brand || '—'} • ${p.category || '—'}${p.sub_category ? ' / ' + p.sub_category : ''}</div>
+        <div style="font-size:21px;font-weight:800;color:var(--text);line-height:1.25;">${p.product_name}</div>
+        <div style="font-size:14px;color:var(--text-muted);margin-top:4px;">${p.brand || '—'} • ${p.category || '—'}${p.sub_category ? ' / ' + p.sub_category : ''}</div>
         <div style="margin-top:8px;">${badge(p.status)}</div>
       </div>
       <div class="form-row-2" style="margin-bottom:10px;">
         <div>
-          <label class="form-label" style="font-size:11px;">Price</label>
+          <label class="form-label" style="font-size:12px;">Price</label>
           ${hasDiscount
-            ? `<div style="font-size:12px;color:var(--text-muted);text-decoration:line-through;">${peso(p.price)}</div>
-               <div style="font-weight:800;font-size:20px;color:var(--g-400);">${peso(discountedPrice)} <span style="font-size:12px;font-weight:700;">(${disc.percentage}% OFF)</span></div>`
-            : `<div style="font-weight:800;font-size:20px;color:var(--text);">${peso(p.price)}</div>`
+            ? `<div style="font-size:13px;color:var(--text-muted);text-decoration:line-through;">${peso(p.price)}</div>
+               <div style="font-weight:800;font-size:21px;color:var(--g-400);">${peso(discountedPrice)} <span style="font-size:13px;font-weight:700;">(${disc.percentage}% OFF)</span></div>`
+            : `<div style="font-weight:800;font-size:21px;color:var(--text);">${peso(p.price)}</div>`
           }
-          ${(p.base_price !== null && p.base_price !== undefined && p.base_price !== '') ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px;">Cost (Base Price): ${peso(p.base_price)}</div>` : ''}
+          ${(p.base_price !== null && p.base_price !== undefined && p.base_price !== '') ? `<div style="font-size:13px;color:var(--text-muted);margin-top:2px;">Cost (Base Price): ${peso(p.base_price)}</div>` : ''}
         </div>
         <div>
-          <label class="form-label" style="font-size:11px;">Total Stock (all branches)</label>
-          <div style="font-weight:800;font-size:20px;color:var(--text);">${totalStock} <span style="font-size:12px;font-weight:600;color:var(--text-muted);">units</span></div>
+          <label class="form-label" style="font-size:12px;">Total Stock (all branches)</label>
+          <div style="font-weight:800;font-size:21px;color:var(--text);">${totalStock} <span style="font-size:13px;font-weight:600;color:var(--text-muted);">units</span></div>
         </div>
       </div>
       <div style="margin-bottom:10px;">
-        <label class="form-label" style="font-size:11px;">Stock by Branch</label>
+        <label class="form-label" style="font-size:12px;">Stock by Branch</label>
         <div style="margin-top:4px;">${branchRows}</div>
       </div>
       <div style="margin-bottom:10px;">
-        <label class="form-label" style="font-size:11px;">Net Weight / Volume</label>
-        <div style="font-size:13px;${(!p.net_weight || Number(p.net_weight) <= 0) ? 'color:#f59e0b;font-weight:600;' : 'color:var(--text);'}margin-top:2px;">
+        <label class="form-label" style="font-size:12px;">Net Weight / Volume</label>
+        <div style="font-size:14px;${(!p.net_weight || Number(p.net_weight) <= 0) ? 'color:#f59e0b;font-weight:600;' : 'color:var(--text);'}margin-top:2px;">
           ${(!p.net_weight || Number(p.net_weight) <= 0) ? '⚠️ Not set yet — edit this product to add it.' : `${p.net_weight} ${p.net_weight_unit || 'kg'}`}
         </div>
       </div>
       ${p.description ? `
         <div style="margin-bottom:10px;">
-          <label class="form-label" style="font-size:11px;">Description</label>
-          <div style="font-size:13px;color:var(--text-muted);margin-top:2px;">${p.description}</div>
+          <label class="form-label" style="font-size:12px;">Description</label>
+          <div style="font-size:14px;color:var(--text-muted);margin-top:2px;">${p.description}</div>
         </div>` : ''}
       ${variantsHtml}
-      <div style="display:flex;gap:16px;margin-top:14px;font-size:11px;color:var(--text-muted);">
+      <div style="display:flex;gap:16px;margin-top:14px;font-size:12px;color:var(--text-muted);">
         <span>Created: ${p.created_at ? toUtcDate(p.created_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
         <span>Updated: ${p.updated_at ? toUtcDate(p.updated_at).toLocaleDateString('en-PH', { month:'short', day:'numeric', year:'numeric' }) : '—'}</span>
       </div>
     </div>
-  `);
+  `, '660px');
 }
 window.viewAdminProductDetails = viewAdminProductDetails;
 
@@ -2117,26 +2117,26 @@ function renderOptionGroups() {
           style="flex:1;"
         />
         <button type="button" onclick="removeOptionGroup(${gi})"
-          style="background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:12px;white-space:nowrap;">
+          style="background:rgba(239,68,68,0.1);color:#ef4444;border:1px solid rgba(239,68,68,0.3);border-radius:6px;padding:6px 10px;cursor:pointer;font-size:13px;white-space:nowrap;">
           Remove
         </button>
       </div>
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
         ${g.choices.map((c, ci) => `
-          <div style="display:flex;align-items:center;gap:6px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.25);border-radius:8px;padding:5px 8px;flex-wrap:wrap;">
-            <span style="font-size:12px;font-weight:600;color:#16a34a;min-width:60px;">${c.value}</span>
+          <div style="display:flex;align-items:center;gap:6px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.25);border-radius:8px;padding:6px 9px;flex-wrap:wrap;">
+            <span style="font-size:13px;font-weight:600;color:#16a34a;min-width:60px;">${c.value}</span>
             <input type="number" step="0.01" min="0" class="form-input" placeholder="Price override"
               value="${c.price ?? ''}" oninput="updateChoicePrice(${gi}, ${ci}, this.value)"
               title="Leave blank to use the base price"
-              style="width:110px;font-size:11px;padding:4px 6px;"/>
+              style="width:112px;font-size:12px;padding:5px 7px;"/>
             ${_choiceImagePickerHtml(gi, ci, c.image)}
-            <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-muted);min-width:78px;" title="This choice's own barcode — leave ungenerated to scan the product's base barcode instead">${c.barcode || 'no barcode'}</span>
+            <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-muted);min-width:78px;" title="This choice's own barcode — leave ungenerated to scan the product's base barcode instead">${c.barcode || 'no barcode'}</span>
             <button type="button" onclick="generateChoiceBarcode(${gi}, ${ci})"
               class="btn-icon" title="${c.barcode ? 'Regenerate this choice’s barcode' : 'Generate a barcode for this choice'}" style="padding:3px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
             </button>
             <button type="button" onclick="removeChoice(${gi}, ${ci})"
-              style="margin-left:auto;background:none;border:none;color:#ef4444;cursor:pointer;font-size:15px;line-height:1;padding:2px 4px;" title="Remove choice">&times;</button>
+              style="margin-left:auto;background:none;border:none;color:#ef4444;cursor:pointer;font-size:16px;line-height:1;padding:2px 4px;" title="Remove choice">&times;</button>
           </div>`).join('')}
       </div>
       <div style="display:flex;gap:8px;">
@@ -2145,11 +2145,11 @@ function renderOptionGroups() {
           class="form-input"
           placeholder="Add choice (e.g. XS, Red...)"
           id="choiceInput_${gi}"
-          style="flex:1;font-size:13px;"
+          style="flex:1;font-size:14px;"
           onkeydown="if(event.key==='Enter'){event.preventDefault();addChoice(${gi});}"
         />
         <button type="button" onclick="addChoice(${gi})"
-          class="btn btn-cancel" style="white-space:nowrap;font-size:12px;">
+          class="btn btn-cancel" style="white-space:nowrap;font-size:13px;">
           + Add
         </button>
       </div>
@@ -2293,16 +2293,16 @@ function renderVariantOverridesGrid() {
         const ov    = _findComboOverride(options) || {};
         const label = Object.values(options).join(' / ');
         return `
-        <div style="display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:5px 8px;flex-wrap:wrap;">
-          <span style="flex:1;font-size:12px;min-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span>
+        <div style="display:flex;align-items:center;gap:6px;border:1px solid var(--border);border-radius:8px;padding:6px 9px;flex-wrap:wrap;">
+          <span style="flex:1;font-size:13px;min-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${label}</span>
           <input type="number" step="0.01" min="0" class="form-input" placeholder="Price"
             value="${ov.price ?? ''}" oninput="updateComboOverride(${idx}, 'price', this.value)"
-            style="width:90px;font-size:11px;padding:4px 6px;"/>
-          <select class="form-input form-select" style="font-size:11px;padding:4px 6px;max-width:120px;" onchange="updateComboOverride(${idx}, 'image', this.value)" ${urls.length ? '' : 'disabled'}>
+            style="width:92px;font-size:12px;padding:5px 7px;"/>
+          <select class="form-input form-select" style="font-size:12px;padding:5px 7px;max-width:120px;" onchange="updateComboOverride(${idx}, 'image', this.value)" ${urls.length ? '' : 'disabled'}>
             <option value="">Default image</option>
             ${urls.map((u, ui) => `<option value="${u}" ${u === ov.image ? 'selected' : ''}>Image ${ui + 1}</option>`).join('')}
           </select>
-          <span style="font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--text-muted);min-width:78px;" title="This exact combination's own barcode — leave ungenerated to fall back to its choices' or the product's barcode">${ov.barcode || 'no barcode'}</span>
+          <span style="font-family:'JetBrains Mono',monospace;font-size:11.5px;color:var(--text-muted);min-width:78px;" title="This exact combination's own barcode — leave ungenerated to fall back to its choices' or the product's barcode">${ov.barcode || 'no barcode'}</span>
           <button type="button" onclick="generateComboBarcode(${idx})"
             class="btn-icon" title="${ov.barcode ? 'Regenerate this combination’s barcode' : 'Generate a barcode for this combination'}" style="padding:3px;">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px;"><rect x="3" y="5" width="2" height="14"/><rect x="7" y="5" width="1" height="14"/><rect x="10" y="5" width="3" height="14"/><rect x="15" y="5" width="1" height="14"/><rect x="18" y="5" width="2" height="14"/><rect x="21" y="5" width="1" height="14"/></svg>
@@ -3198,7 +3198,7 @@ function buildProductAutocomplete(container, { inputId, hiddenId, listId, onSele
       (p.product_name || '').toLowerCase().includes(term)
     ).slice(0, 10);
     if (!matches.length) {
-      list.innerHTML = `<div style="padding:8px 12px;font-size:12px;color:var(--text-muted);">No products found</div>`;
+      list.innerHTML = `<div style="padding:9px 13px;font-size:13px;color:var(--text-muted);">No products found</div>`;
       positionList();
       list.style.display = 'block';
       return;
@@ -3206,8 +3206,8 @@ function buildProductAutocomplete(container, { inputId, hiddenId, listId, onSele
     matches.forEach(p => {
       const item = document.createElement('div');
       item.className = 'ac-item';
-      item.style.cssText = 'padding:7px 12px;cursor:pointer;font-size:12px;border-bottom:1px solid var(--border);background:var(--card-bg);';
-      item.innerHTML = `<span style="font-weight:500;">${p.product_name}</span><span style="font-size:11px;color:var(--text-muted);margin-left:6px;">${stockLabel(p)}</span>`;
+      item.style.cssText = 'padding:8px 13px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border);background:var(--card-bg);';
+      item.innerHTML = `<span style="font-weight:500;">${p.product_name}</span><span style="font-size:12px;color:var(--text-muted);margin-left:6px;">${stockLabel(p)}</span>`;
       item.addEventListener('mousedown', e => { e.preventDefault(); selectProduct(p); });
       list.appendChild(item);
     });
@@ -3283,15 +3283,15 @@ function addStockItemRow() {
   row.innerHTML = `
     ${addStockRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove();_addStockUpdateBtn();" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
     <div class="form-group" style="margin-bottom:8px;">
-      <label class="form-label" style="font-size:11px;">Product <span class="req">*</span></label>
+      <label class="form-label" style="font-size:12px;">Product <span class="req">*</span></label>
       ${productAcHTML(inputId, hiddenId)}
     </div>
     <div class="add-stock-variant-wrap" style="display:none;margin-bottom:8px;">
-      <label class="form-label" style="font-size:11px;">Variant <span style="font-size:10px;color:var(--text-muted);">(optional)</span></label>
+      <label class="form-label" style="font-size:12px;">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
       <div class="add-stock-variant-selects" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
     </div>
     <div class="form-group" style="margin:0;">
-      <label class="form-label" style="font-size:11px;">Quantity <span class="req">*</span></label>
+      <label class="form-label" style="font-size:12px;">Quantity <span class="req">*</span></label>
       <input type="number" class="form-input add-stock-qty" min="1" required placeholder="e.g. 10"/>
     </div>
   `;
@@ -3316,8 +3316,8 @@ function loadRowVariantsByProduct(product, rowId) {
   wrap.style.display = 'block';
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
-      <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
-      <select class="form-input form-select add-stock-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select add-stock-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
         <option value="">Any</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -3563,8 +3563,8 @@ function loadTransferVariants(productId) {
   wrap.style.display = 'block';
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:120px;">
-      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
-      <select id="transferVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
+      <label style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="transferVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:13px;">
         <option value="">All (no variant)</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -3593,8 +3593,8 @@ function loadAdjustVariants(productId) {
   wrap.style.display = 'block';
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:120px;">
-      <label style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
-      <select id="adjustVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:12px;">
+      <label style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="adjustVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:13px;">
         <option value="">All (no variant)</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -4087,12 +4087,12 @@ function viewOrderItems(order) {
                 ? `<img src="${imgUrl}" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="${i.product?.product_name}"/>`
                 : `<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>`}
               <div style="flex:1;">
-                <div style="font-size:13px;font-weight:600;color:var(--text-primary);">${i.product?.product_name || '—'}</div>
+                <div style="font-size:14px;font-weight:600;color:var(--text-primary);">${i.product?.product_name || '—'}</div>
                 ${opts ? `<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">${opts}</div>` : ''}
               </div>
               <div style="text-align:right;flex-shrink:0;">
-                <div style="font-size:13px;font-weight:700;">₱${Number(i.price * i.qty).toFixed(2)}</div>
-                <div style="font-size:11px;color:var(--text-muted);">x${i.qty} @ ₱${Number(i.price).toFixed(2)}</div>
+                <div style="font-size:14px;font-weight:700;">₱${Number(i.price * i.qty).toFixed(2)}</div>
+                <div style="font-size:12px;color:var(--text-muted);">x${i.qty} @ ₱${Number(i.price).toFixed(2)}</div>
               </div>
             </div>
           </div>`;
@@ -4104,14 +4104,14 @@ function viewOrderItems(order) {
       <!-- Header -->
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
         <div>
-          <h3 style="margin:0;font-size:16px;">Order Details</h3>
-          <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#${shortId(order.order_id)}</p>
+          <h3 style="margin:0;font-size:17px;">Order Details</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${shortId(order.order_id)}</p>
         </div>
         <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
       </div>
 
       <!-- Order Info -->
-      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
         <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
         <div><span style="color:var(--text-muted);">Phone Number</span><br/><strong>${customerPhone || '—'}</strong></div>
         <div><span style="color:var(--text-muted);">Branch</span><br/><strong>${branch}</strong></div>
@@ -4149,16 +4149,16 @@ function viewOrderItems(order) {
         </div>` : ''}
 
       <!-- Items -->
-      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>
+      <div style="margin-bottom:0.5rem;font-size:13px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>
       ${itemsHtml}
 
       <!-- Total -->
       <div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">
         <span style="font-weight:700;">Grand Total</span>
-        <span style="font-weight:700;color:#16a34a;font-size:16px;">₱${Number(order.total).toFixed(2)}</span>
+        <span style="font-weight:700;color:#16a34a;font-size:17px;">₱${Number(order.total).toFixed(2)}</span>
       </div>
     </div>
-  `, undefined, false);
+  `, '660px', false);
 }
 
 // Orders only move forward one step at a time: pending -> processing -> out_for_delivery -> completed.
@@ -5754,20 +5754,20 @@ function renderAssignProducts(products) {
   wrap.innerHTML = products.length
     ? products.map(p => {
         const branchTags = (p.branch_stock || []).map(bs =>
-          `<span style="font-size:10px;background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 5px;">🏪 ${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}</span>`
+          `<span style="font-size:11px;background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 5px;">🏪 ${bs.branch?.branch_name || 'Branch'}: ${bs.quantity}</span>`
         ).join(' ');
         return `
-          <label style="display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:6px;cursor:pointer;background:var(--surface-2);transition:background 0.15s;"
+          <label style="display:flex;align-items:center;gap:10px;padding:9px 11px;border-radius:6px;cursor:pointer;background:var(--surface-2);transition:background 0.15s;"
             onmouseover="this.style.background='var(--surface-3)'" onmouseout="this.style.background='var(--surface-2)'">
             <input type="checkbox" value="${p.product_id}" ${p.checked ? 'checked' : ''}
               onchange="toggleAssignProduct('${p.product_id}', this.checked)"
-              style="accent-color:var(--g-400);width:15px;height:15px;flex-shrink:0;"/>
+              style="accent-color:var(--g-400);width:16px;height:16px;flex-shrink:0;"/>
             <div style="flex:1;min-width:0;">
-              <div style="font-weight:500;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.product_name}</div>
-              <div style="font-size:11px;color:var(--text-muted);margin-bottom:3px;">${p.category}</div>
-              <div style="display:flex;gap:4px;flex-wrap:wrap;">${branchTags || '<span style="font-size:10px;color:var(--text-muted);">No branch stock</span>'}</div>
+              <div style="font-weight:500;font-size:14px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${p.product_name}</div>
+              <div style="font-size:12px;color:var(--text-muted);margin-bottom:3px;">${p.category}</div>
+              <div style="display:flex;gap:4px;flex-wrap:wrap;">${branchTags || '<span style="font-size:11px;color:var(--text-muted);">No branch stock</span>'}</div>
             </div>
-            ${p.checked ? '<span class="badge badge--blue" style="flex-shrink:0;font-size:10px;">Assigned</span>' : ''}
+            ${p.checked ? '<span class="badge badge--blue" style="flex-shrink:0;font-size:11px;">Assigned</span>' : ''}
           </label>`;
       }).join('')
     : '<p class="table-empty">No products found</p>';
@@ -6946,8 +6946,8 @@ function loadPORowVariants(sel) {
   wrap.style.display = 'flex';
   wrap.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
-      <label style="font-size:10px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
-      <select class="form-input form-select po-variant-opt" data-label="${g.label}" style="font-size:11px;padding:4px 6px;">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select po-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
         <option value="">Any</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -6974,7 +6974,7 @@ function addPOItemRow() {
         }).join('')}
       </select>
       <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
-      <span class="po-stock-info" style="font-size:11px;color:var(--text-muted);padding-left:4px;"></span>
+      <span class="po-stock-info" style="font-size:12px;color:var(--text-muted);padding-left:4px;"></span>
     </div>
     <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="updatePOTotal()"/>
     <input type="number" class="form-input po-cost" min="0" step="0.01" placeholder="Unit Cost" oninput="updatePOTotal()"/>
@@ -7123,14 +7123,14 @@ function openApprovedRequestsModal() {
   const list = document.getElementById('approvedRequestsList');
   list.innerHTML = available.length
     ? available.map(r => `
-      <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+      <label style="display:flex;align-items:flex-start;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
         <input type="checkbox" class="approved-req-check" value="${r.request_id}" style="margin-top:2px;" onchange="updateApprovedReqBtn()"/>
         <span style="flex:1;">
           <strong>${r.product?.product_name || '—'}</strong>
           ${r.variant_options && Object.keys(r.variant_options).length
-            ? '<div style="font-size:11px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+            ? '<div style="font-size:12px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
             : ''}
-          <div style="font-size:12px;color:var(--text-muted);">Qty: ${r.quantity_needed} · Branch: ${r.branch?.branch_name || '—'} · Requested by: ${r.staff ? r.staff.fname + ' ' + r.staff.lname : '—'}</div>
+          <div style="font-size:13px;color:var(--text-muted);">Qty: ${r.quantity_needed} · Branch: ${r.branch?.branch_name || '—'} · Requested by: ${r.staff ? r.staff.fname + ' ' + r.staff.lname : '—'}</div>
         </span>
       </label>`).join('')
     : '<div class="table-empty" style="padding:1rem;">No approved requests waiting to be ordered.</div>';
@@ -7464,7 +7464,7 @@ function openPODetail(poId) {
   const total = items.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0);
 
   document.getElementById('poDetailContent').innerHTML = `
-    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:13px;">
+    <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:14px;">
       <div><strong>Supplier:</strong> ${po.supplier}</div>
       <div><strong>Status:</strong> ${badge(po.status)}</div>
       <div><strong>Created:</strong> ${toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</div>
@@ -7482,7 +7482,7 @@ function openPODetail(poId) {
           <tr>
             <td>
               ${i.product?.product_name || '—'}
-              ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>` : ''}
+              ${i.variant_options ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>` : ''}
             </td>
             <td>${orderedQty}</td>
             <td style="color:${recvColor};font-weight:600;">${receivedQty} / ${orderedQty}</td>
@@ -7497,8 +7497,8 @@ function openPODetail(poId) {
       </tbody>
     </table>
     <div>
-      <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Linked Inventory Entries</div>
-      <div id="poLinkedInventoryWrap" style="font-size:12px;color:var(--text-muted);padding:4px 0;">Loading...</div>
+      <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Linked Inventory Entries</div>
+      <div id="poLinkedInventoryWrap" style="font-size:13px;color:var(--text-muted);padding:4px 0;">Loading...</div>
     </div>`;
 
   // Fetched separately (not part of the PO payload itself) — these are the
@@ -7526,47 +7526,47 @@ function openPODetail(poId) {
       const outstanding     = Math.max(orderedQty - alreadyReceived, 0);
       const productLabel = (item.product?.product_name || '—')
         + (item.variant_options && Object.keys(item.variant_options).length
-            ? ' <span style="font-size:10px;color:var(--text-muted);">(' + Object.entries(item.variant_options).map(([k,v])=>k+': '+v).join(', ') + ')</span>'
+            ? ' <span style="font-size:11px;color:var(--text-muted);">(' + Object.entries(item.variant_options).map(([k,v])=>k+': '+v).join(', ') + ')</span>'
             : '');
 
       if (outstanding <= 0) {
         // Already fully received in an earlier batch — nothing left to do
         // here. No data-item-idx, so validatePODistribution() skips it.
         return `
-          <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;opacity:0.7;">
-            <span style="font-size:13px;font-weight:600;">${productLabel}</span>
-            <span style="font-size:11px;color:var(--g-400);margin-left:8px;">✓ Fully received (${orderedQty}/${orderedQty})</span>
+          <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;opacity:0.7;">
+            <span style="font-size:14px;font-weight:600;">${productLabel}</span>
+            <span style="font-size:12px;color:var(--g-400);margin-left:8px;">✓ Fully received (${orderedQty}/${orderedQty})</span>
           </div>`;
       }
 
       const branchInputs = allBranches.map(b =>
         `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-          <label style="font-size:12px;font-weight:500;min-width:120px;">${b.branch_name}</label>
+          <label style="font-size:13px;font-weight:500;min-width:120px;">${b.branch_name}</label>
           <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="0"
             data-item="${idx}" data-branch="${b.branch_id}"
-            style="width:64px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:12px;"
+            style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"
             oninput="validatePODistribution()"/>
-          <span style="font-size:11px;color:var(--text-muted);">units</span>
+          <span style="font-size:12px;color:var(--text-muted);">units</span>
         </div>`
       ).join('');
       return `
-        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:10px 12px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}">
+        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
-            <span style="font-size:13px;font-weight:600;">${productLabel}</span>
-            <span style="font-size:11px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
-            ${alreadyReceived > 0 ? `<span style="font-size:11px;color:var(--text-muted);">Already received: ${alreadyReceived}</span>` : ''}
+            <span style="font-size:14px;font-weight:600;">${productLabel}</span>
+            <span style="font-size:12px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
+            ${alreadyReceived > 0 ? `<span style="font-size:12px;color:var(--text-muted);">Already received: ${alreadyReceived}</span>` : ''}
             <div style="display:flex;align-items:center;gap:6px;">
-              <label style="font-size:11px;color:var(--text-muted);">Receiving now:</label>
+              <label style="font-size:12px;color:var(--text-muted);">Receiving now:</label>
               <input type="number" id="recv_${idx}" min="0" max="${outstanding}" value="${outstanding}"
-                style="width:64px;padding:4px 8px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:12px;font-weight:600;"
+                style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:13px;font-weight:600;"
                 oninput="validatePODistribution()"/>
-              <span style="font-size:11px;color:var(--text-muted);">/ ${outstanding} outstanding</span>
+              <span style="font-size:12px;color:var(--text-muted);">/ ${outstanding} outstanding</span>
             </div>
           </div>
-          <div style="font-size:11px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
           ${branchInputs}
-          <div id="distError_${idx}" style="font-size:11px;color:#ef4444;margin-top:4px;display:none;"></div>
-          <div id="distCount_${idx}" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+          <div id="distError_${idx}" style="font-size:12px;color:#ef4444;margin-top:4px;display:none;"></div>
+          <div id="distCount_${idx}" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
         </div>`;
     }).join('');
 
@@ -7577,7 +7577,7 @@ function openPODetail(poId) {
     // footer to just the two buttons keeps them a normal size.
     document.getElementById('poDetailContent').innerHTML += `
       <div style="width:100%;max-height:380px;overflow-y:auto;padding-right:2px;">
-        <div style="font-size:12px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
+        <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
         ${itemRows}
       </div>`;
     footer.innerHTML += `

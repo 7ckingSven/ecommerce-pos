@@ -6,7 +6,7 @@
   <title>Staff Dashboard — TEFC E-Commerce</title>
   <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
   <link rel="icon" type="image/png" href="{{ url_for('static', filename='img/favicon.png') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/admin.css') }}?v=2">
   <link rel="stylesheet" href="{{ url_for('static', filename='css/staff.css') }}">
 </head>
 <body>
@@ -684,7 +684,7 @@
 
   <!-- Add Stock Modal -->
   <div class="modal-overlay" id="requestModalOverlay"></div>
-  <div class="modal" id="requestModal">
+  <div class="modal" id="requestModal" style="max-width:640px;">
     <div class="modal-header">
       <h3 class="modal-title">Request Stock</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('requestModal', closeRequestModal)">
@@ -701,8 +701,8 @@
         <!-- Product Items Container -->
         <div id="reqItems" style="display:flex;flex-direction:column;gap:10px;max-height:380px;overflow-y:auto;padding-right:4px;"></div>
         <!-- Add Another Product Button -->
-        <button type="button" onclick="addReqItemRow()" style="margin-top:10px;width:100%;padding:8px;border:1.5px dashed var(--border);border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;font-size:13px;display:flex;align-items:center;justify-content:center;gap:6px;">
-          <span style="font-size:18px;">+</span> Add Another Product
+        <button type="button" onclick="addReqItemRow()" style="margin-top:10px;width:100%;padding:9px;border:1.5px dashed var(--border);border-radius:8px;background:transparent;color:var(--text-muted);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;gap:6px;">
+          <span style="font-size:19px;">+</span> Add Another Product
         </button>
         <div class="modal-footer" style="margin-top:12px;">
           <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('requestModal', closeRequestModal)">Cancel</button>

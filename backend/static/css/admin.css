@@ -837,7 +837,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   transition: all var(--transition);
 }
 .modal-close:hover { background: var(--hover); color: var(--text); }
-.modal-body { padding: 1.4rem; }
+.modal-body { padding: 1.5rem; font-size: 14.5px; }
 .modal-footer {
   display: flex;
   gap: 0.75rem;
@@ -846,6 +846,30 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   padding-top: 1rem;
   border-top: 1px solid var(--border);
 }
+
+/* Larger, more readable text inside modals only — scoped to .modal-body /
+   #genericModalContent so the same fields/tables/buttons elsewhere in the
+   dashboard (sidebar sections, main tables) keep their current size. Field
+   padding/structure is left alone so inputs don't shift shape, just read
+   a bit bigger. */
+.modal-title { font-size: 17px; }
+.modal-body .form-label,
+.modal-body .field-hint,
+#genericModalContent .form-label,
+#genericModalContent .field-hint { font-size: 13.5px; }
+.modal-body .form-input,
+.modal-body .form-select,
+.modal-body .search-input,
+.modal-body .filter-select,
+#genericModalContent .form-input,
+#genericModalContent .form-select { font-size: 15px; }
+.modal-body .data-table,
+#genericModalContent .data-table { font-size: 14.5px; }
+.modal-body .data-table th,
+#genericModalContent .data-table th { font-size: 13.5px; }
+.modal-body .btn,
+#genericModalContent .btn { font-size: 14.5px; }
+#genericModalContent { font-size: 14.5px; }
 
 /* ─── Toast ─── */
 .toast {
