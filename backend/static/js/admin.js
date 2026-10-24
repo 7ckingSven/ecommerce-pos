@@ -899,7 +899,7 @@ async function loadOverview() {
   // ── Skeleton ──
   skStats(['statProducts','statOrders','statSales','statSalesTripleE','statSalesFielCollince',
            'statLowStock','statCriticalStock','statPending','statTodayRevenue','statOutOfStock',
-           'statActiveDiscounts','statPendingRequests']);
+           'statActiveDiscounts']);
   skTable('topSellingBody',    ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 4);
   skTable('leastSellingBody',  ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 4);
   skTable('pendingRequestsBody',['sk-cell-full','sk-cell-md','sk-cell-sm','sk-cell-md'], 4);
@@ -999,9 +999,9 @@ async function loadOverview() {
     });
     document.getElementById('statActiveDiscounts').textContent = activeDiscounts.length;
 
-    // Pending stock requests
+    // Pending stock requests — still used below for the nav badge and the
+    // Pending Stock Requests table; the stat card itself was removed.
     const pendingReqs = (stockRequests || []).filter(r => r.status === 'pending');
-    document.getElementById('statPendingRequests').textContent = pendingReqs.length;
 
     // Update orders nav badge
     const ordersBadge = document.getElementById('adminOrdersBadge');
@@ -1915,6 +1915,7 @@ function openProductModal(product = null) {
   _prodUpdateSaveBtn();
   document.getElementById('productModalOverlay').classList.add('open');
   document.getElementById('productModal').classList.add('open');
+  captureModalSnapshot('productModal');
 }
 
 // ── Product Modal Inline Validation ──────────────────────
@@ -2406,6 +2407,7 @@ function openProductToggleModal(id, name, status, totalStock) {
   btn.style.borderColor  = isActive ? '#ef4444' : '#16a34a';
   document.getElementById('productToggleModalOverlay').classList.add('open');
   document.getElementById('productToggleModal').classList.add('open');
+  captureModalSnapshot('productToggleModal');
 }
 
 function closeProductToggleModal() {
@@ -3148,6 +3150,7 @@ async function openAddStockModal() {
   document.getElementById('addStockItems')?.addEventListener('change', _addStockUpdateBtn);
   document.getElementById('addStockModalOverlay')?.classList.add('open');
   document.getElementById('addStockModal')?.classList.add('open');
+  captureModalSnapshot('addStockModal');
 }
 
 let addStockRowCount = 0;
@@ -3535,6 +3538,7 @@ async function openTransferModal() {
   document.getElementById('transferTo')?.addEventListener('change',   _transferUpdateBtn);
   document.getElementById('transferModalOverlay')?.classList.add('open');
   document.getElementById('transferModal')?.classList.add('open');
+  captureModalSnapshot('transferModal');
 }
 
 function closeTransferModal() {
@@ -3695,6 +3699,7 @@ async function openAdjustModal() {
   document.getElementById('adjustBranch')?.addEventListener('change', _adjustUpdateBtn);
   document.getElementById('adjustModalOverlay')?.classList.add('open');
   document.getElementById('adjustModal')?.classList.add('open');
+  captureModalSnapshot('adjustModal');
 }
 
 function closeAdjustModal() {
@@ -5589,6 +5594,7 @@ function openDiscountModal(discount = null) {
   document.getElementById('discountModalOverlay').classList.add('open');
   document.getElementById('discountModal').classList.add('open');
   _discUpdateSaveBtn();
+  captureModalSnapshot('discountModal');
 }
 
 function closeDiscountModal() {
@@ -5732,6 +5738,7 @@ function openAssignModal(discountId, discountName) {
 
   document.getElementById('assignModalOverlay').classList.add('open');
   document.getElementById('assignModal').classList.add('open');
+  captureModalSnapshot('assignModal');
 }
 
 function closeAssignModal() {
@@ -6118,6 +6125,7 @@ function openUserModal(user = null) {
   document.getElementById('userModalOverlay').classList.add('open');
   document.getElementById('userModal').classList.add('open');
   _userClearErrors();
+  captureModalSnapshot('userModal');
 }
 
 function closeUserModal() {
@@ -6342,6 +6350,56 @@ function showConfirmDialog(title, message) {
   });
 }
 window.showConfirmDialog = showConfirmDialog;
+
+// ── Unsaved-changes confirmation for X/Cancel on modals ──────────────
+// Snapshots every input/select/textarea inside a modal the moment it finishes
+// opening, so X/Cancel can prompt "discard changes?" only when something was
+// actually typed or changed — and close immediately, with no prompt, when
+// nothing did. Positional (not id-based) so it works even for dynamically
+// added rows (e.g. Create PO items, Assign Discount checkboxes) that have no
+// unique id of their own: adding/removing a row changes the snapshot too.
+const _modalSnapshots = {};
+
+function _snapshotModalFields(containerEl) {
+  if (!containerEl) return '';
+  const els = containerEl.querySelectorAll('input, select, textarea');
+  return Array.from(els).map(el => {
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? '1' : '0';
+    if (el.type === 'file') return (el.files && el.files[0]) ? el.files[0].name : '';
+    return el.value;
+  }).join('\u0001');
+}
+
+// Call as the last step of an openXModal() function, once its fields are
+// fully populated, to record the "nothing changed yet" baseline. Deferred a
+// tick so any population still pending via setTimeout(...,0) (e.g. the user
+// modal) has already run by the time the snapshot is taken.
+function captureModalSnapshot(modalId) {
+  setTimeout(() => {
+    _modalSnapshots[modalId] = _snapshotModalFields(document.getElementById(modalId));
+  }, 0);
+}
+window.captureModalSnapshot = captureModalSnapshot;
+
+function _isModalDirty(modalId) {
+  const baseline = _modalSnapshots[modalId];
+  if (baseline === undefined) return false;
+  return _snapshotModalFields(document.getElementById(modalId)) !== baseline;
+}
+
+// Wraps a modal's real close function: prompts for confirmation only when
+// the modal's fields differ from how they looked when it opened, otherwise
+// closes right away. Used for X/Cancel buttons only — internal/post-save
+// code keeps calling closeXModal() directly so saving never triggers this.
+function closeModalWithConfirm(modalId, closeFn) {
+  if (_isModalDirty(modalId)) {
+    showConfirmDialog('Discard changes?', 'You have unsaved changes. Are you sure you want to close without saving?')
+      .then(confirmed => { if (confirmed) closeFn(); });
+  } else {
+    closeFn();
+  }
+}
+window.closeModalWithConfirm = closeModalWithConfirm;
 
 // ─── Init ─────────────────────────────────────────────
 // ═══════════════════════════════════════════════════════
@@ -6867,6 +6925,7 @@ function openCreatePOModal() {
   updatePOTotal(); // reset Create PO button to disabled until a row is filled in
   document.getElementById('createPOModalOverlay')?.classList.add('open');
   document.getElementById('createPOModal')?.classList.add('open');
+  captureModalSnapshot('createPOModal');
 }
 
 function closeCreatePOModal() {
@@ -7080,6 +7139,7 @@ function openApprovedRequestsModal() {
   updateApprovedReqBtn();
   document.getElementById('approvedRequestsModalOverlay')?.classList.add('open');
   document.getElementById('approvedRequestsModal')?.classList.add('open');
+  captureModalSnapshot('approvedRequestsModal');
 }
 
 // Checks/unchecks every request row at once from the "Select All" checkbox.
@@ -7450,7 +7510,7 @@ function openPODetail(poId) {
 
   // Action buttons based on status
   const footer = document.getElementById('poDetailFooter');
-  footer.innerHTML = `<button type="button" class="btn btn-cancel" onclick="closePODetailModal()">Close</button>`;
+  footer.innerHTML = `<button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('poDetailModal', closePODetailModal)">Close</button>`;
   if (po.status === 'draft') {
     footer.innerHTML += `
       <button id="cancelPOBtn" class="btn btn-cancel" onclick="updatePOStatus('${poId}', 'cancelled')">Cancel PO</button>
@@ -7529,6 +7589,7 @@ function openPODetail(poId) {
 
   document.getElementById('poDetailModalOverlay')?.classList.add('open');
   document.getElementById('poDetailModal')?.classList.add('open');
+  captureModalSnapshot('poDetailModal');
 }
 
 function closePODetailModal() {

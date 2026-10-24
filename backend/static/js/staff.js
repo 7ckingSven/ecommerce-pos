@@ -488,6 +488,54 @@ function showConfirmDialog(title, message) {
 }
 window.showConfirmDialog = showConfirmDialog;
 
+// ── Unsaved-changes confirmation for X/Cancel on modals ──────────────
+// Ported from admin.js (same implementation there). Snapshots every
+// input/select/textarea inside a modal the moment it finishes opening, so
+// X/Cancel can prompt "discard changes?" only when something was actually
+// typed or changed — and close immediately, with no prompt, when nothing
+// did. Positional (not id-based) so it still works for dynamically added
+// rows (e.g. extra Request Stock item rows) that have no unique id.
+const _modalSnapshots = {};
+
+function _snapshotModalFields(containerEl) {
+  if (!containerEl) return '';
+  const els = containerEl.querySelectorAll('input, select, textarea');
+  return Array.from(els).map(el => {
+    if (el.type === 'checkbox' || el.type === 'radio') return el.checked ? '1' : '0';
+    if (el.type === 'file') return (el.files && el.files[0]) ? el.files[0].name : '';
+    return el.value;
+  }).join('\u0001');
+}
+
+// Call as the last step of an openXModal() function, once its fields are
+// fully populated, to record the "nothing changed yet" baseline.
+function captureModalSnapshot(modalId) {
+  setTimeout(() => {
+    _modalSnapshots[modalId] = _snapshotModalFields(document.getElementById(modalId));
+  }, 0);
+}
+window.captureModalSnapshot = captureModalSnapshot;
+
+function _isModalDirty(modalId) {
+  const baseline = _modalSnapshots[modalId];
+  if (baseline === undefined) return false;
+  return _snapshotModalFields(document.getElementById(modalId)) !== baseline;
+}
+
+// Wraps a modal's real close function: prompts for confirmation only when
+// the modal's fields differ from how they looked when it opened, otherwise
+// closes right away. Used for X/Cancel buttons only — internal/post-save
+// code keeps calling closeXModal() directly so saving never triggers this.
+function closeModalWithConfirm(modalId, closeFn) {
+  if (_isModalDirty(modalId)) {
+    showConfirmDialog('Discard changes?', 'You have unsaved changes. Are you sure you want to close without saving?')
+      .then(confirmed => { if (confirmed) closeFn(); });
+  } else {
+    closeFn();
+  }
+}
+window.closeModalWithConfirm = closeModalWithConfirm;
+
 // ─── Button Loading Helper ────────────────────────────
 function setButtonLoading(btn, loading) {
   if (!btn) return;
@@ -4021,6 +4069,7 @@ async function openRequestModal(btn) {
 
     document.getElementById('requestModalOverlay')?.classList.add('open');
     document.getElementById('requestModal')?.classList.add('open');
+    captureModalSnapshot('requestModal');
   } finally {
     setButtonLoading(btn, false);
   }
@@ -4066,6 +4115,7 @@ async function openRequestModalForProduct(productId) {
 
   _reqUpdateBtn();
   document.querySelector('#reqItems .req-qty')?.focus();
+  captureModalSnapshot('requestModal');
 }
 window.openRequestModalForProduct = openRequestModalForProduct;
 

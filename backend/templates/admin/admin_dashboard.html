@@ -237,16 +237,6 @@
             <span class="stat-sub">Running now</span>
           </div>
         </div>
-        <div class="stat-card" onclick="dashGoToPurchaseOrders()" title="View Purchase Orders / Stock Requests" role="button" tabindex="0">
-          <div class="stat-icon stat-icon--yellow">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
-          </div>
-          <div class="stat-info">
-            <span class="stat-label">Stock Requests</span>
-            <span class="stat-value" id="statPendingRequests">—</span>
-            <span class="stat-sub">Pending from staff</span>
-          </div>
-        </div>
       </div>
 
       <!-- Quick Status Row -->
@@ -1168,7 +1158,7 @@
   <div class="modal" id="productModal" style="max-width:680px;width:95%;">
     <div class="modal-header">
       <h3 class="modal-title" id="productModalTitle">Add Product</h3>
-      <button class="modal-close" onclick="closeProductModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('productModal', closeProductModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1282,7 +1272,7 @@
         </div>
 
         <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeProductModal()">Cancel</button>
+          <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('productModal', closeProductModal)">Cancel</button>
           <button type="submit" id="productSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Save Product</button>
         </div>
       </form>
@@ -1294,7 +1284,7 @@
   <div class="modal" id="discountModal">
     <div class="modal-header">
       <h3 class="modal-title" id="discountModalTitle">Add Discount</h3>
-      <button class="modal-close" onclick="closeDiscountModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('discountModal', closeDiscountModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1320,7 +1310,7 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeDiscountModal()">Cancel</button>
+          <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('discountModal', closeDiscountModal)">Cancel</button>
           <button type="submit" id="discountSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Save Discount</button>
         </div>
       </form>
@@ -1332,7 +1322,7 @@
   <div class="modal" id="assignModal" style="max-width:560px;">
     <div class="modal-header">
       <h3 class="modal-title" id="assignModalTitle">Assign Discount to Products</h3>
-      <button class="modal-close" onclick="closeAssignModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('assignModal', closeAssignModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1351,7 +1341,7 @@
         <p class="table-empty">Loading products...</p>
       </div>
       <div class="modal-footer" style="margin-top:1rem;">
-        <button type="button" class="btn btn-cancel" onclick="closeAssignModal()">Cancel</button>
+        <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('assignModal', closeAssignModal)">Cancel</button>
         <button type="button" id="assignApplyBtn" class="btn btn-solid-green" onclick="submitAssign()" disabled style="opacity:0.45;cursor:not-allowed;">Apply</button>
       </div>
     </div>
@@ -1363,7 +1353,7 @@
   <div class="modal" id="addStockModal" style="max-width:560px;">
     <div class="modal-header">
       <h3 class="modal-title">Add Stock</h3>
-      <button class="modal-close" onclick="closeAddStockModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('addStockModal', closeAddStockModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1389,7 +1379,7 @@
           <span style="font-size:18px;">+</span> Add Another Product
         </button>
         <div class="modal-footer" style="margin-top:12px;">
-          <button type="button" class="btn btn-cancel" onclick="closeAddStockModal()">Cancel</button>
+          <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('addStockModal', closeAddStockModal)">Cancel</button>
           <button type="submit" id="addStockSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Submit All</button>
         </div>
       </form>
@@ -1401,7 +1391,7 @@
   <div class="modal" id="transferModal">
     <div class="modal-header">
       <h3 class="modal-title">Stock Transfer</h3>
-      <button class="modal-close" onclick="closeTransferModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('transferModal', closeTransferModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1440,7 +1430,7 @@
           <textarea id="transferNote" class="form-input form-textarea" rows="2" placeholder="e.g. Transfer for branch restock..."></textarea>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeTransferModal()">Cancel</button>
+          <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('transferModal', closeTransferModal)">Cancel</button>
           <button type="submit" id="transferSubmitBtn" class="btn" style="background:#3b82f6;color:#fff;border-color:#3b82f6;opacity:0.45;cursor:not-allowed;" disabled>Transfer Stock</button>
         </div>
       </form>
@@ -1452,7 +1442,7 @@
   <div class="modal" id="adjustModal">
     <div class="modal-header">
       <h3 class="modal-title" style="color:#ef4444;">Adjust Stock</h3>
-      <button class="modal-close" onclick="closeAdjustModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('adjustModal', closeAdjustModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1498,7 +1488,7 @@
           <textarea id="adjustNote" class="form-input form-textarea" rows="2" placeholder="e.g. 5 units found damaged during inspection..."></textarea>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeAdjustModal()">Cancel</button>
+          <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('adjustModal', closeAdjustModal)">Cancel</button>
           <button type="submit" id="adjustSubmitBtn" class="btn" style="background:#ef4444;color:#fff;opacity:0.45;cursor:not-allowed;" disabled>Deduct Stock</button>
         </div>
       </form>
@@ -1510,7 +1500,7 @@
   <div class="modal" id="userModal">
     <div class="modal-header">
       <h3 class="modal-title" id="userModalTitle">Add Staff</h3>
-      <button class="modal-close" onclick="closeUserModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('userModal', closeUserModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1595,7 +1585,7 @@
           </div>
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-cancel" onclick="closeUserModal()">Cancel</button>
+          <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('userModal', closeUserModal)">Cancel</button>
           <button type="submit" id="userSubmitBtn" class="btn btn-solid-green" disabled style="opacity:0.45;cursor:not-allowed;">Save</button>
         </div>
       </form>
@@ -1632,7 +1622,7 @@
   <div class="modal" id="createPOModal" style="max-width:920px;">
     <div class="modal-header">
       <h3 class="modal-title">Create Purchase Order</h3>
-      <button class="modal-close" onclick="closeCreatePOModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('createPOModal', closeCreatePOModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1665,7 +1655,7 @@
       </div>
 
       <div class="modal-footer">
-        <button type="button" class="btn btn-cancel" onclick="closeCreatePOModal()">Cancel</button>
+        <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('createPOModal', closeCreatePOModal)">Cancel</button>
         <button type="button" id="createPOBtn" class="btn btn-solid-green" onclick="submitCreatePO()" disabled>Create PO</button>
       </div>
     </div>
@@ -1676,7 +1666,7 @@
   <div class="modal" id="approvedRequestsModal" style="max-width:720px;">
     <div class="modal-header">
       <h3 class="modal-title">Approved Stock Requests</h3>
-      <button class="modal-close" onclick="closeApprovedRequestsModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('approvedRequestsModal', closeApprovedRequestsModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1690,7 +1680,7 @@
         <!-- rows injected by openApprovedRequestsModal() -->
       </div>
       <div class="modal-footer">
-        <button type="button" class="btn btn-cancel" onclick="closeApprovedRequestsModal()">Cancel</button>
+        <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('approvedRequestsModal', closeApprovedRequestsModal)">Cancel</button>
         <button type="button" id="useApprovedReqBtn" class="btn btn-solid-green" onclick="useSelectedApprovedRequests()" disabled>Add Selected to PO</button>
       </div>
     </div>
@@ -1701,7 +1691,7 @@
   <div class="modal" id="poDetailModal" style="max-width:820px;">
     <div class="modal-header">
       <h3 class="modal-title" id="poDetailTitle">Purchase Order</h3>
-      <button class="modal-close" onclick="closePODetailModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('poDetailModal', closePODetailModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
@@ -1719,14 +1709,14 @@
   <div class="modal" id="productToggleModal" style="max-width:400px;">
     <div class="modal-header">
       <h3 class="modal-title" id="productToggleModalTitle">Deactivate Product</h3>
-      <button class="modal-close" onclick="closeProductToggleModal()">
+      <button class="modal-close" onclick="closeModalWithConfirm('productToggleModal', closeProductToggleModal)">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>
     <div class="modal-body">
       <p id="productToggleModalDesc" style="font-size:13px;color:var(--text-muted);margin:0 0 1.25rem;line-height:1.6;"></p>
       <div class="modal-footer">
-        <button type="button" class="btn btn-cancel" onclick="closeProductToggleModal()">Cancel</button>
+        <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('productToggleModal', closeProductToggleModal)">Cancel</button>
         <button type="button" class="btn" id="productToggleConfirmBtn" onclick="confirmProductToggle()">Confirm</button>
       </div>
     </div>
@@ -1738,7 +1728,7 @@
   </div>
 
   <script src="{{ url_for('static', filename='js/security.js') }}"></script>
-  <script src="{{ url_for('static', filename='js/admin.js') }}?v=8"></script>
+  <script src="{{ url_for('static', filename='js/admin.js') }}?v=9"></script>
 
   <!-- Logout Confirmation Modal -->
   <div id="logoutModalOverlay" onclick="closeLogoutModal()" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.5);z-index:9999;"></div>
