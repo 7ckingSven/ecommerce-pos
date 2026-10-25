@@ -4089,7 +4089,7 @@ function renderDeliveriesForToday(orders) {
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${o.delivery_attempts || 0}/3</td>
           <td style="display:flex;gap:6px;">
-            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="markOrderDelivered('${o.order_id}')">Delivered</button>
+            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openRemitModal('${o.order_id}')">Remit</button>
             <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="markOrderNotDelivered('${o.order_id}')">Not Delivered</button>
           </td>
         </tr>`).join('')
@@ -4127,40 +4127,119 @@ async function dispatchSelectedOrders() {
   } catch (e) { showToast('Error dispatching orders.', 'error'); }
 }
 
-async function markOrderDelivered(orderId, confirmRemittance) {
-  // Only ask the generic "are you sure" on the plain path — the COD
-  // remittance step below (confirmRemittance=true) is its own, more specific
-  // confirmation and re-asking on top of it would be redundant.
-  if (!confirmRemittance) {
-    const confirmed = await showConfirmDialog('Confirm', 'Mark this order as delivered?');
-    if (!confirmed) return;
+// ─── Remit Modal ──────────────────────────────────────
+// Replaces the old instant/COD-only "Delivered" button (adviser revision,
+// Oct 25 2026). Every order in Out for Deliveries — GCash or COD — now
+// goes through this modal: full order details + the amount actually
+// remitted, which must match the order's total (items + shipping) before
+// Complete Order is allowed to go through. The backend re-validates the
+// same match server-side (see _validate_remittance in app.py) — the
+// client-side check here is only for immediate feedback.
+function openRemitModal(orderId) {
+  const order = allOrders.find(o => o.order_id === orderId);
+  if (!order) { showToast('Order not found.', 'error'); return; }
+
+  const items    = order.order_item || [];
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const payment  = Array.isArray(order.payment) ? order.payment[0] : order.payment;
+  const paymentMethod = payment?.payment_method || null;
+
+  const subtotal   = Number(order.total || 0);
+  const shipping   = Number(order.shipping_fee || 0);
+  const grandTotal = Math.round((subtotal + shipping) * 100) / 100;
+
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : order.address || '—';
+
+  const itemsHtml = items.length
+    ? items.map(i => {
+        const opts = i.selected_options && Object.keys(i.selected_options).length
+          ? ` <span style="color:var(--text-muted);">(${Object.values(i.selected_options).join(', ')})</span>`
+          : '';
+        return `
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+            <span>${i.product?.product_name || '—'}${opts} <span style="color:var(--text-muted);">x${i.qty}</span></span>
+            <span style="font-weight:600;">₱${Number(i.price * i.qty).toFixed(2)}</span>
+          </div>`;
+      }).join('')
+    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
+
+  showModal(`
+    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:17px;">Remit &amp; Complete Order</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${shortId(order.order_id)}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
+        <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
+        <div><span style="color:var(--text-muted);">Payment Method</span><br/>${paymentMethod ? badge(paymentMethod) : '—'}</div>
+        <div style="grid-column:1/-1;"><span style="color:var(--text-muted);">Delivery Address</span><br/><strong>${addrString && addrString.trim() ? addrString : 'No address provided'}</strong></div>
+      </div>
+
+      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>
+      ${itemsHtml}
+
+      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;">
+        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Subtotal</span><span>₱${subtotal.toFixed(2)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Shipping Fee</span><span>${shipping === 0 ? 'FREE' : '₱' + shipping.toFixed(2)}</span></div>
+        <div style="display:flex;justify-content:space-between;padding:6px 0;margin-top:4px;border-top:1px solid var(--border);font-weight:700;font-size:15px;"><span>Total Amount Due</span><span style="color:#16a34a;">₱${grandTotal.toFixed(2)}</span></div>
+      </div>
+
+      <div style="margin-top:1rem;">
+        <label class="form-label" style="font-size:12px;">Amount Remitted</label>
+        <input type="number" id="remitAmountInput" class="form-input" step="0.01" min="0" placeholder="Enter the amount remitted for this order" style="width:100%;" oninput="document.getElementById('remitAmountError').style.display='none';"/>
+        <div id="remitAmountError" style="display:none;color:#dc2626;font-size:12px;margin-top:6px;"></div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1.5rem;">
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-solid-green" onclick="submitRemitAmount('${order.order_id}', ${grandTotal})">Complete Order</button>
+      </div>
+    </div>
+  `, '520px', false);
+}
+
+async function submitRemitAmount(orderId, grandTotal) {
+  const input   = document.getElementById('remitAmountInput');
+  const errorEl = document.getElementById('remitAmountError');
+  const amount  = parseFloat(input ? input.value : NaN);
+
+  if (isNaN(amount)) {
+    errorEl.textContent   = 'Enter the amount remitted.';
+    errorEl.style.display = 'block';
+    return;
   }
+  if (Math.abs(amount - grandTotal) > 0.01) {
+    errorEl.textContent   = `Remitted amount (₱${amount.toFixed(2)}) does not match the order total (₱${grandTotal.toFixed(2)}).`;
+    errorEl.style.display = 'block';
+    return;
+  }
+
   try {
     const res = await fetch(`/api/admin/orders/${orderId}/delivered`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(confirmRemittance ? { confirm_remittance: true } : {}),
+      body: JSON.stringify({ amount_remitted: amount }),
     });
     const body = await res.json().catch(() => ({}));
     if (res.ok) {
-      showToast('Order marked delivered.');
+      closeModal();
+      showToast('Order remitted and marked delivered.');
       loadOrders();
       return;
     }
-    if (res.status === 409 && body.requires_remittance_confirmation) {
-      showModal(`
-        <div style="padding:1.5rem;">
-          <h3 style="margin:0 0 8px;font-size:16px;">Confirm Cash Remittance</h3>
-          <p style="font-size:13px;color:var(--text-muted);margin:0 0 1rem;">This is a Cash on Delivery order. Confirm that the cash has been collected and remitted before marking it delivered.</p>
-          <div style="display:flex;justify-content:flex-end;gap:8px;">
-            <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
-            <button class="btn btn-solid-green" onclick="closeModal(); markOrderDelivered('${orderId}', true)">Confirm & Mark Delivered</button>
-          </div>
-        </div>`);
-      return;
-    }
-    showToast(body.error || 'Failed to mark delivered.', 'error');
-  } catch (e) { showToast('Error marking order delivered.', 'error'); }
+    errorEl.textContent   = body.error || 'Failed to complete the order.';
+    errorEl.style.display = 'block';
+  } catch (e) {
+    errorEl.textContent   = 'Error completing the order.';
+    errorEl.style.display = 'block';
+  }
 }
 
 async function markOrderNotDelivered(orderId) {

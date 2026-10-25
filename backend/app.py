@@ -4556,13 +4556,48 @@ def admin_return_order_items(order_id):
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
-# ─── Deliveries for Today ──────────────────────────────
-# Three-step flow for out_for_delivery orders, agreed with the panel:
-#   1. Dispatch  — admin/staff picks today's run from the Available list.
-#   2. Delivered — GCash orders complete immediately; COD orders need a
-#      remittance confirmation first (cash hasn't been handed in yet).
+# ─── Deliveries ─────────────────────────────────────────
+# Three-step flow for out_for_delivery orders, agreed with the panel
+# (adviser follow-up revision, Oct 25 2026): the "Delivered" button was
+# replaced with "Remit" — for every order, GCash or COD, staff must type in
+# the amount actually remitted and it must match the order's full total
+# (items + shipping) before the order is allowed to complete. This closes
+# the gap where a staff member could tap through "Delivered" without
+# actually reconciling what was collected/returned for the order.
+#   1. Dispatch — admin/staff picks today's run from the To Dispatch list.
+#   2. Remit    — opens a modal with the full order details + amount due;
+#      the order only completes once the typed amount matches exactly
+#      (see _order_grand_total / _validate_remittance below).
 #   3. Not Delivered — up to 3 attempts; the 3rd marks the order
 #      'returned_failed' and restores stock exactly like a cancellation.
+
+def _order_grand_total(order_data):
+    """items subtotal + shipping fee — the actual amount due for an order,
+    used by the Remit flow below. order.total only ever stored the item
+    subtotal (see api_place_order), so shipping has to be added back in
+    here rather than trusted from any single column."""
+    return round(float(order_data.get('total') or 0) + float(order_data.get('shipping_fee') or 0), 2)
+
+def _validate_remittance(data, order_data):
+    """Shared Remit-modal validation for both admin and staff. Returns
+    (ok: bool, error_response_or_None). amount_remitted must be present and
+    match the order's grand total to the centavo (small float tolerance)."""
+    amount_remitted = data.get('amount_remitted')
+    if amount_remitted is None or amount_remitted == '':
+        return False, (jsonify({'error': 'Amount remitted is required.'}), 400)
+    try:
+        amount_remitted = float(amount_remitted)
+    except (TypeError, ValueError):
+        return False, (jsonify({'error': 'Amount remitted must be a number.'}), 400)
+
+    grand_total = _order_grand_total(order_data)
+    if abs(amount_remitted - grand_total) > 0.01:
+        return False, (jsonify({
+            'error': f'Remitted amount (₱{amount_remitted:.2f}) does not match the order total (₱{grand_total:.2f}).',
+            'grand_total': grand_total,
+            'amount_remitted': amount_remitted,
+        }), 400)
+    return True, None
 
 def _deduct_order_item_stock(order_id, branch_id, order_items):
     """Shared per-item stock-deduction helper, called exactly once — the
@@ -4706,8 +4741,8 @@ def _restore_order_item_stock(order_id, items, note_label):
 @admin_required
 def admin_dispatch_orders():
     """Set dispatch_date = today for the selected out_for_delivery orders —
-    this is what moves them from 'Available' into "Today's Batch" on the
-    Deliveries for Today screen."""
+    this is what moves them from "To Dispatch" into "Out for Deliveries" on
+    the Deliveries screen."""
     try:
         data       = request.get_json()
         order_ids  = data.get('order_ids', [])
@@ -4729,15 +4764,15 @@ def admin_dispatch_orders():
 @app.route('/api/admin/orders/<order_id>/delivered', methods=['POST'])
 @admin_required
 def admin_mark_delivered(order_id):
-    """Delivered action from today's dispatch batch. GCash orders are
-    already paid (verified via PayMongo at order time), so they complete
-    immediately. COD orders are only completed once staff confirm they
-    actually collected/remitted the cash — pass {"confirm_remittance": true}
-    for those; without it the order is left as-is and a 409 explains why."""
+    """Remit action from today's dispatch batch (adviser revision, Oct 25
+    2026 — replaces the old instant/COD-only "Delivered" button). Every
+    order, GCash or COD, now requires {"amount_remitted": <number>} that
+    matches the order's full total (items + shipping) before it's allowed
+    to complete — see _validate_remittance above."""
     try:
         data = request.get_json(silent=True) or {}
         order_res = supabase.table('order').select(
-            'order_id, status, payment(payment_method, status)'
+            'order_id, status, total, shipping_fee, payment(payment_method, status)'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
@@ -4746,19 +4781,15 @@ def admin_mark_delivered(order_id):
         if order_data.get('status') != 'out_for_delivery':
             return jsonify({'error': 'Only out-for-delivery orders can be marked delivered.'}), 400
 
+        ok, err = _validate_remittance(data, order_data)
+        if not ok:
+            return err
+
         payment = order_data.get('payment')
         if isinstance(payment, list):
             payment = payment[0] if payment else None
-        payment_method = (payment or {}).get('payment_method')
-        payment_status = (payment or {}).get('payment_status') or (payment or {}).get('status')
-
+        payment_status = (payment or {}).get('status')
         if payment_status != 'paid':
-            if not data.get('confirm_remittance'):
-                return jsonify({
-                    'error': 'This is a Cash on Delivery order — confirm remittance to complete it.',
-                    'requires_remittance_confirmation': True,
-                    'payment_method': payment_method
-                }), 409
             supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
 
         supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
@@ -4771,7 +4802,7 @@ def admin_mark_delivered(order_id):
 @admin_required
 def admin_mark_not_delivered(order_id):
     """Not Delivered action. Attempts 1-2: order stays out_for_delivery,
-    dispatch_date is cleared so it drops back into "Available" for a later
+    dispatch_date is cleared so it drops back into "To Dispatch" for a later
     run. Attempt 3: order is marked returned_failed and its stock is
     restored, same as a cancellation."""
     try:
@@ -4799,7 +4830,7 @@ def admin_mark_not_delivered(order_id):
                 'delivery_attempts': attempts,
                 'dispatch_date': None
             }).eq('order_id', order_id).execute()
-            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to Available for another try.', 'delivery_attempts': attempts, 'final': False}), 200
+            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to To Dispatch for another try.', 'delivery_attempts': attempts, 'final': False}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -5610,7 +5641,7 @@ def staff_return_order_items(order_id):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-# ─── Deliveries for Today (staff) ──────────────────────
+# ─── Deliveries (staff) ─────────────────────────────────
 # Branch-scoped mirror of the admin endpoints above — a staff member only
 # ever dispatches/acts on their own branch's orders.
 
@@ -5648,10 +5679,14 @@ def staff_dispatch_orders():
 @app.route('/api/staff/orders/<order_id>/delivered', methods=['POST'])
 @staff_required
 def staff_mark_delivered(order_id):
+    """Remit action — branch-scoped mirror of admin_mark_delivered above.
+    Every order, GCash or COD, now requires {"amount_remitted": <number>}
+    that matches the order's full total (items + shipping) before it's
+    allowed to complete."""
     try:
         data = request.get_json(silent=True) or {}
         order_res = supabase.table('order').select(
-            'order_id, status, payment(payment_method, status)'
+            'order_id, status, total, shipping_fee, payment(payment_method, status)'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
@@ -5660,19 +5695,15 @@ def staff_mark_delivered(order_id):
         if order_data.get('status') != 'out_for_delivery':
             return jsonify({'error': 'Only out-for-delivery orders can be marked delivered.'}), 400
 
+        ok, err = _validate_remittance(data, order_data)
+        if not ok:
+            return err
+
         payment = order_data.get('payment')
         if isinstance(payment, list):
             payment = payment[0] if payment else None
-        payment_method = (payment or {}).get('payment_method')
         payment_status = (payment or {}).get('status')
-
         if payment_status != 'paid':
-            if not data.get('confirm_remittance'):
-                return jsonify({
-                    'error': 'This is a Cash on Delivery order — confirm remittance to complete it.',
-                    'requires_remittance_confirmation': True,
-                    'payment_method': payment_method
-                }), 409
             supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
 
         supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
@@ -5709,7 +5740,7 @@ def staff_mark_not_delivered(order_id):
                 'delivery_attempts': attempts,
                 'dispatch_date': None
             }).eq('order_id', order_id).execute()
-            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to Available for another try.', 'delivery_attempts': attempts, 'final': False}), 200
+            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to To Dispatch for another try.', 'delivery_attempts': attempts, 'final': False}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
