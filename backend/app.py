@@ -4571,6 +4571,11 @@ def admin_return_order_items(order_id):
 #   3. Not Delivered — up to 3 attempts; the 3rd marks the order
 #      'returned_failed' and restores stock exactly like a cancellation.
 
+#   4. Remittance summary — "Today's Remittance" strip on the Deliveries
+#      card (adviser follow-up, same day as #2 and #3 above): Expected vs
+#      Actual totals, computed server-side (see _remittance_summary below).
+#      Needs a new order.completed_at column — see migration note there.
+
 def _order_grand_total(order_data):
     """items subtotal + shipping fee — the actual amount due for an order,
     used by the Remit flow below. order.total only ever stored the item
@@ -4792,7 +4797,13 @@ def admin_mark_delivered(order_id):
         if payment_status != 'paid':
             supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
 
-        supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
+        # completed_at stamps the exact moment of remittance — needed by
+        # _remittance_summary below to total "Actual remitted today"
+        # correctly even for an order dispatched on an earlier day.
+        supabase.table('order').update({
+            'status': 'completed',
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('order_id', order_id).execute()
         return jsonify({'message': 'Order marked delivered.', 'order_id': order_id}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -5706,7 +5717,10 @@ def staff_mark_delivered(order_id):
         if payment_status != 'paid':
             supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
 
-        supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
+        supabase.table('order').update({
+            'status': 'completed',
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('order_id', order_id).execute()
         return jsonify({'message': 'Order marked delivered.', 'order_id': order_id}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
@@ -6251,6 +6265,57 @@ def _delivery_notification_items(out_for_delivery_count, returned_failed_count):
                       'count': returned_failed_count, 'section': 'orders'})
     return items
 
+def _remittance_summary(branch_id=None):
+    """"Today's Remittance" summary strip (adviser follow-up, same day as
+    the notification bell's delivery categories).
+
+    - Expected: the full amount due (subtotal + shipping) across EVERY
+      order dispatched today — dispatch_date == today AND status in
+      ('out_for_delivery', 'completed') — fixed for the day as soon as an
+      order is dispatched, regardless of whether it's been remitted yet.
+      A 'returned_failed' order dropped off today's batch is deliberately
+      excluded: that money was never going to come in.
+    - Actual: the amount already remitted today, i.e. every order whose
+      Remit went through today — status == 'completed' AND completed_at
+      falls within today (UTC day boundary, matching every other
+      "today" check in this file) — regardless of what day it was
+      dispatched, so a late remit on a carried-over order still counts.
+      Remit requires the typed amount to match the order's grand total
+      exactly, so the grand total IS the remitted amount — no separate
+      amount_remitted column is needed to report it back.
+    branch_id=None means store-wide (Admin); passed, it's staff's own
+    branch only.
+    """
+    try:
+        today       = datetime.utcnow().strftime('%Y-%m-%d')
+        today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
+        today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
+
+        exp_q = supabase.table('order').select('order_id, total, shipping_fee') \
+            .eq('dispatch_date', today).in_('status', ['out_for_delivery', 'completed'])
+        if branch_id:
+            exp_q = exp_q.eq('branch_id', branch_id)
+        expected_rows  = exp_q.execute().data or []
+        expected_total = round(sum(_order_grand_total(o) for o in expected_rows), 2)
+
+        act_q = supabase.table('order').select('order_id, total, shipping_fee') \
+            .eq('status', 'completed').gte('completed_at', today_start).lte('completed_at', today_end)
+        if branch_id:
+            act_q = act_q.eq('branch_id', branch_id)
+        actual_rows  = act_q.execute().data or []
+        actual_total = round(sum(_order_grand_total(o) for o in actual_rows), 2)
+
+        return {
+            'expected_total': expected_total,
+            'expected_count': len(expected_rows),
+            'actual_total':   actual_total,
+            'actual_count':   len(actual_rows),
+            'remaining_total': round(expected_total - actual_total, 2),
+        }
+    except Exception as e:
+        print(f'Remittance-summary query warning: {e}')
+        return {'expected_total': 0, 'expected_count': 0, 'actual_total': 0, 'actual_count': 0, 'remaining_total': 0}
+
 @app.route('/api/admin/notifications')
 @admin_required
 def admin_get_notifications():
@@ -6316,6 +6381,30 @@ def staff_get_notifications():
         badge_count = (pending_orders_count + pending_transfers_count + out_for_delivery_count
                        + returned_failed_count + alerts['out'] + alerts['critical'] + alerts['low'])
         return jsonify({'badge_count': badge_count, 'items': items}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/remittance-summary')
+@admin_required
+def admin_remittance_summary():
+    """Store-wide "Today's Remittance" strip for the Deliveries card —
+    see _remittance_summary above for the Expected/Actual definitions."""
+    try:
+        return jsonify(_remittance_summary()), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/remittance-summary')
+@staff_required
+def staff_remittance_summary():
+    """Branch-scoped mirror of admin_remittance_summary above."""
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+        return jsonify(_remittance_summary(branch_id)), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500

@@ -4232,18 +4232,7 @@ function renderStaffDeliveriesForToday(orders) {
   const available = ofd.filter(o => !o.dispatch_date);
   const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
 
-  // Cash Remitted Today — same logic as admin: COD orders dispatched today
-  // that have since been confirmed Delivered (remittance-confirmed).
-  const remittedToday = orders.filter(o =>
-    o.status === 'completed' &&
-    o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC &&
-    (o.payment?.payment_method === 'cash_on_delivery' || (Array.isArray(o.payment) && o.payment[0]?.payment_method === 'cash_on_delivery'))
-  );
-  const remittedSummaryEl = document.getElementById('staffCashRemittedTodaySummary');
-  if (remittedSummaryEl) {
-    const total = remittedToday.reduce((sum, o) => sum + Number(o.total || 0), 0);
-    remittedSummaryEl.textContent = `${peso(total)} (${remittedToday.length} order${remittedToday.length !== 1 ? 's' : ''})`;
-  }
+  loadStaffRemittanceSummary();
 
   document.getElementById('staffDeliveriesAvailableBody').innerHTML = available.length
     ? available.map(o => `
@@ -4271,6 +4260,23 @@ function renderStaffDeliveriesForToday(orders) {
           </td>
         </tr>`).join('')
     : '<tr><td colspan="6" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
+}
+
+// "Today's Remittance" strip — branch-scoped mirror of admin's
+// loadRemittanceSummary. See _remittance_summary in app.py.
+async function loadStaffRemittanceSummary() {
+  const el = document.getElementById('staffRemittanceSummaryStrip');
+  if (!el) return;
+  try {
+    const res  = await fetch('/api/staff/remittance-summary');
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return;
+    document.getElementById('staffRemitExpectedTotal').textContent = peso(body.expected_total || 0);
+    document.getElementById('staffRemitExpectedCount').textContent = `(${body.expected_count || 0} order${body.expected_count === 1 ? '' : 's'})`;
+    document.getElementById('staffRemitActualTotal').textContent   = peso(body.actual_total || 0);
+    document.getElementById('staffRemitActualCount').textContent   = `(${body.actual_count || 0} order${body.actual_count === 1 ? '' : 's'})`;
+    document.getElementById('staffRemitRemainingTotal').textContent = peso(body.remaining_total || 0);
+  } catch (e) { console.error('Remittance summary error:', e); }
 }
 
 function staffToggleAllDeliverySelections(cb) {

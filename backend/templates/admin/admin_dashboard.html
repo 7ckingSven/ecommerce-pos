@@ -596,8 +596,10 @@
             <button id="deliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('today')">Out for Deliveries</button>
           </div>
         </div>
-        <div style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;">
-          Cash Remitted Today: <span id="cashRemittedTodaySummary">₱0.00 (0 orders)</span>
+        <div id="remittanceSummaryStrip" style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;display:flex;gap:1.5rem;flex-wrap:wrap;">
+          <span>Expected Today: <span id="remitExpectedTotal">₱0.00</span> <span id="remitExpectedCount" style="font-weight:400;color:var(--text-muted);"></span></span>
+          <span>Remitted So Far: <span id="remitActualTotal">₱0.00</span> <span id="remitActualCount" style="font-weight:400;color:var(--text-muted);"></span></span>
+          <span>Remaining: <span id="remitRemainingTotal">₱0.00</span></span>
         </div>
 
         <!-- Available: out_for_delivery, not yet picked for a run -->

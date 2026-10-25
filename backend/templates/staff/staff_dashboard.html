@@ -580,8 +580,10 @@
             <button id="staffDeliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('today')">Out for Deliveries</button>
           </div>
         </div>
-        <div style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;">
-          Cash Remitted Today: <span id="staffCashRemittedTodaySummary">₱0.00 (0 orders)</span>
+        <div id="staffRemittanceSummaryStrip" style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;display:flex;gap:1.5rem;flex-wrap:wrap;">
+          <span>Expected Today: <span id="staffRemitExpectedTotal">₱0.00</span> <span id="staffRemitExpectedCount" style="font-weight:400;color:var(--text-muted);"></span></span>
+          <span>Remitted So Far: <span id="staffRemitActualTotal">₱0.00</span> <span id="staffRemitActualCount" style="font-weight:400;color:var(--text-muted);"></span></span>
+          <span>Remaining: <span id="staffRemitRemainingTotal">₱0.00</span></span>
         </div>
 
         <div id="staffDeliveriesAvailablePanel" style="padding:1rem;">

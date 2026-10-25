@@ -4159,21 +4159,7 @@ function renderDeliveriesForToday(orders) {
   const available = ofd.filter(o => !o.dispatch_date);
   const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
 
-  // Cash Remitted Today — COD orders dispatched today that have since been
-  // confirmed Delivered (remittance-confirmed). dispatch_date is cleared on
-  // a failed attempt and re-set on the next dispatch, so "dispatch_date ===
-  // today" still correctly means "delivered on today's run" even for an
-  // order that failed an earlier attempt on a previous day.
-  const remittedToday = orders.filter(o =>
-    o.status === 'completed' &&
-    o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC &&
-    (o.payment?.payment_method === 'cash_on_delivery' || (Array.isArray(o.payment) && o.payment[0]?.payment_method === 'cash_on_delivery'))
-  );
-  const remittedSummaryEl = document.getElementById('cashRemittedTodaySummary');
-  if (remittedSummaryEl) {
-    const total = remittedToday.reduce((sum, o) => sum + Number(o.total || 0), 0);
-    remittedSummaryEl.textContent = `${peso(total)} (${remittedToday.length} order${remittedToday.length !== 1 ? 's' : ''})`;
-  }
+  loadRemittanceSummary();
 
   document.getElementById('deliveriesAvailableBody').innerHTML = available.length
     ? available.map(o => `
@@ -4201,6 +4187,28 @@ function renderDeliveriesForToday(orders) {
           </td>
         </tr>`).join('')
     : '<tr><td colspan="6" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
+}
+
+// "Today's Remittance" strip (adviser follow-up, same day as the delivery
+// notification categories). Expected = full amount due across every order
+// dispatched today, fixed as soon as it's dispatched; Actual = what's
+// actually come in so far today via a completed Remit. Backend-computed
+// (see _remittance_summary in app.py) rather than derived client-side from
+// allOrders, so it stays correct even for an order carried over from a
+// previous day's failed attempt.
+async function loadRemittanceSummary() {
+  const el = document.getElementById('remittanceSummaryStrip');
+  if (!el) return;
+  try {
+    const res  = await fetch('/api/admin/remittance-summary');
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return;
+    document.getElementById('remitExpectedTotal').textContent = peso(body.expected_total || 0);
+    document.getElementById('remitExpectedCount').textContent = `(${body.expected_count || 0} order${body.expected_count === 1 ? '' : 's'})`;
+    document.getElementById('remitActualTotal').textContent   = peso(body.actual_total || 0);
+    document.getElementById('remitActualCount').textContent   = `(${body.actual_count || 0} order${body.actual_count === 1 ? '' : 's'})`;
+    document.getElementById('remitRemainingTotal').textContent = peso(body.remaining_total || 0);
+  } catch (e) { console.error('Remittance summary error:', e); }
 }
 
 function toggleAllDeliverySelections(cb) {
