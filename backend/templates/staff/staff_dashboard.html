@@ -575,15 +575,27 @@
       <div class="card" style="margin-top:16px;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 1rem 0;">
           <h3 class="card-title" style="margin:0;">Deliveries</h3>
-          <div style="display:flex;gap:6px;">
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button id="staffDeliveriesTabAvailableBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('available')">To Dispatch</button>
             <button id="staffDeliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('today')">Out for Deliveries</button>
+            <button id="staffDeliveriesTabDeliveredBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('delivered')">Delivered Today</button>
+            <button id="staffDeliveriesTabFailedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('failed')">Failed Attempts Today</button>
+            <button id="staffDeliveriesTabReturnedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('returned')">Returned/Failed Today</button>
           </div>
+        </div>
+        <div id="staffDeliveriesCountsStrip" style="margin:10px 1rem 0;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:13px;display:flex;gap:1.5rem;flex-wrap:wrap;">
+          <span>Total Deliveries Today: <strong id="staffDeliveriesCountTotal">0</strong></span>
+          <span style="color:#16a34a;">Completed/Remitted: <strong id="staffDeliveriesCountCompleted">0</strong></span>
+          <span style="color:#d97706;">Failed Attempts: <strong id="staffDeliveriesCountFailed">0</strong></span>
+          <span style="color:#dc2626;">Returned/Failed: <strong id="staffDeliveriesCountReturned">0</strong></span>
         </div>
         <div id="staffRemittanceSummaryStrip" style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;display:flex;gap:1.5rem;flex-wrap:wrap;">
           <span>Expected Today: <span id="staffRemitExpectedTotal">₱0.00</span> <span id="staffRemitExpectedCount" style="font-weight:400;color:var(--text-muted);"></span></span>
           <span>Remitted So Far: <span id="staffRemitActualTotal">₱0.00</span> <span id="staffRemitActualCount" style="font-weight:400;color:var(--text-muted);"></span></span>
           <span>Remaining: <span id="staffRemitRemainingTotal">₱0.00</span></span>
+        </div>
+        <div style="margin:4px 1rem 0;font-size:11px;color:var(--text-muted);">
+          Total Deliveries Today = Out for Deliveries + Delivered Today. Completed/Remitted = Delivered Today. Failed Attempts = sent back to To Dispatch for a retry (not yet final). Returned/Failed = 3rd attempt failed. Full order history for any date is still in the Orders table's status filter above.
         </div>
 
         <div id="staffDeliveriesAvailablePanel" style="padding:1rem;">
@@ -607,6 +619,46 @@
                 <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
               </thead>
               <tbody id="staffDeliveriesTodayBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Delivered Today: completed orders dispatched today — the order-
+             level breakdown backing "Remitted So Far" above. Read-only. -->
+        <div id="staffDeliveriesDeliveredPanel" style="padding:1rem;display:none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Amount Remitted</th></tr>
+              </thead>
+              <tbody id="staffDeliveriesDeliveredBody"><tr><td colspan="4" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Failed Attempts Today: non-final Not-Delivered events (attempt
+             1 or 2) recorded today — sent back to "To Dispatch" for a
+             retry, not yet final. Read-only. -->
+        <div id="staffDeliveriesFailedPanel" style="padding:1rem;display:none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Attempt</th><th>Amount</th></tr>
+              </thead>
+              <tbody id="staffDeliveriesFailedBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Returned/Failed Today: orders that hit their 3rd failed
+             attempt today, dropped from the batch. Read-only. -->
+        <div id="staffDeliveriesReturnedPanel" style="padding:1rem;display:none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Amount (not collected)</th></tr>
+              </thead>
+              <tbody id="staffDeliveriesReturnedBody"><tr><td colspan="4" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>

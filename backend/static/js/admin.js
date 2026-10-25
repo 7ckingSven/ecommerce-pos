@@ -4131,12 +4131,24 @@ let deliveriesActiveTab = 'available';
 
 function switchDeliveriesTab(tab) {
   deliveriesActiveTab = tab;
-  const availBtn = document.getElementById('deliveriesTabAvailableBtn');
-  const todayBtn = document.getElementById('deliveriesTabTodayBtn');
-  document.getElementById('deliveriesAvailablePanel').style.display = tab === 'available' ? '' : 'none';
-  document.getElementById('deliveriesTodayPanel').style.display     = tab === 'today' ? '' : 'none';
-  if (availBtn) availBtn.className = `btn ${tab === 'available' ? 'btn-solid-green' : 'btn-cancel'}`;
-  if (todayBtn) todayBtn.className = `btn ${tab === 'today' ? 'btn-solid-green' : 'btn-cancel'}`;
+  const btns = {
+    available: document.getElementById('deliveriesTabAvailableBtn'),
+    today:     document.getElementById('deliveriesTabTodayBtn'),
+    delivered: document.getElementById('deliveriesTabDeliveredBtn'),
+    failed:    document.getElementById('deliveriesTabFailedBtn'),
+    returned:  document.getElementById('deliveriesTabReturnedBtn'),
+  };
+  const panels = {
+    available: document.getElementById('deliveriesAvailablePanel'),
+    today:     document.getElementById('deliveriesTodayPanel'),
+    delivered: document.getElementById('deliveriesDeliveredPanel'),
+    failed:    document.getElementById('deliveriesFailedPanel'),
+    returned:  document.getElementById('deliveriesReturnedPanel'),
+  };
+  Object.keys(panels).forEach(key => {
+    if (panels[key]) panels[key].style.display = tab === key ? '' : 'none';
+    if (btns[key])   btns[key].className = `btn ${tab === key ? 'btn-solid-green' : 'btn-cancel'}`;
+  });
 }
 
 function fullDeliveryAddress(order) {
@@ -4162,15 +4174,25 @@ function renderDeliveriesForToday(orders) {
   loadRemittanceSummary();
 
   document.getElementById('deliveriesAvailableBody').innerHTML = available.length
-    ? available.map(o => `
+    ? available.map(o => {
+        // "To Dispatch" holds both brand-new orders and ones sent back
+        // after a failed attempt (dispatch_date cleared, not yet final) —
+        // previously indistinguishable on this tab. A Retry flag + attempt
+        // count surfaces which is which, so nothing looks like it's stuck.
+        const attempts = o.delivery_attempts || 0;
+        const retryBadge = attempts > 0
+          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
+          : '';
+        return `
         <tr>
           <td><input type="checkbox" class="delivery-select-cb" value="${o.order_id}"/></td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${fullDeliveryAddress(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${peso(o.total)}</td>
-        </tr>`).join('')
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
 
   document.getElementById('deliveriesTodayBody').innerHTML = today.length
@@ -4208,6 +4230,66 @@ async function loadRemittanceSummary() {
     document.getElementById('remitActualTotal').textContent   = peso(body.actual_total || 0);
     document.getElementById('remitActualCount').textContent   = `(${body.actual_count || 0} order${body.actual_count === 1 ? '' : 's'})`;
     document.getElementById('remitRemainingTotal').textContent = peso(body.remaining_total || 0);
+
+    // Headline counts strip (team follow-up: Total Deliveries / Completed /
+    // Failed Attempts / Returned-Failed, all scoped to today).
+    const countsEl = document.getElementById('deliveriesCountsStrip');
+    if (countsEl) {
+      document.getElementById('deliveriesCountTotal').textContent     = body.total_deliveries_count || 0;
+      document.getElementById('deliveriesCountCompleted').textContent = body.completed_count || 0;
+      document.getElementById('deliveriesCountFailed').textContent    = body.failed_attempts_count || 0;
+      document.getElementById('deliveriesCountReturned').textContent  = body.returned_count || 0;
+    }
+
+    // Order-level breakdown — the "where did this amount come from" tabs
+    // (team follow-up: the Expected total alone wasn't traceable to
+    // anything visible on screen). Read-only: no Remit/Not-Delivered
+    // actions here, those stay on the live "Out for Deliveries" tab.
+    const deliveredBody = document.getElementById('deliveriesDeliveredBody');
+    if (deliveredBody) {
+      const rows = body.delivered_orders || [];
+      deliveredBody.innerHTML = rows.length
+        ? rows.map(o => `
+            <tr>
+              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+              <td>${o.customer_name}</td>
+              <td>${o.branch_name || '—'}</td>
+              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
+              <td>${peso(o.grand_total)}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="5" class="table-empty">No orders remitted yet today.</td></tr>';
+    }
+
+    const failedBody = document.getElementById('deliveriesFailedBody');
+    if (failedBody) {
+      const rows = body.failed_attempt_orders || [];
+      failedBody.innerHTML = rows.length
+        ? rows.map(o => `
+            <tr>
+              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+              <td>${o.customer_name}</td>
+              <td>${o.branch_name || '—'}</td>
+              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
+              <td>${o.delivery_attempts}/3</td>
+              <td>${peso(o.grand_total)}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="6" class="table-empty">No failed attempts recorded today.</td></tr>';
+    }
+
+    const returnedBody = document.getElementById('deliveriesReturnedBody');
+    if (returnedBody) {
+      const rows = body.returned_orders || [];
+      returnedBody.innerHTML = rows.length
+        ? rows.map(o => `
+            <tr>
+              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+              <td>${o.customer_name}</td>
+              <td>${o.branch_name || '—'}</td>
+              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
+              <td>${peso(o.grand_total)}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="5" class="table-empty">No orders returned/failed today.</td></tr>';
+    }
   } catch (e) { console.error('Remittance summary error:', e); }
 }
 

@@ -4206,12 +4206,24 @@ let staffDeliveriesActiveTab = 'available';
 
 function staffSwitchDeliveriesTab(tab) {
   staffDeliveriesActiveTab = tab;
-  const availBtn = document.getElementById('staffDeliveriesTabAvailableBtn');
-  const todayBtn = document.getElementById('staffDeliveriesTabTodayBtn');
-  document.getElementById('staffDeliveriesAvailablePanel').style.display = tab === 'available' ? '' : 'none';
-  document.getElementById('staffDeliveriesTodayPanel').style.display     = tab === 'today' ? '' : 'none';
-  if (availBtn) availBtn.className = `btn ${tab === 'available' ? 'btn-solid-green' : 'btn-cancel'}`;
-  if (todayBtn) todayBtn.className = `btn ${tab === 'today' ? 'btn-solid-green' : 'btn-cancel'}`;
+  const btns = {
+    available: document.getElementById('staffDeliveriesTabAvailableBtn'),
+    today:     document.getElementById('staffDeliveriesTabTodayBtn'),
+    delivered: document.getElementById('staffDeliveriesTabDeliveredBtn'),
+    failed:    document.getElementById('staffDeliveriesTabFailedBtn'),
+    returned:  document.getElementById('staffDeliveriesTabReturnedBtn'),
+  };
+  const panels = {
+    available: document.getElementById('staffDeliveriesAvailablePanel'),
+    today:     document.getElementById('staffDeliveriesTodayPanel'),
+    delivered: document.getElementById('staffDeliveriesDeliveredPanel'),
+    failed:    document.getElementById('staffDeliveriesFailedPanel'),
+    returned:  document.getElementById('staffDeliveriesReturnedPanel'),
+  };
+  Object.keys(panels).forEach(key => {
+    if (panels[key]) panels[key].style.display = tab === key ? '' : 'none';
+    if (btns[key])   btns[key].className = `btn ${tab === key ? 'btn-solid-green' : 'btn-cancel'}`;
+  });
 }
 
 function staffFullDeliveryAddress(order) {
@@ -4235,15 +4247,21 @@ function renderStaffDeliveriesForToday(orders) {
   loadStaffRemittanceSummary();
 
   document.getElementById('staffDeliveriesAvailableBody').innerHTML = available.length
-    ? available.map(o => `
+    ? available.map(o => {
+        const attempts = o.delivery_attempts || 0;
+        const retryBadge = attempts > 0
+          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
+          : '';
+        return `
         <tr>
           <td><input type="checkbox" class="staff-delivery-select-cb" value="${o.order_id}"/></td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${staffFullDeliveryAddress(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${peso(o.total)}</td>
-        </tr>`).join('')
+        </tr>`;
+      }).join('')
     : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
 
   document.getElementById('staffDeliveriesTodayBody').innerHTML = today.length
@@ -4276,6 +4294,58 @@ async function loadStaffRemittanceSummary() {
     document.getElementById('staffRemitActualTotal').textContent   = peso(body.actual_total || 0);
     document.getElementById('staffRemitActualCount').textContent   = `(${body.actual_count || 0} order${body.actual_count === 1 ? '' : 's'})`;
     document.getElementById('staffRemitRemainingTotal').textContent = peso(body.remaining_total || 0);
+
+    const countsEl = document.getElementById('staffDeliveriesCountsStrip');
+    if (countsEl) {
+      document.getElementById('staffDeliveriesCountTotal').textContent     = body.total_deliveries_count || 0;
+      document.getElementById('staffDeliveriesCountCompleted').textContent = body.completed_count || 0;
+      document.getElementById('staffDeliveriesCountFailed').textContent    = body.failed_attempts_count || 0;
+      document.getElementById('staffDeliveriesCountReturned').textContent  = body.returned_count || 0;
+    }
+
+    // Order-level breakdown tabs — branch-scoped mirror of admin's.
+    const deliveredBody = document.getElementById('staffDeliveriesDeliveredBody');
+    if (deliveredBody) {
+      const rows = body.delivered_orders || [];
+      deliveredBody.innerHTML = rows.length
+        ? rows.map(o => `
+            <tr>
+              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+              <td>${o.customer_name}</td>
+              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
+              <td>${peso(o.grand_total)}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="4" class="table-empty">No orders remitted yet today.</td></tr>';
+    }
+
+    const failedBody = document.getElementById('staffDeliveriesFailedBody');
+    if (failedBody) {
+      const rows = body.failed_attempt_orders || [];
+      failedBody.innerHTML = rows.length
+        ? rows.map(o => `
+            <tr>
+              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+              <td>${o.customer_name}</td>
+              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
+              <td>${o.delivery_attempts}/3</td>
+              <td>${peso(o.grand_total)}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="5" class="table-empty">No failed attempts recorded today.</td></tr>';
+    }
+
+    const returnedBody = document.getElementById('staffDeliveriesReturnedBody');
+    if (returnedBody) {
+      const rows = body.returned_orders || [];
+      returnedBody.innerHTML = rows.length
+        ? rows.map(o => `
+            <tr>
+              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+              <td>${o.customer_name}</td>
+              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
+              <td>${peso(o.grand_total)}</td>
+            </tr>`).join('')
+        : '<tr><td colspan="4" class="table-empty">No orders returned/failed today.</td></tr>';
+    }
   } catch (e) { console.error('Remittance summary error:', e); }
 }
 

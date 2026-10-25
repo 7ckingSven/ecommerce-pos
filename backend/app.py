@@ -4828,18 +4828,26 @@ def admin_mark_not_delivered(order_id):
             return jsonify({'error': 'Only out-for-delivery orders can be marked not delivered.'}), 400
 
         attempts = int(order_data.get('delivery_attempts') or 0) + 1
+        attempted_at = datetime.now(timezone.utc).isoformat()
 
         if attempts >= 3:
             supabase.table('order').update({
                 'status': 'returned_failed',
-                'delivery_attempts': attempts
+                'delivery_attempts': attempts,
+                'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
             _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
             return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
         else:
+            # last_attempt_at is the ONLY remaining record of when this
+            # failure happened — dispatch_date (the usual "which day"
+            # marker) gets cleared below so the order drops back into
+            # "To Dispatch" for a retry, which otherwise erases the date
+            # entirely. See _remittance_summary's failed_attempts stat.
             supabase.table('order').update({
                 'delivery_attempts': attempts,
-                'dispatch_date': None
+                'dispatch_date': None,
+                'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
             return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to To Dispatch for another try.', 'delivery_attempts': attempts, 'final': False}), 200
     except Exception as e:
@@ -5741,18 +5749,21 @@ def staff_mark_not_delivered(order_id):
             return jsonify({'error': 'Only out-for-delivery orders can be marked not delivered.'}), 400
 
         attempts = int(order_data.get('delivery_attempts') or 0) + 1
+        attempted_at = datetime.now(timezone.utc).isoformat()
 
         if attempts >= 3:
             supabase.table('order').update({
                 'status': 'returned_failed',
-                'delivery_attempts': attempts
+                'delivery_attempts': attempts,
+                'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
             _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
             return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
         else:
             supabase.table('order').update({
                 'delivery_attempts': attempts,
-                'dispatch_date': None
+                'dispatch_date': None,
+                'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
             return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to To Dispatch for another try.', 'delivery_attempts': attempts, 'final': False}), 200
     except Exception as e:
@@ -6265,24 +6276,71 @@ def _delivery_notification_items(out_for_delivery_count, returned_failed_count):
                       'count': returned_failed_count, 'section': 'orders'})
     return items
 
-def _remittance_summary(branch_id=None):
-    """"Today's Remittance" summary strip (adviser follow-up, same day as
-    the notification bell's delivery categories).
+_REMIT_ORDER_SELECT = ('order_id, total, shipping_fee, status, dispatch_date, completed_at, '
+                       'delivery_attempts, branch_id, branch(branch_name), customer(fname, lname), payment(payment_method)')
 
-    - Expected: the full amount due (subtotal + shipping) across EVERY
-      order dispatched today — dispatch_date == today AND status in
-      ('out_for_delivery', 'completed') — fixed for the day as soon as an
-      order is dispatched, regardless of whether it's been remitted yet.
-      A 'returned_failed' order dropped off today's batch is deliberately
-      excluded: that money was never going to come in.
-    - Actual: the amount already remitted today, i.e. every order whose
-      Remit went through today — status == 'completed' AND completed_at
-      falls within today (UTC day boundary, matching every other
-      "today" check in this file) — regardless of what day it was
-      dispatched, so a late remit on a carried-over order still counts.
-      Remit requires the typed amount to match the order's grand total
-      exactly, so the grand total IS the remitted amount — no separate
-      amount_remitted column is needed to report it back.
+def _serialize_remit_order(o):
+    """Flattens one order row into exactly what the Deliveries-card
+    breakdown tabs show — see _remittance_summary below."""
+    customer = o.get('customer')
+    if isinstance(customer, list):
+        customer = customer[0] if customer else None
+    payment = o.get('payment')
+    if isinstance(payment, list):
+        payment = payment[0] if payment else None
+    branch = o.get('branch')
+    if isinstance(branch, list):
+        branch = branch[0] if branch else None
+    return {
+        'order_id': o.get('order_id'),
+        'customer_name': f"{customer['fname']} {customer['lname']}" if customer else 'Walk-in',
+        'payment_method': (payment or {}).get('payment_method'),
+        'branch_name': (branch or {}).get('branch_name'),
+        'grand_total': _order_grand_total(o),
+        'status': o.get('status'),
+        'dispatch_date': o.get('dispatch_date'),
+        'completed_at': o.get('completed_at'),
+        'delivery_attempts': o.get('delivery_attempts') or 0,
+    }
+
+def _remittance_summary(branch_id=None):
+    """"Today's Remittance" summary strip + its order-level breakdown
+    (adviser follow-up, same day as the notification bell's delivery
+    categories; breakdown added right after, once the team asked where
+    the Expected total was actually coming from, then asked for the
+    headline counts — Total Deliveries / Completed / Failed Attempts /
+    Returned-Failed — right after that).
+
+    Everything below is derived from ONE query (`expected_rows`) plus two
+    small supporting ones, and every total has a matching order list it's
+    summed from — nothing is a number without a visible row backing it.
+
+    - expected_rows: every order dispatched today — dispatch_date == today
+      AND status in ('out_for_delivery', 'completed'). Split by status
+      into pending_rows ("Out for Deliveries", not yet remitted) and
+      delivered_rows ("Delivered Today", already remitted). A
+      'returned_failed' order is deliberately excluded from this set —
+      that money was never coming in.
+    - Expected total = sum of ALL of expected_rows. Actual/Remitted total
+      = sum of delivered_rows ONLY — this used to be computed from a
+      separate completed_at-based query, which silently undercounted any
+      order completed before that column existed (a one-time migration
+      gap). Deriving it from delivered_rows instead keeps it permanently
+      in sync with the "Delivered Today" tab the team actually looks at,
+      with no dependency on completed_at's timing at all.
+    - returned_rows: status == 'returned_failed' AND dispatch_date ==
+      today — correct without needing last_attempt_at, because a final
+      failed attempt can only happen from today's "Out for Deliveries"
+      batch, so dispatch_date is already guaranteed to be today at that
+      moment (mark_not_delivered doesn't touch it on the final branch).
+    - failed_attempt_rows: status == 'out_for_delivery' AND
+      last_attempt_at falls within today (UTC day boundary) — a NON-final
+      Not-Delivered click (attempt 1 or 2). This is the one figure that
+      genuinely needed a new timestamp: a non-final failure clears
+      dispatch_date (so the order can be picked up again later), which
+      otherwise destroys the only record of which day that failure
+      happened on. last_attempt_at (stamped by both mark_not_delivered
+      routes on every attempt, final or not) fills that gap.
     branch_id=None means store-wide (Admin); passed, it's staff's own
     branch only.
     """
@@ -6291,30 +6349,59 @@ def _remittance_summary(branch_id=None):
         today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
         today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
 
-        exp_q = supabase.table('order').select('order_id, total, shipping_fee') \
+        exp_q = supabase.table('order').select(_REMIT_ORDER_SELECT) \
             .eq('dispatch_date', today).in_('status', ['out_for_delivery', 'completed'])
         if branch_id:
             exp_q = exp_q.eq('branch_id', branch_id)
         expected_rows  = exp_q.execute().data or []
         expected_total = round(sum(_order_grand_total(o) for o in expected_rows), 2)
 
-        act_q = supabase.table('order').select('order_id, total, shipping_fee') \
-            .eq('status', 'completed').gte('completed_at', today_start).lte('completed_at', today_end)
+        delivered_rows = [o for o in expected_rows if o.get('status') == 'completed']
+        pending_rows   = [o for o in expected_rows if o.get('status') == 'out_for_delivery']
+        delivered_total = round(sum(_order_grand_total(o) for o in delivered_rows), 2)
+
+        rf_q = supabase.table('order').select(_REMIT_ORDER_SELECT) \
+            .eq('status', 'returned_failed').eq('dispatch_date', today)
         if branch_id:
-            act_q = act_q.eq('branch_id', branch_id)
-        actual_rows  = act_q.execute().data or []
-        actual_total = round(sum(_order_grand_total(o) for o in actual_rows), 2)
+            rf_q = rf_q.eq('branch_id', branch_id)
+        returned_rows = rf_q.execute().data or []
+
+        fa_q = supabase.table('order').select(_REMIT_ORDER_SELECT) \
+            .eq('status', 'out_for_delivery').gte('last_attempt_at', today_start).lte('last_attempt_at', today_end)
+        if branch_id:
+            fa_q = fa_q.eq('branch_id', branch_id)
+        failed_attempt_rows = fa_q.execute().data or []
 
         return {
-            'expected_total': expected_total,
-            'expected_count': len(expected_rows),
-            'actual_total':   actual_total,
-            'actual_count':   len(actual_rows),
-            'remaining_total': round(expected_total - actual_total, 2),
+            'expected_total':  expected_total,
+            'expected_count':  len(expected_rows),
+            'actual_total':    delivered_total,
+            'actual_count':    len(delivered_rows),
+            'remaining_total': round(expected_total - delivered_total, 2),
+            # Headline counts (team follow-up): Total Deliveries Today is
+            # just expected_count under another name — everything
+            # dispatched today, remitted or not.
+            'total_deliveries_count':   len(expected_rows),
+            'completed_count':          len(delivered_rows),
+            'failed_attempts_count':    len(failed_attempt_rows),
+            'returned_count':           len(returned_rows),
+            # Breakdown lists — every count above sums exactly one of
+            # these, so every number on the strip can be clicked through
+            # to the rows behind it. pending_orders mirrors the live "Out
+            # for Deliveries" tab for cross-reference only; the
+            # action-wired version stays on allOrders so Remit/Not-
+            # Delivered keep working unchanged.
+            'pending_orders':         [_serialize_remit_order(o) for o in pending_rows],
+            'delivered_orders':       [_serialize_remit_order(o) for o in delivered_rows],
+            'returned_orders':        [_serialize_remit_order(o) for o in returned_rows],
+            'failed_attempt_orders':  [_serialize_remit_order(o) for o in failed_attempt_rows],
         }
     except Exception as e:
         print(f'Remittance-summary query warning: {e}')
-        return {'expected_total': 0, 'expected_count': 0, 'actual_total': 0, 'actual_count': 0, 'remaining_total': 0}
+        return {'expected_total': 0, 'expected_count': 0, 'actual_total': 0, 'actual_count': 0,
+                'remaining_total': 0, 'total_deliveries_count': 0, 'completed_count': 0,
+                'failed_attempts_count': 0, 'returned_count': 0,
+                'pending_orders': [], 'delivered_orders': [], 'returned_orders': [], 'failed_attempt_orders': []}
 
 @app.route('/api/admin/notifications')
 @admin_required
