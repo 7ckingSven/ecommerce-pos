@@ -923,6 +923,126 @@ select.form-input {
   to   { opacity: 1; transform: translateY(0); }
 }
 
+/* ─── Notification Bell (adviser follow-up, Oct 25 2026) ─── */
+.notif-bell-wrap { position: relative; }
+.notif-bell-btn {
+  position: relative;
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 6px;
+  border-radius: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+.notif-bell-btn:hover { background: var(--surface-2); color: var(--text); }
+.notif-bell-badge {
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: #dc2626;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+  text-align: center;
+}
+.notif-dropdown {
+  position: absolute;
+  top: calc(100% + 10px);
+  right: 0;
+  width: 320px;
+  max-height: 420px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 12px 32px rgba(0,0,0,0.18);
+  z-index: 400;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.notif-dropdown-header {
+  padding: 12px 14px;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text);
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.notif-dropdown-body { overflow-y: auto; max-height: 370px; }
+.notif-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  transition: background 0.12s;
+}
+.notif-item:last-child { border-bottom: none; }
+.notif-item:hover { background: var(--surface-2); }
+.notif-item-dot {
+  flex-shrink: 0;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-top: 5px;
+  background: #16a34a;
+}
+.notif-item-dot.warn   { background: #f59e0b; }
+.notif-item-dot.danger { background: #dc2626; }
+.notif-item-label { font-size: 12.5px; line-height: 1.4; color: var(--text); }
+.notif-empty {
+  padding: 24px 14px;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* ─── Notification Toasts — bottom-right, stacked above the action toast,
+   auto-dismiss after 5s (see notifyAndToast() in admin.js/staff.js) ─── */
+.notif-toast-stack {
+  position: fixed;
+  bottom: 5.5rem;
+  right: 1.5rem;
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 8px;
+  z-index: 310;
+}
+.notif-toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 12px 14px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  line-height: 1.4;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.22);
+  max-width: 300px;
+  animation: notifToastIn 0.25s ease-out;
+}
+.notif-toast.hide { animation: notifToastOut 0.25s ease-in forwards; }
+@keyframes notifToastIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes notifToastOut {
+  from { opacity: 1; transform: translateY(0); }
+  to   { opacity: 0; transform: translateY(10px); }
+}
+
 /* ─── Responsive ─── */
 @media (max-width: 1200px) {
   .stat-grid { grid-template-columns: repeat(2, 1fr); }

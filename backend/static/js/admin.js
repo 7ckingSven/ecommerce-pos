@@ -526,6 +526,113 @@ if (document.readyState !== 'loading') {
   document.addEventListener('DOMContentLoaded', _connectLiveUpdates);
 }
 
+// ─── Notification Bell ─────────────────────────────────
+// Adviser follow-up, Oct 25 2026 — live/actionable list only, no persisted
+// history or read state by design (see mock-defense-revisions.md). Polls
+// /api/admin/notifications on its OWN timer, independent of the live-update
+// channel above — that one depends on a Postgres trigger migration that
+// isn't confirmed live yet, and the bell needs to work regardless.
+const NOTIF_POLL_MS = 20000;
+let _notifSeenCounts = {}; // type -> count, so a repeat poll only toasts what went UP
+let _notifTimer = null;
+
+function toggleNotifDropdown() {
+  const dd = document.getElementById('notifDropdown');
+  if (!dd) return;
+  const opening = dd.style.display === 'none' || !dd.style.display;
+  dd.style.display = opening ? 'flex' : 'none';
+  if (opening) loadNotifications();
+}
+
+// Outside-click closes the dropdown, same convention as every other popover
+// in this file (modals close via their own X/Cancel instead).
+document.addEventListener('click', function (e) {
+  const wrap = document.querySelector('.notif-bell-wrap');
+  const dd   = document.getElementById('notifDropdown');
+  if (!wrap || !dd || dd.style.display === 'none') return;
+  if (!wrap.contains(e.target)) dd.style.display = 'none';
+});
+
+function _notifDotClass(type) {
+  if (type === 'out_of_stock' || type === 'critical_stock' || type === 'returned_failed') return 'danger';
+  if (type === 'low_stock' || type === 'out_for_delivery') return 'warn';
+  return '';
+}
+
+function renderNotifDropdown(items) {
+  const body = document.getElementById('notifDropdownBody');
+  if (!body) return;
+  body.innerHTML = items.length
+    ? items.map(i => `
+        <div class="notif-item" onclick="goToNotifSection('${i.section}', '${i.type}')">
+          <span class="notif-item-dot ${_notifDotClass(i.type)}"></span>
+          <span class="notif-item-label">${i.label}</span>
+        </div>`).join('')
+    : '<div class="notif-empty">You\'re all caught up.</div>';
+}
+
+function goToNotifSection(section, type) {
+  const dd = document.getElementById('notifDropdown');
+  if (dd) dd.style.display = 'none';
+  showSection(section, null);
+  // Delivery items live inside Orders, under the Deliveries card's own
+  // tabs — jump straight to the right tab, not just the section.
+  if (type === 'out_for_delivery') switchDeliveriesTab('today');
+}
+
+async function loadNotifications() {
+  try {
+    const res = await fetch('/api/admin/notifications');
+    if (!res.ok) return;
+    const data  = await res.json();
+    const items = data.items || [];
+    const count = data.badge_count || 0;
+
+    const badgeEl = document.getElementById('notifBellBadge');
+    if (badgeEl) {
+      if (count > 0) {
+        badgeEl.textContent   = count > 99 ? '99+' : count;
+        badgeEl.style.display = 'inline-block';
+      } else {
+        badgeEl.style.display = 'none';
+      }
+    }
+    renderNotifDropdown(items);
+
+    // Toast only a category whose count went UP since the last poll — a
+    // genuinely new item, not just "still pending from before." Skips the
+    // very first poll (nothing to compare against yet).
+    if (Object.keys(_notifSeenCounts).length > 0) {
+      items.forEach(i => {
+        if (i.count > (_notifSeenCounts[i.type] || 0)) showNotifToast(i.label);
+      });
+    }
+    _notifSeenCounts = {};
+    items.forEach(i => { _notifSeenCounts[i.type] = i.count; });
+  } catch (e) { /* silent — notifications are best-effort, never block the dashboard */ }
+}
+
+function showNotifToast(message) {
+  const stack = document.getElementById('notifToastStack');
+  if (!stack) return;
+  const el = document.createElement('div');
+  el.className = 'notif-toast';
+  el.innerHTML = `
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;margin-top:1px;"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg>
+    <span>${message}</span>`;
+  stack.appendChild(el);
+  setTimeout(() => {
+    el.classList.add('hide');
+    setTimeout(() => el.remove(), 250);
+  }, 5000);
+}
+
+function _startNotifPolling() {
+  loadNotifications();
+  if (_notifTimer) clearInterval(_notifTimer);
+  _notifTimer = setInterval(loadNotifications, NOTIF_POLL_MS);
+}
+
 function showSection(name, el) {
   document.querySelectorAll('.nav-item').forEach(i => i.classList.remove('active'));
   if (el) {
@@ -8170,6 +8277,7 @@ document.addEventListener('DOMContentLoaded', async function () {
   await loadBranches();
   _loadedSections.add('products'); loadProducts();
   switchDeliveriesTab('available');
+  _startNotifPolling();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');

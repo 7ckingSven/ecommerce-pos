@@ -6137,6 +6137,189 @@ def admin_get_stock_transfers():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ─── Notification Bell ──────────────────────────────────
+# Adviser follow-up, Oct 25 2026 — team decision: a LIVE/ACTIONABLE list,
+# not a persisted history log. There is no `notification` table and no
+# read/unread state by design: the badge count and dropdown list are always
+# a fresh read of "what currently needs attention," computed on every call,
+# and an item simply disappears once it's resolved (order processed, stock
+# request reviewed, transfer approved/rejected, stock replenished). See
+# mock-defense-revisions.md for the "live vs. persisted history" trade-off
+# this was decided against.
+#
+# Scope: pending online orders; staff stock requests awaiting review
+# (admin only — staff don't review their own requests); incoming branch
+# transfers awaiting approval (staff only — mirrors the destination-branch-
+# approves design of Feature 9); out-of-stock / critical / low stock alerts
+# (both, branch-scoped for staff). admin.js/staff.js poll this on an
+# independent timer — NOT the Feature 7 live-update channel, since that one
+# depends on DATABASE_URL + the Postgres trigger migration being run, which
+# isn't confirmed live yet.
+
+def _stock_alert_counts(branch_id=None):
+    """Counts products by worst stock tier, mirroring the existing Admin
+    Stock Alert table's classification: a product counts once, under the
+    worst tier any of its branches/variants currently sit at (out-of-stock
+    beats critical beats low) — never double-counted across tiers.
+    branch_id=None means every branch (Admin); passed, it's staff's own
+    branch only."""
+    try:
+        res = supabase.table('product').select(
+            'product_id, branch_stock(branch_id, quantity), variant_stock(branch_id, quantity, options)'
+        ).execute()
+        products = res.data or []
+    except Exception as e:
+        print(f'Notification stock-alert query warning: {e}')
+        return {'out': 0, 'critical': 0, 'low': 0}
+
+    out = critical = low = 0
+    for p in products:
+        bs = [s for s in (p.get('branch_stock') or []) if not branch_id or s.get('branch_id') == branch_id]
+        vs = [s for s in (p.get('variant_stock') or []) if not branch_id or s.get('branch_id') == branch_id]
+        quantities = [int(s.get('quantity') or 0) for s in bs] + [int(s.get('quantity') or 0) for s in vs]
+        if not quantities:
+            continue
+        if any(q == 0 for q in quantities):
+            out += 1
+        elif any(0 < q <= 5 for q in quantities):
+            critical += 1
+        elif any(5 < q <= 10 for q in quantities):
+            low += 1
+    return {'out': out, 'critical': critical, 'low': low}
+
+def _stock_alert_items(alerts):
+    """Shared item-building for the three stock-alert categories — same
+    shape/order for both admin and staff notification responses."""
+    items = []
+    if alerts['out']:
+        items.append({'type': 'out_of_stock', 'label': f"{alerts['out']} product(s) out of stock",
+                       'count': alerts['out'], 'section': 'inventory'})
+    if alerts['critical']:
+        items.append({'type': 'critical_stock', 'label': f"{alerts['critical']} product(s) at critical stock",
+                       'count': alerts['critical'], 'section': 'inventory'})
+    if alerts['low']:
+        items.append({'type': 'low_stock', 'label': f"{alerts['low']} product(s) at low stock",
+                       'count': alerts['low'], 'section': 'inventory'})
+    return items
+
+def _delivery_notification_counts(branch_id=None):
+    """Two more actionable categories, added right after the bell first
+    shipped (team follow-up, Oct 25 2026):
+      - out_for_delivery: every order currently dispatched and sitting in
+        "Out for Deliveries", awaiting Remit — same scope as that whole tab,
+        not just the ones that already failed a try.
+      - returned_failed: orders that hit the FINAL (3rd) failed attempt and
+        were returned. Unlike every other notification category, a
+        returned_failed order never changes state again on its own — there
+        is no further action once it's returned (stock was already restored
+        automatically) — so counting every one of these forever would
+        violate the "live/no-history" design and just grow without bound.
+        Narrowed to the last 3 days instead, using dispatch_date (the date
+        of that final failed attempt) as the closest available timestamp —
+        the order table has no dedicated "failed_at" column. This keeps the
+        category meaningfully transient without adding a notification table.
+    """
+    try:
+        ofd_q = supabase.table('order').select('order_id, dispatch_date').eq('status', 'out_for_delivery')
+        if branch_id:
+            ofd_q = ofd_q.eq('branch_id', branch_id)
+        ofd_rows = ofd_q.execute().data or []
+        out_for_delivery_count = len([o for o in ofd_rows if o.get('dispatch_date')])
+
+        cutoff_date = (datetime.utcnow() - timedelta(days=3)).strftime('%Y-%m-%d')
+        rf_q = supabase.table('order').select('order_id, dispatch_date').eq('status', 'returned_failed')
+        if branch_id:
+            rf_q = rf_q.eq('branch_id', branch_id)
+        rf_rows = rf_q.execute().data or []
+        returned_failed_count = len([
+            o for o in rf_rows
+            if o.get('dispatch_date') and str(o['dispatch_date'])[:10] >= cutoff_date
+        ])
+        return out_for_delivery_count, returned_failed_count
+    except Exception as e:
+        print(f'Notification delivery-count query warning: {e}')
+        return 0, 0
+
+def _delivery_notification_items(out_for_delivery_count, returned_failed_count):
+    """Shared item-building for the two delivery categories above."""
+    items = []
+    if out_for_delivery_count:
+        items.append({'type': 'out_for_delivery', 'label': f'{out_for_delivery_count} order(s) out for delivery awaiting remit',
+                      'count': out_for_delivery_count, 'section': 'orders'})
+    if returned_failed_count:
+        items.append({'type': 'returned_failed', 'label': f'{returned_failed_count} order(s) returned after failed delivery (last 3 days)',
+                      'count': returned_failed_count, 'section': 'orders'})
+    return items
+
+@app.route('/api/admin/notifications')
+@admin_required
+def admin_get_notifications():
+    try:
+        pending_orders_count = supabase.table('order').select('order_id', count='exact') \
+            .eq('status', 'pending').eq('order_type', 'online').execute().count or 0
+
+        pending_requests_count = supabase.table('stock_request').select('request_id', count='exact') \
+            .eq('status', 'pending').execute().count or 0
+
+        out_for_delivery_count, returned_failed_count = _delivery_notification_counts()
+        alerts = _stock_alert_counts()
+
+        items = []
+        if pending_orders_count:
+            items.append({'type': 'orders', 'label': f'{pending_orders_count} pending order(s) awaiting processing',
+                          'count': pending_orders_count, 'section': 'orders'})
+        if pending_requests_count:
+            items.append({'type': 'stock_requests', 'label': f'{pending_requests_count} stock request(s) awaiting review',
+                          'count': pending_requests_count, 'section': 'purchase_orders'})
+        items.extend(_delivery_notification_items(out_for_delivery_count, returned_failed_count))
+        items.extend(_stock_alert_items(alerts))
+
+        badge_count = (pending_orders_count + pending_requests_count + out_for_delivery_count
+                       + returned_failed_count + alerts['out'] + alerts['critical'] + alerts['low'])
+        return jsonify({'badge_count': badge_count, 'items': items}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/notifications')
+@staff_required
+def staff_get_notifications():
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        orders_q = supabase.table('order').select('order_id', count='exact') \
+            .eq('status', 'pending').eq('order_type', 'online')
+        if branch_id:
+            orders_q = orders_q.eq('branch_id', branch_id)
+        pending_orders_count = orders_q.execute().count or 0
+
+        pending_transfers_count = 0
+        if branch_id:
+            pending_transfers_count = supabase.table('stock_transfer').select('transfer_id', count='exact') \
+                .eq('status', 'pending').eq('to_branch_id', branch_id).execute().count or 0
+
+        out_for_delivery_count, returned_failed_count = _delivery_notification_counts(branch_id)
+        alerts = _stock_alert_counts(branch_id)
+
+        items = []
+        if pending_orders_count:
+            items.append({'type': 'orders', 'label': f'{pending_orders_count} pending order(s) awaiting processing',
+                          'count': pending_orders_count, 'section': 'orders'})
+        if pending_transfers_count:
+            items.append({'type': 'incoming_transfers', 'label': f'{pending_transfers_count} incoming stock transfer(s) awaiting approval',
+                          'count': pending_transfers_count, 'section': 'inventory'})
+        items.extend(_delivery_notification_items(out_for_delivery_count, returned_failed_count))
+        items.extend(_stock_alert_items(alerts))
+
+        badge_count = (pending_orders_count + pending_transfers_count + out_for_delivery_count
+                       + returned_failed_count + alerts['out'] + alerts['critical'] + alerts['low'])
+        return jsonify({'badge_count': badge_count, 'items': items}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 # ──────────────────────────────────────────────────────
 
 if __name__ == '__main__':
