@@ -2801,6 +2801,11 @@ async function loadInventory() {
     const invDataRaw = await invRes.json();
     const invData   = Array.isArray(invDataRaw) ? invDataRaw : [];
 
+    // Branch stock transfers — incoming (needs this branch's action) and
+    // outgoing (requests this branch filed) — refreshed alongside the rest
+    // of Inventory rather than its own section, since it's the same tab.
+    loadStockTransfers();
+
     // Stats — two-tier: critical (≤5) and low (6–10), using branch stock AND
     // variant stock (see staffStockInfo below) so a single low/critical/
     // out-of-stock variant trips the alert even when the branch's aggregate
@@ -3036,6 +3041,241 @@ async function requestStockForSelected() {
   captureModalSnapshot('requestModal');
 }
 window.requestStockForSelected = requestStockForSelected;
+
+// ─── Staff-initiated Branch Stock Transfer (new, adviser follow-up) ─────
+// Unlike Admin's instant Transfer Stock, a staff-filed transfer is a
+// request: "From Branch" is locked to this staff's own branch, and
+// submitting does NOT move any stock — it only does so once the
+// destination branch's own staff approves it (see loadStockTransfers /
+// approveStockTransfer below). Reuses the same product-autocomplete
+// helper already built for the Stock Request modal (reqProductAcHTML /
+// buildReqProductAutocomplete), since both just need a simple searchable
+// product picker.
+
+async function openStaffTransferModal() {
+  if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
+  if (!allBranches.length) await loadBranches();
+
+  const prodWrap = document.getElementById('staffTransferProductWrap');
+  if (prodWrap) {
+    prodWrap.innerHTML = reqProductAcHTML('staffTransferProductInput', 'staffTransferProduct');
+    buildReqProductAutocomplete(prodWrap, {
+      inputId:  'staffTransferProductInput',
+      hiddenId: 'staffTransferProduct',
+      onSelect: (p) => { loadStaffTransferVariants(p ? p.product_id : ''); _setStaffTransferBtn(); },
+    });
+  }
+
+  const fromLabel = document.getElementById('staffTransferFromLabel');
+  if (fromLabel) fromLabel.value = staffBranchName || '(your branch)';
+
+  const toEl = document.getElementById('staffTransferTo');
+  if (toEl) {
+    toEl.innerHTML = '<option value="">Select branch</option>' +
+      allBranches.filter(b => b.branch_id !== staffBranchId)
+        .map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+  }
+
+  _setStaffTransferBtn(false);
+  document.getElementById('staffTransferQty')?.addEventListener('input',  () => _setStaffTransferBtn());
+  document.getElementById('staffTransferTo')?.addEventListener('change', () => _setStaffTransferBtn());
+  document.getElementById('staffTransferModalOverlay')?.classList.add('open');
+  document.getElementById('staffTransferModal')?.classList.add('open');
+  captureModalSnapshot('staffTransferModal');
+}
+window.openStaffTransferModal = openStaffTransferModal;
+
+function closeStaffTransferModal() {
+  document.getElementById('staffTransferModalOverlay')?.classList.remove('open');
+  document.getElementById('staffTransferModal')?.classList.remove('open');
+  document.getElementById('staffTransferForm')?.reset();
+  const vw = document.getElementById('staffTransferVariantWrap'); if (vw) vw.style.display = 'none';
+  const prodWrap = document.getElementById('staffTransferProductWrap');
+  if (prodWrap?._acClear) prodWrap._acClear();
+  _setStaffTransferBtn(false);
+}
+window.closeStaffTransferModal = closeStaffTransferModal;
+
+function loadStaffTransferVariants(productId) {
+  const wrap = document.getElementById('staffTransferVariantWrap');
+  const cont = document.getElementById('staffTransferVariantSelects');
+  if (!wrap || !cont) return;
+  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  const product = invProducts.find(p => p.product_id === productId);
+  const groups  = product?.option_groups || [];
+  if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  wrap.style.display = 'block';
+  cont.innerHTML = groups.map(g => `
+    <div style="flex:1;min-width:120px;">
+      <label style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
+      <select id="staffTransferVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:13px;">
+        <option value="">All (no variant)</option>
+        ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
+      </select>
+    </div>
+  `).join('');
+}
+
+function getStaffTransferVariantOptions() {
+  const cont = document.getElementById('staffTransferVariantSelects');
+  if (!cont) return null;
+  const opts = {};
+  cont.querySelectorAll('select').forEach(sel => {
+    const label = sel.id.replace('staffTransferVariantOpt_', '').replace(/_/g, ' ');
+    if (sel.value) opts[label] = sel.value;
+  });
+  return Object.keys(opts).length > 0 ? opts : null;
+}
+
+function _setStaffTransferBtn() {
+  const btn = document.getElementById('staffTransferSubmitBtn');
+  if (!btn) return;
+  const productId = document.getElementById('staffTransferProduct')?.value;
+  const toId      = document.getElementById('staffTransferTo')?.value;
+  const qty       = parseInt(document.getElementById('staffTransferQty')?.value);
+  const ok = !!productId && !!toId && qty > 0;
+  btn.disabled = !ok;
+  btn.style.opacity = ok ? '1' : '0.45';
+  btn.style.cursor  = ok ? 'pointer' : 'not-allowed';
+}
+
+async function submitStaffTransfer(e) {
+  e.preventDefault();
+  const productId = document.getElementById('staffTransferProduct').value;
+  const toId       = document.getElementById('staffTransferTo').value;
+  const qty        = parseInt(document.getElementById('staffTransferQty').value);
+  const variantOpts = getStaffTransferVariantOptions();
+
+  const confirmed = await showConfirmDialog('Send Transfer Request',
+    `Request to send ${qty} unit(s) to the selected branch? They'll need to approve it before stock moves.`);
+  if (!confirmed) return;
+
+  const btn = e.submitter || document.getElementById('staffTransferSubmitBtn');
+  setButtonLoading(btn, true);
+  try {
+    const res = await fetch('/api/staff/stock-transfers', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        product_id: productId, to_branch_id: toId, quantity: qty, variant_options: variantOpts,
+      }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast('Transfer request sent!');
+      closeStaffTransferModal();
+      loadStockTransfers();
+    } else {
+      showToast(data.error || 'Failed to send transfer request.', 'error');
+    }
+  } catch (err) {
+    showToast('Error sending transfer request.', 'error');
+  } finally {
+    setButtonLoading(btn, false);
+  }
+}
+window.submitStaffTransfer = submitStaffTransfer;
+
+// ─── Incoming / Outgoing Transfers lists ─────────────────────────────
+function _transferStatusBadge(t) {
+  switch (t.status) {
+    case 'pending':   return '<span class="badge badge--yellow">Pending</span>';
+    case 'approved':  return '<span class="badge badge--green">Approved</span>';
+    case 'rejected':  return '<span class="badge badge--red">Rejected</span>' + (t.rejection_note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${t.rejection_note}</div>` : '');
+    case 'cancelled': return '<span class="badge badge--gray">Cancelled</span>';
+    default:          return t.status || '';
+  }
+}
+
+async function loadStockTransfers() {
+  const inBody  = document.getElementById('incomingTransfersBody');
+  const outBody = document.getElementById('outgoingTransfersBody');
+  if (!inBody && !outBody) return;
+  try {
+    const res  = await fetch('/api/staff/stock-transfers');
+    const data = await res.json();
+    const transfers = Array.isArray(data) ? data : [];
+
+    const incoming = transfers.filter(t => t.to_branch_id === staffBranchId);
+    const outgoing = transfers.filter(t => t.from_branch_id === staffBranchId);
+
+    if (inBody) {
+      inBody.innerHTML = incoming.length ? incoming.map(t => `
+        <tr>
+          <td>${t.product?.product_name || '—'}${t.variant_options ? ` <span style="font-size:11px;color:var(--text-muted);">(${Object.entries(t.variant_options).map(([k,v])=>`${k}: ${v}`).join(', ')})</span>` : ''}</td>
+          <td>${t.from_branch?.branch_name || '—'}</td>
+          <td style="text-align:center;">${t.quantity}</td>
+          <td>${t.requested_at ? new Date(t.requested_at).toLocaleString() : '—'}</td>
+          <td>${_transferStatusBadge(t)}</td>
+          <td>${t.status === 'pending'
+            ? `<button class="btn btn-sm btn-primary" onclick="approveStockTransfer('${t.transfer_id}')" style="margin-right:4px;">Approve</button>
+               <button class="btn btn-sm btn-cancel" onclick="rejectStockTransfer('${t.transfer_id}')">Reject</button>`
+            : '—'}</td>
+        </tr>
+      `).join('') : '<tr><td colspan="6" class="table-empty">No incoming transfers</td></tr>';
+    }
+
+    if (outBody) {
+      outBody.innerHTML = outgoing.length ? outgoing.map(t => `
+        <tr>
+          <td>${t.product?.product_name || '—'}${t.variant_options ? ` <span style="font-size:11px;color:var(--text-muted);">(${Object.entries(t.variant_options).map(([k,v])=>`${k}: ${v}`).join(', ')})</span>` : ''}</td>
+          <td>${t.to_branch?.branch_name || '—'}</td>
+          <td style="text-align:center;">${t.quantity}</td>
+          <td>${t.requested_at ? new Date(t.requested_at).toLocaleString() : '—'}</td>
+          <td>${_transferStatusBadge(t)}</td>
+          <td>${t.status === 'pending'
+            ? `<button class="btn btn-sm btn-cancel" onclick="cancelStockTransfer('${t.transfer_id}')">Cancel</button>`
+            : '—'}</td>
+        </tr>
+      `).join('') : '<tr><td colspan="6" class="table-empty">No outgoing transfers</td></tr>';
+    }
+  } catch (e) {
+    console.error('Stock transfers load error:', e);
+  }
+}
+window.loadStockTransfers = loadStockTransfers;
+
+async function approveStockTransfer(transferId) {
+  const confirmed = await showConfirmDialog('Approve Transfer', 'Confirm you received this stock? It will be added to your branch and deducted from the source branch now.');
+  if (!confirmed) return;
+  try {
+    const res  = await fetch(`/api/staff/stock-transfers/${transferId}/approve`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast('Transfer approved — stock moved.');
+      loadStockTransfers();
+      invalidateSection('inventory'); loadInventory();
+    } else {
+      showToast(data.error || 'Failed to approve transfer.', 'error');
+    }
+  } catch (e) { showToast('Error approving transfer.', 'error'); }
+}
+window.approveStockTransfer = approveStockTransfer;
+
+async function rejectStockTransfer(transferId) {
+  const confirmed = await showConfirmDialog('Reject Transfer', 'Reject this incoming transfer? No stock will move.');
+  if (!confirmed) return;
+  try {
+    const res  = await fetch(`/api/staff/stock-transfers/${transferId}/reject`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) { showToast('Transfer rejected.'); loadStockTransfers(); }
+    else showToast(data.error || 'Failed to reject transfer.', 'error');
+  } catch (e) { showToast('Error rejecting transfer.', 'error'); }
+}
+window.rejectStockTransfer = rejectStockTransfer;
+
+async function cancelStockTransfer(transferId) {
+  const confirmed = await showConfirmDialog('Cancel Transfer', 'Withdraw this outgoing transfer request?');
+  if (!confirmed) return;
+  try {
+    const res  = await fetch(`/api/staff/stock-transfers/${transferId}/cancel`, { method: 'POST' });
+    const data = await res.json().catch(() => ({}));
+    if (res.ok) { showToast('Transfer cancelled.'); loadStockTransfers(); }
+    else showToast(data.error || 'Failed to cancel transfer.', 'error');
+  } catch (e) { showToast('Error cancelling transfer.', 'error'); }
+}
+window.cancelStockTransfer = cancelStockTransfer;
 
 /* ── Read-only Product Details modal (Staff) ───────────── */
 function viewStaffProductDetails(productId) {

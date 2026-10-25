@@ -313,6 +313,10 @@
         <div class="card-header" style="flex-wrap:wrap;gap:8px;">
           <h3 class="card-title">Product Stock Levels</h3>
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+            <button class="btn" onclick="openStaffTransferModal()" style="display:inline-flex;align-items:center;gap:6px;background:#3b82f6;color:#fff;border-color:#3b82f6;font-size:12px;padding:8px 12px;">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
+              Transfer Stock
+            </button>
             <select class="filter-select" id="staffStockLevelFilter" onchange="filterStaffInventoryType(this.value)" style="font-size:12px;">
               <option value="">All Stock Levels</option>
               <option value="critical_stock">🔴 Critical Level (≤5)</option>
@@ -380,7 +384,94 @@
         </div>
         <div id="staffHistoryPagination" style="padding:0 1rem;"></div>
       </div>
+
+      <!-- ─── Branch Stock Transfers ─── Staff-initiated cross-branch
+           transfers. Outgoing = requests this branch filed (cancellable
+           while pending). Incoming = requests from other branches sent TO
+           this branch — this is where Approve/Reject actually moves stock,
+           since the destination branch is the one that confirms receipt. -->
+      <div class="card" style="margin-top:1rem;">
+        <div class="card-header">
+          <h3 class="card-title">Incoming Transfers <span style="font-size:12px;color:var(--text-muted);font-weight:500;">— from other branches, needs your action</span></h3>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Product</th><th>From Branch</th><th style="text-align:center;">Qty</th><th>Requested</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody id="incomingTransfersBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+
+      <div class="card" style="margin-top:1rem;">
+        <div class="card-header">
+          <h3 class="card-title">Outgoing Transfers <span style="font-size:12px;color:var(--text-muted);font-weight:500;">— requests you filed to send stock out</span></h3>
+        </div>
+        <div class="table-wrap">
+          <table class="data-table">
+            <thead>
+              <tr><th>Product</th><th>To Branch</th><th style="text-align:center;">Qty</th><th>Requested</th><th>Status</th><th>Action</th></tr>
+            </thead>
+            <tbody id="outgoingTransfersBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+          </table>
+        </div>
+      </div>
     </section>
+
+    <!-- ─── Staff Transfer Stock Modal ───────────────────────
+         Mirrors Admin's transferModal, except "From Branch" is fixed to
+         this staff's own branch (read-only text, not a selectable field —
+         a staff account can only initiate a transfer OUT of its own
+         branch) and submitting files a pending request instead of moving
+         stock immediately; the destination branch approves/rejects it
+         from their own Incoming Transfers table above. -->
+    <div class="modal-overlay" id="staffTransferModalOverlay"></div>
+    <div class="modal" id="staffTransferModal" style="max-width:620px;">
+      <div class="modal-header">
+        <h3 class="modal-title">Transfer Stock to Another Branch</h3>
+        <button class="modal-close" onclick="closeModalWithConfirm('staffTransferModal', closeStaffTransferModal)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;">
+          This sends a request to the destination branch — stock only moves once their staff approves it.
+        </p>
+        <form id="staffTransferForm" onsubmit="submitStaffTransfer(event)">
+          <div class="form-group">
+            <label class="form-label">Product <span class="req">*</span></label>
+            <div id="staffTransferProductWrap"></div>
+          </div>
+          <div id="staffTransferVariantWrap" style="display:none;">
+            <div class="form-group">
+              <label class="form-label">Variant <span style="font-size:12px;color:var(--text-muted);">(optional)</span></label>
+              <div id="staffTransferVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+            </div>
+          </div>
+          <div class="form-row-2">
+            <div class="form-group">
+              <label class="form-label">Quantity to Transfer <span class="req">*</span></label>
+              <input type="number" id="staffTransferQty" class="form-input" min="1" required/>
+            </div>
+            <div class="form-group">
+              <label class="form-label">From Branch</label>
+              <input type="text" id="staffTransferFromLabel" class="form-input" readonly/>
+            </div>
+          </div>
+          <div class="form-group">
+            <label class="form-label">To Branch <span class="req">*</span></label>
+            <select id="staffTransferTo" class="form-input form-select" required>
+              <option value="">Select branch</option>
+            </select>
+          </div>
+          <div class="modal-footer">
+            <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('staffTransferModal', closeStaffTransferModal)">Cancel</button>
+            <button type="submit" id="staffTransferSubmitBtn" class="btn" style="background:#3b82f6;color:#fff;border-color:#3b82f6;opacity:0.45;cursor:not-allowed;" disabled>Send Transfer Request</button>
+          </div>
+        </form>
+      </div>
+    </div>
 
     <!-- ─── STOCK REQUESTS SECTION ───────────────────── -->
     <section class="section" id="section-requests">

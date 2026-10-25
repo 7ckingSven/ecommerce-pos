@@ -5801,6 +5801,311 @@ def staff_add_inventory():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+# ─── STAFF-INITIATED BRANCH STOCK TRANSFER + APPROVAL ─────────────────
+# New capability (adviser follow-up, after-consultation round 2): Staff now
+# get a "Transfer Stock" action in their own Inventory module, same as
+# Admin already has — but unlike Admin (who has cross-branch authority and
+# moves stock instantly via /api/admin/inventory type='transfer'), a
+# staff-initiated transfer between two branches needs the *destination*
+# branch to confirm receipt before stock actually moves. Modeled as a
+# request/approval table (stock_transfer) rather than reusing `inventory`
+# directly, since a pending/rejected/cancelled request never touches real
+# stock numbers at all — only an *approved* one does, at which point it's
+# logged into `inventory` exactly like Admin's existing transfer is.
+#
+# Schema (run once, not yet applied by the ALTER/CREATE below):
+#   CREATE TABLE stock_transfer (
+#     transfer_id     uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+#     product_id      uuid NOT NULL REFERENCES product(product_id),
+#     variant_options jsonb,
+#     from_branch_id  uuid NOT NULL REFERENCES branch(branch_id),
+#     to_branch_id    uuid NOT NULL REFERENCES branch(branch_id),
+#     quantity        integer NOT NULL,
+#     status          text NOT NULL DEFAULT 'pending', -- pending|approved|rejected|cancelled
+#     requested_by    uuid REFERENCES staff(staff_id),
+#     requested_at    timestamptz NOT NULL DEFAULT now(),
+#     resolved_by     uuid REFERENCES staff(staff_id),
+#     resolved_at     timestamptz,
+#     rejection_note  text
+#   );
+
+def _execute_branch_stock_transfer(product_id, from_branch_id, to_branch_id, qty, variant_options, staff_id, note):
+    """Shared core of an actual branch-to-branch stock move: re-validates
+    the source branch still has enough RIGHT NOW (time has passed since the
+    transfer was first requested — stock may have moved in the meantime),
+    deducts source / adds destination (branch_stock + variant_stock), and
+    logs one `inventory` row. Returns (ok: bool, error_message_or_None).
+
+    Deliberately NOT shared with admin_add_inventory's type='transfer'
+    branch — kept as its own standalone copy so the already-shipped Admin
+    Transfer Stock endpoint is never touched by this new flow."""
+    try:
+        if variant_options:
+            vs_src = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+            match = [v for v in (vs_src.data or []) if v.get('options') == variant_options]
+            if not match or match[0]['quantity'] < qty:
+                available  = match[0]['quantity'] if match else 0
+                opts_label = ', '.join(f'{k}: {v}' for k, v in variant_options.items())
+                return False, f'Insufficient variant stock ({opts_label}) at the source branch. Only {available} unit(s) available now.'
+
+        src = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+        if not src.data or src.data[0]['quantity'] < qty:
+            available = src.data[0]['quantity'] if src.data else 0
+            return False, f'Insufficient stock at the source branch. Only {available} unit(s) available now.'
+
+        qty_before = src.data[0]['quantity']
+        qty_after  = qty_before - qty
+
+        supabase.table('branch_stock').update({
+            'quantity': qty_after, 'updated_at': 'now()'
+        }).eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+
+        dst = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+        if dst.data:
+            supabase.table('branch_stock').update({
+                'quantity': dst.data[0]['quantity'] + qty, 'updated_at': 'now()'
+            }).eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+        else:
+            supabase.table('branch_stock').insert({
+                'product_id': product_id, 'branch_id': to_branch_id, 'quantity': qty,
+            }).execute()
+
+        if variant_options:
+            try:
+                all_vs_src = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+                match_src  = [v for v in (all_vs_src.data or []) if v.get('options') == variant_options]
+                if match_src:
+                    supabase.table('variant_stock').update({
+                        'quantity': max(0, match_src[0]['quantity'] - qty), 'updated_at': 'now()'
+                    }).eq('id', match_src[0]['id']).execute()
+
+                all_vs_dst = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', to_branch_id).execute()
+                match_dst  = [v for v in (all_vs_dst.data or []) if v.get('options') == variant_options]
+                if match_dst:
+                    supabase.table('variant_stock').update({
+                        'quantity': match_dst[0]['quantity'] + qty, 'updated_at': 'now()'
+                    }).eq('id', match_dst[0]['id']).execute()
+                else:
+                    supabase.table('variant_stock').insert({
+                        'product_id': product_id, 'branch_id': to_branch_id, 'options': variant_options, 'quantity': qty
+                    }).execute()
+            except Exception as vs_err:
+                print(f'Variant stock update warning (stock_transfer): {vs_err}')
+
+        # product.quantity total is unchanged — stock just moved branches,
+        # same as Admin's existing transfer logic — no sync needed here.
+
+        supabase.table('inventory').insert({
+            'product_id':      product_id,
+            'staff_id':        staff_id,
+            'quantity_added':  qty,
+            'quantity_before': qty_before,
+            'quantity_after':  qty_after,
+            'from_branch_id':  from_branch_id,
+            'to_branch_id':    to_branch_id,
+            'variant_options': variant_options,
+            'note':            note,
+        }).execute()
+
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+
+_STOCK_TRANSFER_SELECT = (
+    '*, product(product_name, image_url, option_groups), '
+    'from_branch:branch!from_branch_id(branch_name), '
+    'to_branch:branch!to_branch_id(branch_name), '
+    'requested_staff:staff!requested_by(fname, lname), '
+    'resolved_staff:staff!resolved_by(fname, lname)'
+)
+
+
+@app.route('/api/staff/stock-transfers', methods=['GET'])
+@staff_required
+def staff_get_stock_transfers():
+    """Everything involving this staff's own branch — as the requesting
+    (outgoing) branch or the receiving (incoming) branch — newest first."""
+    try:
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', session.get('staff_id')).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+        if not branch_id:
+            return jsonify([]), 200
+
+        res = supabase.table('stock_transfer').select(_STOCK_TRANSFER_SELECT) \
+            .or_(f'from_branch_id.eq.{branch_id},to_branch_id.eq.{branch_id}') \
+            .order('requested_at', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/staff/stock-transfers', methods=['POST'])
+@staff_required
+def staff_create_stock_transfer():
+    """Initiate a transfer OUT of the requesting staff's own branch. The
+    source branch is always the staff's own assigned branch — never taken
+    from the request body — so a staff account can't file a transfer on
+    behalf of a branch they don't belong to. No stock moves yet; this just
+    files a 'pending' request for the destination branch to act on."""
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        from_branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+        if not from_branch_id:
+            return jsonify({'error': 'Your account has no assigned branch.'}), 400
+
+        data            = request.get_json()
+        product_id      = data.get('product_id')
+        to_branch_id    = data.get('to_branch_id')
+        quantity        = int(data.get('quantity', 0))
+        variant_options = data.get('variant_options') or None
+
+        if not product_id or not to_branch_id or quantity <= 0:
+            return jsonify({'error': 'Product, destination branch, and a quantity greater than 0 are required.'}), 400
+        if to_branch_id == from_branch_id:
+            return jsonify({'error': 'Destination branch must be different from your own branch.'}), 400
+
+        # Submit-time sanity check only — re-validated for real at approval,
+        # since stock can move between now and then.
+        if variant_options:
+            vs = supabase.table('variant_stock').select('quantity, options').eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+            match = [v for v in (vs.data or []) if v.get('options') == variant_options]
+            available = match[0]['quantity'] if match else 0
+        else:
+            bs = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', from_branch_id).execute()
+            available = bs.data[0]['quantity'] if bs.data else 0
+        if quantity > available:
+            return jsonify({'error': f'Only {available} unit(s) available at your branch.'}), 400
+
+        ins = supabase.table('stock_transfer').insert({
+            'product_id':      product_id,
+            'variant_options': variant_options,
+            'from_branch_id':  from_branch_id,
+            'to_branch_id':    to_branch_id,
+            'quantity':        quantity,
+            'status':          'pending',
+            'requested_by':    staff_id,
+        }).execute()
+
+        return jsonify({'message': 'Transfer request sent.', 'transfer': (ins.data or [{}])[0]}), 201
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/staff/stock-transfers/<transfer_id>/cancel', methods=['POST'])
+@staff_required
+def staff_cancel_stock_transfer(transfer_id):
+    """The requesting (source) branch can withdraw its own request, but
+    only while it's still pending — once the destination has acted, the
+    outcome stands."""
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        t = supabase.table('stock_transfer').select('*').eq('transfer_id', transfer_id).execute()
+        if not t.data:
+            return jsonify({'error': 'Transfer not found.'}), 404
+        transfer = t.data[0]
+
+        if transfer['status'] != 'pending':
+            return jsonify({'error': f'This transfer is already {transfer["status"]} and can no longer be cancelled.'}), 400
+        if transfer['from_branch_id'] != branch_id:
+            return jsonify({'error': 'Only the requesting branch can cancel this transfer.'}), 403
+
+        supabase.table('stock_transfer').update({
+            'status': 'cancelled', 'resolved_by': staff_id, 'resolved_at': 'now()'
+        }).eq('transfer_id', transfer_id).execute()
+        return jsonify({'message': 'Transfer cancelled.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/staff/stock-transfers/<transfer_id>/approve', methods=['POST'])
+@staff_required
+def staff_approve_stock_transfer(transfer_id):
+    """Only the DESTINATION branch's staff can approve — this is the
+    "confirm you actually received it" step, and the moment stock numbers
+    actually move (not when the request was first filed)."""
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        t = supabase.table('stock_transfer').select('*').eq('transfer_id', transfer_id).execute()
+        if not t.data:
+            return jsonify({'error': 'Transfer not found.'}), 404
+        transfer = t.data[0]
+
+        if transfer['status'] != 'pending':
+            return jsonify({'error': f'This transfer is already {transfer["status"]}.'}), 400
+        if transfer['to_branch_id'] != branch_id:
+            return jsonify({'error': 'Only the receiving branch can approve this transfer.'}), 403
+
+        ok, err = _execute_branch_stock_transfer(
+            transfer['product_id'], transfer['from_branch_id'], transfer['to_branch_id'],
+            transfer['quantity'], transfer.get('variant_options'), staff_id,
+            note=f"Branch transfer (staff-approved, transfer_id={transfer_id})"
+        )
+        if not ok:
+            # Stock has since fallen short at the source branch — leave the
+            # request pending rather than silently failing it, so the
+            # source branch can see why and adjust/cancel.
+            return jsonify({'error': err}), 400
+
+        supabase.table('stock_transfer').update({
+            'status': 'approved', 'resolved_by': staff_id, 'resolved_at': 'now()'
+        }).eq('transfer_id', transfer_id).execute()
+        return jsonify({'message': 'Transfer approved — stock moved.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/staff/stock-transfers/<transfer_id>/reject', methods=['POST'])
+@staff_required
+def staff_reject_stock_transfer(transfer_id):
+    """Only the destination branch can reject. No stock moves."""
+    try:
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
+
+        data = request.get_json(silent=True) or {}
+        rejection_note = (data.get('note') or '').strip() or None
+
+        t = supabase.table('stock_transfer').select('*').eq('transfer_id', transfer_id).execute()
+        if not t.data:
+            return jsonify({'error': 'Transfer not found.'}), 404
+        transfer = t.data[0]
+
+        if transfer['status'] != 'pending':
+            return jsonify({'error': f'This transfer is already {transfer["status"]}.'}), 400
+        if transfer['to_branch_id'] != branch_id:
+            return jsonify({'error': 'Only the receiving branch can reject this transfer.'}), 403
+
+        supabase.table('stock_transfer').update({
+            'status': 'rejected', 'resolved_by': staff_id, 'resolved_at': 'now()',
+            'rejection_note': rejection_note,
+        }).eq('transfer_id', transfer_id).execute()
+        return jsonify({'message': 'Transfer rejected.'}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/admin/stock-transfers', methods=['GET'])
+@admin_required
+def admin_get_stock_transfers():
+    """Oversight only — Admin can see every branch's transfers, but this
+    approval flow is staff-to-staff; Admin has no approve/reject route
+    here on purpose (Admin's own Transfer Stock stays instant/separate)."""
+    try:
+        res = supabase.table('stock_transfer').select(_STOCK_TRANSFER_SELECT) \
+            .order('requested_at', desc=True).execute()
+        return jsonify(res.data), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 # ──────────────────────────────────────────────────────
 
 if __name__ == '__main__':

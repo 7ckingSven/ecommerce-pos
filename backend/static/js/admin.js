@@ -2949,6 +2949,10 @@ async function loadInventory() {
     // Update branch stock summary with products that have branch_stock
     updateBranchStockSummary(products);
 
+    // Staff-initiated branch transfers — oversight only, loaded alongside
+    // the rest of Inventory (same tab).
+    loadAdminStockTransfers();
+
 
     // Check low stock per branch — two-tier: critical (≤5) and low (6–10)
     // Also checks variant_stock so a single low/critical/out-of-stock variant
@@ -3005,6 +3009,46 @@ async function loadInventory() {
     renderInventory(allInventory);
   } catch (e) { console.error('Inventory error:', e); }
 }
+
+// ── Branch Stock Transfers — Admin oversight (read-only) ───────────────
+// Staff-initiated transfers are approved/rejected by the DESTINATION
+// branch's own staff, not Admin (see the new /api/staff/stock-transfers
+// routes) — Admin's existing Transfer Stock above stays instant/separate.
+// This just lists every transfer across every branch so Admin can see
+// what's moving without being the approver.
+async function loadAdminStockTransfers() {
+  const body = document.getElementById('adminStockTransfersBody');
+  if (!body) return;
+  try {
+    const res  = await fetch('/api/admin/stock-transfers');
+    const data = await res.json();
+    const transfers = Array.isArray(data) ? data : [];
+    const statusBadge = t => {
+      switch (t.status) {
+        case 'pending':   return '<span class="badge badge--yellow">Pending</span>';
+        case 'approved':  return '<span class="badge badge--green">Approved</span>';
+        case 'rejected':  return '<span class="badge badge--red">Rejected</span>' + (t.rejection_note ? `<div style="font-size:11px;color:var(--text-muted);margin-top:2px;">${t.rejection_note}</div>` : '');
+        case 'cancelled': return '<span class="badge badge--gray">Cancelled</span>';
+        default:          return t.status || '';
+      }
+    };
+    body.innerHTML = transfers.length ? transfers.map(t => `
+      <tr>
+        <td>${t.product?.product_name || '—'}${t.variant_options ? ` <span style="font-size:11px;color:var(--text-muted);">(${Object.entries(t.variant_options).map(([k,v])=>`${k}: ${v}`).join(', ')})</span>` : ''}</td>
+        <td>${t.from_branch?.branch_name || '—'}</td>
+        <td>${t.to_branch?.branch_name || '—'}</td>
+        <td style="text-align:center;">${t.quantity}</td>
+        <td>${t.requested_staff ? `${t.requested_staff.fname || ''} ${t.requested_staff.lname || ''}`.trim() : '—'}</td>
+        <td>${t.requested_at ? new Date(t.requested_at).toLocaleString() : '—'}</td>
+        <td>${statusBadge(t)}</td>
+        <td>${t.resolved_staff ? `${t.resolved_staff.fname || ''} ${t.resolved_staff.lname || ''}`.trim() : '—'}</td>
+      </tr>
+    `).join('') : '<tr><td colspan="8" class="table-empty">No branch stock transfers yet</td></tr>';
+  } catch (e) {
+    console.error('Admin stock transfers load error:', e);
+  }
+}
+window.loadAdminStockTransfers = loadAdminStockTransfers;
 
 // ── Shared Stock Movement classification ───────────────────────────────
 // One canonical set of 8 movement types, used identically here, in the
