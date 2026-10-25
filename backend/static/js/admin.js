@@ -4133,6 +4133,7 @@ function switchDeliveriesTab(tab) {
   deliveriesActiveTab = tab;
   const btns = {
     available: document.getElementById('deliveriesTabAvailableBtn'),
+    scheduled: document.getElementById('deliveriesTabScheduledBtn'),
     today:     document.getElementById('deliveriesTabTodayBtn'),
     delivered: document.getElementById('deliveriesTabDeliveredBtn'),
     failed:    document.getElementById('deliveriesTabFailedBtn'),
@@ -4140,6 +4141,7 @@ function switchDeliveriesTab(tab) {
   };
   const panels = {
     available: document.getElementById('deliveriesAvailablePanel'),
+    scheduled: document.getElementById('deliveriesScheduledPanel'),
     today:     document.getElementById('deliveriesTodayPanel'),
     delivered: document.getElementById('deliveriesDeliveredPanel'),
     failed:    document.getElementById('deliveriesFailedPanel'),
@@ -4168,32 +4170,51 @@ function renderDeliveriesForToday(orders) {
   if (!document.getElementById('deliveriesAvailableBody')) return; // card not on this page
   const todayUTC = new Date().toISOString().slice(0, 10);
   const ofd = orders.filter(o => o.status === 'out_for_delivery');
+  // Courier-retry model: a non-final failed attempt no longer clears
+  // dispatch_date — it reschedules it to the next day instead (see
+  // admin_mark_not_delivered in app.py). So "To Dispatch" (no
+  // dispatch_date at all) is now ONLY ever brand-new, never-attempted
+  // orders; a failed-and-rescheduled order shows in the new "Tomorrow"
+  // tab until its scheduled date actually arrives, at which point it
+  // moves itself into "Out for Deliveries" with zero extra code — the
+  // date comparison below just naturally matches it that day.
   const available = ofd.filter(o => !o.dispatch_date);
   const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
+  const scheduled  = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
 
   loadRemittanceSummary();
 
   document.getElementById('deliveriesAvailableBody').innerHTML = available.length
-    ? available.map(o => {
-        // "To Dispatch" holds both brand-new orders and ones sent back
-        // after a failed attempt (dispatch_date cleared, not yet final) —
-        // previously indistinguishable on this tab. A Retry flag + attempt
-        // count surfaces which is which, so nothing looks like it's stuck.
-        const attempts = o.delivery_attempts || 0;
-        const retryBadge = attempts > 0
-          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
-          : '';
-        return `
+    ? available.map(o => `
         <tr>
           <td><input type="checkbox" class="delivery-select-cb" value="${o.order_id}"/></td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${fullDeliveryAddress(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${peso(o.total)}</td>
-        </tr>`;
-      }).join('')
+        </tr>`).join('')
     : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
+
+  const scheduledBody = document.getElementById('deliveriesScheduledBody');
+  if (scheduledBody) {
+    scheduledBody.innerHTML = scheduled.length
+      ? scheduled.map(o => {
+          const attempts = o.delivery_attempts || 0;
+          const retryBadge = attempts > 0
+            ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
+            : '';
+          return `
+          <tr>
+            <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
+            <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+            <td>${fullDeliveryAddress(o)}</td>
+            <td>${o.dispatch_date}</td>
+            <td>${peso(o.total)}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="5" class="table-empty">No retries scheduled for a future day.</td></tr>';
+  }
 
   document.getElementById('deliveriesTodayBody').innerHTML = today.length
     ? today.map(o => `

@@ -4208,6 +4208,7 @@ function staffSwitchDeliveriesTab(tab) {
   staffDeliveriesActiveTab = tab;
   const btns = {
     available: document.getElementById('staffDeliveriesTabAvailableBtn'),
+    scheduled: document.getElementById('staffDeliveriesTabScheduledBtn'),
     today:     document.getElementById('staffDeliveriesTabTodayBtn'),
     delivered: document.getElementById('staffDeliveriesTabDeliveredBtn'),
     failed:    document.getElementById('staffDeliveriesTabFailedBtn'),
@@ -4215,6 +4216,7 @@ function staffSwitchDeliveriesTab(tab) {
   };
   const panels = {
     available: document.getElementById('staffDeliveriesAvailablePanel'),
+    scheduled: document.getElementById('staffDeliveriesScheduledPanel'),
     today:     document.getElementById('staffDeliveriesTodayPanel'),
     delivered: document.getElementById('staffDeliveriesDeliveredPanel'),
     failed:    document.getElementById('staffDeliveriesFailedPanel'),
@@ -4241,28 +4243,47 @@ function renderStaffDeliveriesForToday(orders) {
   if (!document.getElementById('staffDeliveriesAvailableBody')) return; // card not on this page
   const todayUTC = new Date().toISOString().slice(0, 10);
   const ofd = orders.filter(o => o.status === 'out_for_delivery');
+  // Courier-retry model — see renderDeliveriesForToday in admin.js for
+  // the full reasoning. "To Dispatch" (no dispatch_date) is now only
+  // ever brand-new orders; a failed-and-rescheduled one shows under
+  // "Scheduled for Retry" until its date arrives.
   const available = ofd.filter(o => !o.dispatch_date);
   const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
+  const scheduled  = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
 
   loadStaffRemittanceSummary();
 
   document.getElementById('staffDeliveriesAvailableBody').innerHTML = available.length
-    ? available.map(o => {
-        const attempts = o.delivery_attempts || 0;
-        const retryBadge = attempts > 0
-          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
-          : '';
-        return `
+    ? available.map(o => `
         <tr>
           <td><input type="checkbox" class="staff-delivery-select-cb" value="${o.order_id}"/></td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${staffFullDeliveryAddress(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${peso(o.total)}</td>
-        </tr>`;
-      }).join('')
+        </tr>`).join('')
     : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
+
+  const scheduledBody = document.getElementById('staffDeliveriesScheduledBody');
+  if (scheduledBody) {
+    scheduledBody.innerHTML = scheduled.length
+      ? scheduled.map(o => {
+          const attempts = o.delivery_attempts || 0;
+          const retryBadge = attempts > 0
+            ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
+            : '';
+          return `
+          <tr>
+            <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
+            <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
+            <td>${staffFullDeliveryAddress(o)}</td>
+            <td>${o.dispatch_date}</td>
+            <td>${peso(o.total)}</td>
+          </tr>`;
+        }).join('')
+      : '<tr><td colspan="5" class="table-empty">No retries scheduled for a future day.</td></tr>';
+  }
 
   document.getElementById('staffDeliveriesTodayBody').innerHTML = today.length
     ? today.map(o => `

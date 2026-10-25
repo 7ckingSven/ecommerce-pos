@@ -577,6 +577,7 @@
           <h3 class="card-title" style="margin:0;">Deliveries</h3>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button id="staffDeliveriesTabAvailableBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('available')">To Dispatch</button>
+            <button id="staffDeliveriesTabScheduledBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('scheduled')">Scheduled for Retry</button>
             <button id="staffDeliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('today')">Out for Deliveries</button>
             <button id="staffDeliveriesTabDeliveredBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('delivered')">Delivered Today</button>
             <button id="staffDeliveriesTabFailedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="staffSwitchDeliveriesTab('failed')">Failed Attempts Today</button>
@@ -595,7 +596,7 @@
           <span>Remaining: <span id="staffRemitRemainingTotal">₱0.00</span></span>
         </div>
         <div style="margin:4px 1rem 0;font-size:11px;color:var(--text-muted);">
-          Total Deliveries Today = Out for Deliveries + Delivered Today. Completed/Remitted = Delivered Today. Failed Attempts = sent back to To Dispatch for a retry (not yet final). Returned/Failed = 3rd attempt failed. Full order history for any date is still in the Orders table's status filter above.
+          Total Deliveries Today = Out for Deliveries + Delivered Today. Completed/Remitted = Delivered Today. Failed Attempts = a Not-Delivered click recorded today, rescheduled to retry (not yet final). Returned/Failed = 3rd attempt failed. Full order history for any date is still in the Orders table's status filter above.
         </div>
 
         <div id="staffDeliveriesAvailablePanel" style="padding:1rem;">
@@ -608,6 +609,21 @@
                 <tr><th style="width:30px;"><input type="checkbox" id="staffDeliveriesAvailableSelectAll" onchange="staffToggleAllDeliverySelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Total</th></tr>
               </thead>
               <tbody id="staffDeliveriesAvailableBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
+        <!-- Scheduled for Retry: failed once/twice (not final), the
+             courier keeps it and retries on the rescheduled dispatch_date.
+             Read-only — it reappears in "Out for Deliveries" on its own
+             once that day arrives, no manual redispatch needed. -->
+        <div id="staffDeliveriesScheduledPanel" style="padding:1rem;display:none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Retry Date</th><th>Total</th></tr>
+              </thead>
+              <tbody id="staffDeliveriesScheduledBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>

@@ -4839,17 +4839,28 @@ def admin_mark_not_delivered(order_id):
             _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
             return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
         else:
-            # last_attempt_at is the ONLY remaining record of when this
-            # failure happened — dispatch_date (the usual "which day"
-            # marker) gets cleared below so the order drops back into
-            # "To Dispatch" for a retry, which otherwise erases the date
-            # entirely. See _remittance_summary's failed_attempts stat.
+            # Courier-retry model (adviser-team clarification, Oct 25
+            # 2026): the package stays WITH the courier across its 3
+            # attempts — it is not handed back to "To Dispatch" to be
+            # re-selected and dispatched again by hand. So a non-final
+            # failure reschedules dispatch_date to tomorrow instead of
+            # clearing it. That single change is enough to make it
+            # reappear in "Out for Deliveries" on its own once that day
+            # actually arrives — no extra automation needed, since every
+            # "today" filter in this file already keys off dispatch_date.
+            # It's visible in between on the new "Tomorrow" tab.
+            # last_attempt_at is still stamped for the Failed Attempts
+            # Today stat (see _remittance_summary) — that one reports
+            # "when did a Not-Delivered click happen", which is a
+            # different question from "which day is this now scheduled
+            # for" and dispatch_date alone can't answer it.
+            next_dispatch = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
             supabase.table('order').update({
                 'delivery_attempts': attempts,
-                'dispatch_date': None,
+                'dispatch_date': next_dispatch,
                 'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
-            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to To Dispatch for another try.', 'delivery_attempts': attempts, 'final': False}), 200
+            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Retry scheduled for {next_dispatch}.', 'delivery_attempts': attempts, 'final': False, 'next_dispatch': next_dispatch}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -5760,12 +5771,17 @@ def staff_mark_not_delivered(order_id):
             _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
             return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
         else:
+            # Courier-retry model — see admin_mark_not_delivered's comment
+            # for the full reasoning. Reschedules for tomorrow instead of
+            # clearing dispatch_date, so the order reappears in "Out for
+            # Deliveries" automatically once that day arrives.
+            next_dispatch = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
             supabase.table('order').update({
                 'delivery_attempts': attempts,
-                'dispatch_date': None,
+                'dispatch_date': next_dispatch,
                 'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
-            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Order returned to To Dispatch for another try.', 'delivery_attempts': attempts, 'final': False}), 200
+            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Retry scheduled for {next_dispatch}.', 'delivery_attempts': attempts, 'final': False, 'next_dispatch': next_dispatch}), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
