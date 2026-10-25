@@ -25,7 +25,7 @@
   --border:      #1f3328;
   --text:        #e8f5ee;
   --text-2:      #a3c4b0;
-  --text-muted:  #5a7a68;
+  --text-muted:  #82a695; /* brightened from #5a7a68 for readable contrast on dark bg */
   --sidebar-bg:  #0d1710;
   --topbar-bg:   #0d1710;
   --card-bg:     #141f18;
@@ -43,7 +43,7 @@
   --border:      #bbf7d0;
   --text:        #111827;
   --text-2:      #374151;
-  --text-muted:  #9ca3af;
+  --text-muted:  #6b7280; /* darkened from #9ca3af for readable contrast on white */
   --sidebar-bg:  #052e16;
   --topbar-bg:   #ffffff;
   --card-bg:     #ffffff;
@@ -534,7 +534,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .stat-icon--yellow{ background: rgba(234,179,8,0.12);  color: #eab308; }
 .stat-icon--red   { background: rgba(239,68,68,0.12);  color: #ef4444; }
 .stat-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.stat-label { font-size: 13px; color: var(--text-muted); font-weight: 500; }
+.stat-label { font-size: 13px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.2px; }
 .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--text); font-family: 'JetBrains Mono', monospace; }
 .stat-sub   { font-size: 13px; color: var(--text-muted); }
 
@@ -593,7 +593,11 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   max-width: 320px;
   transition: border-color var(--transition);
 }
-.search-wrap:focus-within { border-color: var(--g-600); }
+.search-wrap { min-height: 40px; }
+.search-wrap:focus-within {
+  border-color: var(--g-600);
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+}
 .search-input {
   border: none;
   background: none;
@@ -604,20 +608,25 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   width: 100%;
   outline: none;
 }
-.search-input::placeholder { color: var(--text-muted); }
+.search-input::placeholder { color: var(--text-muted); opacity: 0.85; }
 .filter-select {
-  border: 1px solid var(--border);
+  border: 1.5px solid var(--border);
   background: var(--card-bg);
   color: var(--text);
   font-family: 'Sora', sans-serif;
   font-size: 14px;
-  padding: 8px 12px;
+  padding: 10px 14px;
+  min-height: 40px;
   border-radius: var(--radius-sm);
   outline: none;
   cursor: pointer;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
-.filter-select:focus { border-color: var(--g-600); }
+.filter-select:focus,
+.filter-select:focus-visible {
+  border-color: var(--g-600);
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+}
 
 /* ─── Table ─── */
 .table-wrap { overflow-x: auto; }
@@ -756,8 +765,17 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .btn-icon--red:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
 
 /* ─── Forms ─── */
+/* Typography scale shared by every "label" (a caption above/describing a
+   value) and every "value" (the data itself) across stat cards, form
+   fields and table headers, so weight/size pairings read the same way
+   everywhere instead of drifting field-by-field. */
 .form-group { display: flex; flex-direction: column; gap: 5px; margin-bottom: 1rem; }
-.form-label { font-size: 13px; font-weight: 600; color: var(--text); }
+.form-label {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+  color: var(--text);
+}
 .form-input {
   border: 1.5px solid var(--border);
   background: var(--input-bg);
@@ -765,13 +783,18 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   font-family: 'Sora', sans-serif;
   font-size: 14px;
   padding: 10px 12px;
+  min-height: 40px;
   border-radius: var(--radius-sm);
   outline: none;
-  transition: border-color var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
   width: 100%;
 }
-.form-input:focus { border-color: var(--g-600); }
-.form-input::placeholder { color: var(--text-muted); }
+.form-input:focus,
+.form-input:focus-visible {
+  border-color: var(--g-600);
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+}
+.form-input::placeholder { color: var(--text-muted); opacity: 0.85; }
 .form-input[readonly] {
   background: transparent;
   border: none;
@@ -781,9 +804,15 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   padding: 9px 2px 10px 0;
   cursor: default;
 }
-.form-input[readonly]:focus { border-bottom-color: var(--text-muted); }
+.form-input[readonly]:focus { border-bottom-color: var(--text-muted); box-shadow: none; }
 .form-input[readonly]::placeholder { color: var(--text); }
-.form-select { cursor: pointer; }
+.form-select,
+select.form-input {
+  cursor: pointer;
+  min-height: 40px;
+  /* extra right padding keeps the native dropdown arrow clear of text */
+  padding-right: 32px;
+}
 .form-textarea { resize: vertical; min-height: 80px; line-height: 1.5; }
 .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .form-row-3 { display: grid; grid-template-columns: 1fr 0.4fr 1fr; gap: 1rem; }
@@ -998,7 +1027,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .branch-stock-name {
   font-size: 14px;
   font-weight: 700;
-  color: var(--text-primary);
+  color: var(--text); /* was var(--text-primary), an undefined variable that fell back to inherited/black text */
 }
 
 .branch-stock-count {

@@ -2711,9 +2711,18 @@ function updateBranchStockSummary(products) {
           + '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>'
           + '</button>'
         : '';
+      // Bulk-select checkbox — only for critical/out rows, the ones eligible
+      // for "Generate PO for Selected" (see generatePOForSelectedCritical).
+      var bulkKey = i.product_id + '|' + branchId;
+      var checkboxHtml = (bqLevel === 'critical' || bqLevel === 'out')
+        ? '<input type="checkbox" id="bulkPOChk_' + i.product_id + '_' + branchId + '" '
+          + 'onclick="event.stopPropagation();toggleBulkPOSelect(\'' + i.product_id + '\',\'' + branchId + '\',this.checked)" '
+          + (_bulkPOSelected.has(bulkKey) ? 'checked' : '') + '/>'
+        : '';
       return '<tr style="cursor:' + (hasVariants ? 'pointer' : 'default') + ';" '
         + (hasVariants ? 'onclick="toggleInvVariantRow(\'' + i.product_id + '\',\'' + branchId + '\',this.querySelector(\'.inv-expand-btn\'))"' : '')
         + '>'
+        + '<td style="width:28px;text-align:center;" onclick="event.stopPropagation();">' + checkboxHtml + '</td>'
         + '<td><div style="display:flex;align-items:center;gap:8px;">' + imgHtml
         + '<span style="font-size:12px;font-weight:600;">' + i.product_name + '</span>'
         + expandBtn + '</div></td>'
@@ -2722,7 +2731,7 @@ function updateBranchStockSummary(products) {
         + '<td>' + poActionBtn + '</td>'
         + '</tr>'
         + '<tr id="invVarRow_' + i.product_id + '_' + branchId + '" style="display:none;background:var(--surface);">'
-        + '<td colspan="4" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>'
+        + '<td colspan="5" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>'
         + '</tr>';
     }).join('');
 
@@ -2731,7 +2740,7 @@ function updateBranchStockSummary(products) {
       + '<span class="branch-stock-name">' + branch + '</span>'
       + '<span class="branch-stock-count">' + allItems.length + ' products</span></div>'
       + '<table class="data-table" style="margin:0;">'
-      + '<thead><tr><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th><th>Action</th></tr></thead>'
+      + '<thead><tr><th style="width:28px;"></th><th>Product</th><th style="text-align:center;">Stock</th><th>Status</th><th>Action</th></tr></thead>'
       + '<tbody>' + rows + '</tbody>'
       + '</table></div>';
   });
@@ -2759,7 +2768,118 @@ function updateBranchStockSummary(products) {
     wrap.after(pagerEl);
   }
   renderPager('branchStockPagination', maxItems, branchStockPage, 'changeBranchStockPage');
+  ensureBulkPOToolbar();
+  updateBulkPOToolbar();
 }
+
+// ─── Bulk "Generate PO for Selected" (critical / out-of-stock rows) ──────
+// Selections are keyed "productId|branchId" so the same product across
+// different branches can be picked independently.
+var _bulkPOSelected = (typeof _bulkPOSelected !== 'undefined') ? _bulkPOSelected : new Set();
+
+function toggleBulkPOSelect(productId, branchId, checked) {
+  const key = productId + '|' + branchId;
+  if (checked) _bulkPOSelected.add(key); else _bulkPOSelected.delete(key);
+  updateBulkPOToolbar();
+}
+window.toggleBulkPOSelect = toggleBulkPOSelect;
+
+function ensureBulkPOToolbar() {
+  if (document.getElementById('bulkPOToolbar')) return;
+  var wrap = document.getElementById('branchStockSummary');
+  if (!wrap) return;
+  var bar = document.createElement('div');
+  bar.id = 'bulkPOToolbar';
+  bar.style.cssText = 'display:none;align-items:center;gap:10px;padding:8px 12px;margin-bottom:10px;background:var(--surface);border:1px solid var(--border);border-radius:8px;';
+  bar.innerHTML = '<span style="font-size:12px;font-weight:600;">'
+    + '<span id="bulkPOCount">0</span> critical/out item(s) selected</span>'
+    + '<button type="button" class="btn btn-sm btn-primary" onclick="generatePOForSelectedCritical()">Generate PO for Selected</button>'
+    + '<button type="button" class="btn btn-sm btn-ghost" onclick="clearBulkPOSelection()">Clear</button>';
+  wrap.parentElement.insertBefore(bar, wrap);
+}
+
+function clearBulkPOSelection() {
+  _bulkPOSelected.clear();
+  document.querySelectorAll('[id^="bulkPOChk_"]').forEach(cb => cb.checked = false);
+  updateBulkPOToolbar();
+}
+window.clearBulkPOSelection = clearBulkPOSelection;
+
+function updateBulkPOToolbar() {
+  var bar = document.getElementById('bulkPOToolbar');
+  var countEl = document.getElementById('bulkPOCount');
+  if (!bar) return;
+  var n = _bulkPOSelected.size;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+  if (countEl) countEl.textContent = n;
+}
+
+async function generatePOForSelectedCritical() {
+  if (!_bulkPOSelected.size) return;
+  const entries = Array.from(_bulkPOSelected).map(key => {
+    const [productId, branchId] = key.split('|');
+    return { productId, branchId };
+  });
+
+  // Resolve each product's recorded supplier (first stock-in / first add
+  // stock), then group selections by supplier — "one PO per supplier."
+  const supplierByProduct = {};
+  await Promise.all([...new Set(entries.map(e => e.productId))].map(async pid => {
+    try {
+      const res = await fetch('/api/admin/products/' + pid + '/supplier');
+      const data = await res.json().catch(() => ({}));
+      supplierByProduct[pid] = (data && data.supplier) || '';
+    } catch (e) { supplierByProduct[pid] = ''; }
+  }));
+
+  const groups = {};
+  entries.forEach(e => {
+    const supplier = supplierByProduct[e.productId] || 'Unspecified Supplier';
+    (groups[supplier] = groups[supplier] || []).push(e);
+  });
+  const supplierNames = Object.keys(groups);
+  const firstSupplier = supplierNames[0];
+  const firstGroup = groups[firstSupplier];
+
+  // Consume just this supplier's group — the rest stay selected so clicking
+  // "Generate PO for Selected" again opens the next supplier's draft.
+  firstGroup.forEach(e => {
+    _bulkPOSelected.delete(e.productId + '|' + e.branchId);
+    const cb = document.getElementById('bulkPOChk_' + e.productId + '_' + e.branchId);
+    if (cb) cb.checked = false;
+  });
+  updateBulkPOToolbar();
+
+  openCreatePOModal();
+  const itemsWrap = document.getElementById('poItemsWrap');
+  if (itemsWrap) itemsWrap.innerHTML = '';
+  const supplierInput = document.getElementById('poSupplier');
+  if (supplierInput) supplierInput.value = (firstSupplier === 'Unspecified Supplier') ? '' : firstSupplier;
+
+  firstGroup.forEach(e => {
+    const p = (allBranchProducts || []).find(pr => pr.product_id === e.productId);
+    if (!p) return;
+    addPOItemRow();
+    const row = itemsWrap ? itemsWrap.lastElementChild : null;
+    if (!row) return;
+    row.dataset.requestingBranchId = e.branchId;
+    const sel = row.querySelector('.po-product');
+    if (sel) {
+      sel.value = p.product_id;
+      if (typeof updatePORowStock === 'function') updatePORowStock(sel);
+      if (typeof loadPORowVariants === 'function') loadPORowVariants(sel);
+      if (typeof autofillPORowCost === 'function') autofillPORowCost(sel);
+      if (typeof autofillPOSupplier === 'function') autofillPOSupplier(sel.value);
+    }
+  });
+  if (typeof updatePOTotal === 'function') updatePOTotal();
+
+  if (supplierNames.length > 1 && typeof showToast === 'function') {
+    showToast('PO draft opened for "' + firstSupplier + '". ' + (supplierNames.length - 1)
+      + ' more supplier group(s) still selected — submit this one, then click "Generate PO for Selected" again.');
+  }
+}
+window.generatePOForSelectedCritical = generatePOForSelectedCritical;
 
 async function toggleInvVariantRow(productId, branchId, btnEl) {
   const rowId  = 'invVarRow_' + productId + '_' + branchId;
@@ -3141,6 +3261,8 @@ async function openAddStockModal() {
   // Clear and add first product row
   document.getElementById('addStockItems').innerHTML = '';
   document.getElementById('addStockNote').value = '';
+  const supplierEl = document.getElementById('addStockSupplier');
+  if (supplierEl) supplierEl.value = '';
   addStockItemRow();
 
   _setInvBtn('addStockSubmitBtn', false);
@@ -3193,9 +3315,13 @@ function buildProductAutocomplete(container, { inputId, hiddenId, listId, onSele
   function showSuggestions(q) {
     const term = (q || '').toLowerCase().trim();
     list.innerHTML = '';
-    if (!term) { list.style.display = 'none'; return; }
-    const matches = allProducts.filter(p =>
-      (p.product_name || '').toLowerCase().includes(term)
+    // Per the Oct 25 adviser consultation: clicking into the field (or
+    // clearing it) should still show a browsable dropdown of products, not
+    // just filtered results once you start typing — so an empty term lists
+    // the first 10 products instead of hiding the list outright.
+    const matches = (term
+      ? allProducts.filter(p => (p.product_name || '').toLowerCase().includes(term))
+      : allProducts
     ).slice(0, 10);
     if (!matches.length) {
       list.innerHTML = `<div style="padding:9px 13px;font-size:13px;color:var(--text-muted);">No products found</div>`;
@@ -3414,6 +3540,7 @@ async function submitAddStock(e) {
 
   const branchVal = document.getElementById('addStockBranch').value;
   const note      = document.getElementById('addStockNote').value || 'Stock added';
+  const supplier  = (document.getElementById('addStockSupplier')?.value || '').trim();
 
   if (!branchVal) {
     showToast('Please select a branch.', 'error');
@@ -3486,6 +3613,7 @@ async function submitAddStock(e) {
             quantity:        item.quantity,
             to_branch_id:    bId,
             note:            note,
+            supplier:        supplier || null,
             type:            'restock',
             variant_options: item.variant_options,
           }),
@@ -4189,13 +4317,72 @@ function sortOrdersHierarchy(orders) {
   });
 }
 
-function orderStatusSelectHtml(orderId, status, updateFnName) {
-  const locked = status === 'completed' || status === 'cancelled' || status === 'returned_failed';
-  const next   = ORDER_STATUS_FLOW[status];
-  const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
-    + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
-  return `<select class="filter-select" style="font-size:11px;padding:4px 8px;" ${locked ? 'disabled' : ''}
-      onchange="${updateFnName}('${orderId}', this.value, this)">${options}</select>`;
+// Per the Oct 25 adviser consultation: a free-form status dropdown is "not
+// supposed to be" the way an order moves forward — each step now needs its
+// own explicit trigger action instead. Pending -> Processing is already
+// system-driven (30-min auto-advance in app.py, or the "Move to Processing"
+// batch button above the table), so it gets no manual button here at all;
+// Processing -> Out for Delivery is the one step this row-level action still
+// drives, as a single contextual button. Everything past that (Delivered,
+// Not Delivered) already goes through the dedicated Deliveries-for-Today
+// actions, not this cell.
+function orderStatusActionHtml(order, updateFnName) {
+  const status = order.status;
+  if (status === 'pending') {
+    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>`;
+  }
+  const next = ORDER_STATUS_FLOW[status];
+  if (!next) return '';
+  return `<button class="btn btn-solid-green" style="font-size:11px;padding:5px 10px;white-space:nowrap;"
+      onclick="${updateFnName}('${order.order_id}', '${next}')">Mark ${ORDER_STATUS_LABELS[next]}</button>`;
+}
+
+// ─── Print Parcel Label ─────────────────────────────────
+// Only ever offered while an order is 'processing' (see renderOrders) — the
+// window between stock being deducted and the order actually leaving, which
+// is when a label needs to go on the parcel. Opens a small print-only
+// window rather than reusing the receipt modal, since this is a shipping
+// label (recipient + items to pack), not a payment receipt.
+function printOrderLabel(order) {
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : (order.address || '');
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const phone    = order.customer?.phone_number || '';
+  const itemsHtml = (order.order_item || []).map(i => {
+    const opts = i.selected_options && Object.keys(i.selected_options).length
+      ? ' (' + Object.entries(i.selected_options).map(([k, v]) => `${k}: ${v}`).join(', ') + ')'
+      : '';
+    return `<tr><td style="padding:4px 0;">${i.product?.product_name || '—'}${opts}</td><td style="padding:4px 0;text-align:right;">x${i.qty}</td></tr>`;
+  }).join('');
+
+  const html = `
+    <html><head><title>Parcel Label — ${shortId(order.order_id)}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#111;}
+      h2{margin:0 0 4px;font-size:18px;}
+      .muted{color:#666;font-size:12px;}
+      .box{border:2px solid #111;border-radius:8px;padding:16px;margin-top:16px;}
+      table{width:100%;font-size:13px;margin-top:10px;border-top:1px solid #ccc;padding-top:6px;}
+      .label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;}
+    </style></head><body>
+      <h2>TEFC E-Commerce — Parcel Label</h2>
+      <div class="muted">Order #${shortId(order.order_id)} · ${badge ? '' : ''}${(order.order_type || '').toUpperCase()}</div>
+      <div class="box">
+        <div class="label">Deliver To</div>
+        <div style="font-size:15px;font-weight:bold;margin:2px 0 6px;">${customer}</div>
+        <div>${addrString || 'No address provided'}</div>
+        ${order.address_note ? `<div class="muted">Note: ${order.address_note}</div>` : ''}
+        ${phone ? `<div class="muted">Phone: ${phone}</div>` : ''}
+        <table>${itemsHtml}</table>
+      </div>
+      <script>window.onload = () => { window.print(); };</script>
+    </body></html>`;
+  const win = window.open('', '_blank', 'width=480,height=640');
+  if (!win) { showToast('Allow pop-ups to print the parcel label.', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
 }
 
 function renderOrders(orders) {
@@ -4223,10 +4410,14 @@ function renderOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
-            ${orderStatusSelectHtml(o.order_id, o.status, 'updateOrderStatus')}
+            ${orderStatusActionHtml(o, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
+            ${o.status === 'processing' ? `
+            <button class="btn-icon" onclick="printOrderLabel(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Print Parcel Label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            </button>` : ''}
             ${o.status === 'completed' ? `
             <button class="btn-icon" onclick="openProcessReturn(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Process Return">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></svg>
@@ -4335,15 +4526,11 @@ async function submitProcessReturn(orderId) {
   }
 }
 
-async function updateOrderStatus(id, status, selectEl) {
-  // selectEl is the <select> itself (see orderStatusSelectHtml) — its value
-  // has already visually changed to `status` by the time onchange fires, so
-  // a cancel here needs to snap it back to the option it started on.
+async function updateOrderStatus(id, status) {
+  // Fired from the single contextual trigger button in orderStatusActionHtml
+  // (e.g. "Mark Out for Delivery") — no dropdown to snap back on cancel.
   const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
-  if (!confirmed) {
-    if (selectEl && selectEl.options.length) selectEl.value = selectEl.options[0].value;
-    return;
-  }
+  if (!confirmed) return;
   try {
     const res  = await fetch(`/api/admin/orders/${id}`, {
       method: 'PUT',
@@ -6962,7 +7149,7 @@ function addPOItemRow() {
   row.style.cssText = 'display:grid;grid-template-columns:0.8fr 80px 160px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);autofillPORowCost(this);">
+      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);autofillPORowCost(this);autofillPOSupplier(this.value);">
         <option value="">Select product</option>
         ${allProducts.map(p => {
           const bs = p.branch_stock || [];
@@ -7038,6 +7225,7 @@ function fillPORowForProduct(product, variantRow, requestId, qty) {
     updatePORowStock(sel);
     loadPORowVariants(sel);
     autofillPORowCost(sel);
+    autofillPOSupplier(product.product_id);
   }
 
   if (variantRow && variantRow.options) {
@@ -7232,6 +7420,25 @@ function autofillPORowCost(sel) {
 }
 window.autofillPORowCost = autofillPORowCost;
 
+// Auto-fills the PO's (single, whole-order) Supplier field from whichever
+// supplier was recorded the FIRST time this product was ever stocked in
+// (Add Stock modal's new "Supplier Name" field -> inventory.supplier),
+// per the Oct 25 adviser consultation. Only fills it while the field is
+// still empty — doesn't overwrite a supplier the admin already typed, or
+// one a different product on this same draft already filled in.
+async function autofillPOSupplier(productId) {
+  if (!productId) return;
+  const supplierEl = document.getElementById('poSupplier');
+  if (!supplierEl || supplierEl.value.trim()) return;
+  try {
+    const res = await fetch(`/api/admin/products/${productId}/supplier`);
+    if (!res.ok) return;
+    const data = await res.json();
+    if (data.supplier && !supplierEl.value.trim()) supplierEl.value = data.supplier;
+  } catch (e) { /* best-effort — admin can still type it manually */ }
+}
+window.autofillPOSupplier = autofillPOSupplier;
+
 function updatePOTotal() {
   const rows  = document.getElementById('poItemsWrap').children;
   let total   = 0;
@@ -7274,7 +7481,17 @@ async function submitCreatePO() {
       variantSelects.forEach(vs => {
         if (vs.value) variantOpts[vs.dataset.label] = vs.value;
       });
-      items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost, variant_options: Object.keys(variantOpts).length ? variantOpts : null });
+      // If this row came from a staff stock request (via fillPORowForProduct),
+      // or was stamped directly by the bulk "Generate PO for Selected"
+      // critical-stock action (row.dataset.requestingBranchId), carry that
+      // branch along as requesting_branch_id so the Receive & Distribute
+      // step later can pre-fill that branch's amount.
+      const sourceReq = row.dataset.requestId
+        ? (allStockRequests || []).find(r => r.request_id === row.dataset.requestId)
+        : null;
+      const requestingBranchId = row.dataset.requestingBranchId
+        || (sourceReq ? (sourceReq.branch_id || sourceReq.branch?.branch_id || null) : null);
+      items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost, variant_options: Object.keys(variantOpts).length ? variantOpts : null, requesting_branch_id: requestingBranchId });
       if (row.dataset.requestId) stockRequestIds.push(row.dataset.requestId);
     }
   }
@@ -7539,16 +7756,23 @@ function openPODetail(poId) {
           </div>`;
       }
 
-      const branchInputs = allBranches.map(b =>
-        `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-          <label style="font-size:13px;font-weight:500;min-width:120px;">${b.branch_name}</label>
-          <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="0"
+      // If this item came from a staff stock request, requesting_branch_id
+      // (set at Create-PO time — see submitCreatePO) names which branch
+      // actually asked for it. Pre-fill that branch's distribution with the
+      // full amount being received, instead of leaving every branch at 0 —
+      // admin can still override it before saving.
+      const branchInputs = allBranches.map(b => {
+        const isRequestingBranch = item.requesting_branch_id && b.branch_id === item.requesting_branch_id;
+        const defaultVal = isRequestingBranch ? outstanding : 0;
+        return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
+          <label style="font-size:13px;font-weight:500;min-width:120px;">${b.branch_name}${isRequestingBranch ? ' <span style="color:var(--g-400);font-size:11px;">(requested)</span>' : ''}</label>
+          <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="${defaultVal}"
             data-item="${idx}" data-branch="${b.branch_id}"
             style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"
             oninput="validatePODistribution()"/>
           <span style="font-size:12px;color:var(--text-muted);">units</span>
-        </div>`
-      ).join('');
+        </div>`;
+      }).join('');
       return `
         <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">

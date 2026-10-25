@@ -32,6 +32,15 @@ function isWithinSouthCotabato(addr) {
   return parts.some(p => p.includes('south cotabato') || p.includes('southcotabato'));
 }
 
+// Koronadal City specifically — the only free-shipping city within South
+// Cotabato now (see calculateShipping below). Kept separate from
+// isWithinSouthCotabato, which still gates COD availability/delivery
+// estimate zones for the whole province, unchanged by this split.
+function isWithinKoronadal(addr) {
+  const parts = (addr || '').split('|').map(p => p.trim().toLowerCase());
+  return parts.some(p => p.includes('koronadal'));
+}
+
 function getAvailablePaymentMethods(addr) {
   if (isWithinSouthCotabato(addr)) return ALL_PAYMENT_METHODS;
   return ALL_PAYMENT_METHODS.filter(m => m.id !== 'cash_on_delivery');
@@ -131,18 +140,22 @@ export default function CheckoutScreen({ route, navigation }) {
       p.includes('armm')
     );
 
-    console.log('Shipping calc:', { inSC, inR12, inMindanao, totalWeight, parts });
+    const inKoronadal = isWithinKoronadal(addr);
 
-    // Within South Cotabato (Koronadal included — it's a component city of
-    // the province) — always free shipping, regardless of weight/subtotal.
-    if (inSC) return 0;
+    console.log('Shipping calc:', { inSC, inKoronadal, inR12, inMindanao, totalWeight, parts });
 
-    // Four zones modeled on real courier (J&T) pricing — same-region
-    // cheapest, same-island mid-tier, inter-island priciest — plus a
-    // light-item bracket under 500g so a small item isn't charged the same
-    // flat base fee as something near 5kg.
+    // Koronadal City only — the single free-shipping city in South
+    // Cotabato now. Everywhere else in the province pays the new
+    // "rest of South Cotabato" light tier below instead of free shipping.
+    if (inSC && inKoronadal) return 0;
+
+    // Five zones modeled on real courier (J&T) pricing — same-city free,
+    // same-province cheapest, same-region mid-tier, same-island higher,
+    // inter-island priciest — plus a light-item bracket under 500g so a
+    // small item isn't charged the same flat base fee as something near 5kg.
     let light, base, overKg, rate;
-    if (inR12)            { light = 70;  base = 120; overKg = 5; rate = 30; }
+    if (inSC)             { light = 40;  base = 70;  overKg = 5; rate = 20; } // rest of South Cotabato
+    else if (inR12)       { light = 70;  base = 120; overKg = 5; rate = 30; }
     else if (inMindanao)  { light = 90;  base = 150; overKg = 5; rate = 32; }
     else                  { light = 120; base = 200; overKg = 5; rate = 35; } // Luzon/Visayas
 

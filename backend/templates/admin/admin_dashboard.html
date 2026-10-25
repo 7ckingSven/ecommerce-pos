@@ -1359,8 +1359,8 @@
     </div>
     <div class="modal-body">
       <form id="addStockForm" onsubmit="submitAddStock(event)">
-        <!-- Global Branch + Note -->
-        <div class="form-row-2" style="margin-bottom:12px;">
+        <!-- Global Branch + Supplier + Note -->
+        <div class="form-row-3" style="margin-bottom:12px;">
           <div class="form-group" style="margin:0;">
             <label class="form-label">To Branch <span class="req">*</span></label>
             <select id="addStockBranch" class="form-input form-select" required>
@@ -1368,8 +1368,13 @@
             </select>
           </div>
           <div class="form-group" style="margin:0;">
-            <label class="form-label">Note / Supplier</label>
-            <input type="text" id="addStockNote" class="form-input" placeholder="e.g. Supplier ABC"/>
+            <label class="form-label">Supplier Name</label>
+            <input type="text" id="addStockSupplier" class="form-input" placeholder="e.g. Supplier ABC"
+              title="Recorded once per product — the first time you add stock, this becomes that product's supplier for Purchase Order auto-fill."/>
+          </div>
+          <div class="form-group" style="margin:0;">
+            <label class="form-label">Note</label>
+            <input type="text" id="addStockNote" class="form-input" placeholder="Optional remarks"/>
           </div>
         </div>
         <!-- Product Items Container -->

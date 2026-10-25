@@ -50,9 +50,11 @@ function statusColor(s, COLORS) {
 
 // ─── Customer Self-Cancel Window ─────────────────────
 // Customers can cancel only while an order is still 'pending', and only within
-// 2 hours of placing it. This is UX-only — the backend re-checks both before
-// actually cancelling.
-const CANCEL_WINDOW_HOURS = 2;
+// 30 minutes of placing it (per the Oct 25 adviser consultation — was 2 hours).
+// Kept in lockstep with the server's PENDING_AUTO_PROCESS_MINUTES in app.py,
+// which is what actually flips the order to 'processing' and ends the window;
+// this is UX-only — the backend re-checks both before actually cancelling.
+const CANCEL_WINDOW_MINUTES = 30;
 function getCancelWindow(order) {
   if (!order || order.status !== 'pending') return { canCancel: false, msRemaining: 0 };
   // Supabase's created_at comes back with no 'Z'/UTC suffix (e.g.
@@ -60,15 +62,15 @@ function getCancelWindow(order) {
   // UTC (PH is UTC+8), `new Date()` parses that naive string as LOCAL time,
   // which silently shifts the apparent creation moment hours into the past
   // relative to the real UTC creation time — making a brand-new order look
-  // like its 2-hour cancel window already expired. Force it to be read as
-  // UTC, same fix already applied to this timestamp format in app.py's
+  // like its cancel window already expired. Force it to be read as UTC,
+  // same fix already applied to this timestamp format in app.py's
   // duplicate-order check and in admin.js's order date rendering.
   const raw = order.created_at || order.date;
   if (!raw) return { canCancel: false, msRemaining: 0 };
   const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
   const utcStr      = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
   const created     = new Date(utcStr);
-  const deadline    = new Date(created.getTime() + CANCEL_WINDOW_HOURS * 60 * 60 * 1000);
+  const deadline    = new Date(created.getTime() + CANCEL_WINDOW_MINUTES * 60 * 1000);
   const msRemaining = deadline.getTime() - Date.now();
   return { canCancel: msRemaining > 0, msRemaining };
 }
@@ -714,7 +716,7 @@ export default function OrdersScreen({ navigation }) {
               </TouchableOpacity>
             )}
 
-            {/* Cancel Order Button — pending + within 2hr window only */}
+            {/* Cancel Order Button — pending + within the cancel window only */}
             {selectedOrder && getCancelWindow(selectedOrder).canCancel && (
               <View style={{ marginBottom: SPACING.sm }}>
                 <TouchableOpacity

@@ -33,7 +33,10 @@
   position: relative;
   z-index: 2;
 }
-.pos-search-wrap:focus-within { border-color: var(--g-600); }
+.pos-search-wrap:focus-within {
+  border-color: var(--g-600);
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+}
 
 /* ─── Barcode Scanner Input ───
    Visually distinct (dashed border) from the regular search box so staff can
@@ -119,7 +122,11 @@
   flex-direction: column;
   gap: 2px;
 }
-.pos-cat-wrap:hover .pos-subcat-menu,
+/* Shown purely via the .open class now (hover-intent JS in staff.js —
+   positionSubcatMenu's mouseenter/mouseleave pair), not plain CSS :hover:
+   a bare :hover chain broke the instant the pointer crossed the gap
+   between the tab and the flyout below it, closing the menu before the
+   mouse got there. */
 .pos-cat-wrap.open .pos-subcat-menu { display: flex; }
 .pos-subcat-item {
   padding: 6px 10px;
@@ -336,7 +343,11 @@
   text-align: center;
   font-family: 'JetBrains Mono', monospace;
 }
-.pos-qty-input:focus { border-color: var(--g-600); outline: none; }
+.pos-qty-input:focus {
+  border-color: var(--g-600);
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+}
 .pos-remove-btn {
   background: none;
   border: none;

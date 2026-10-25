@@ -893,6 +893,83 @@ def _auto_advance_processing_orders():
         print(f'Auto-advance (processing -> out_for_delivery) warning: {e}')
 
 
+# How long a pending ONLINE order gets before it's auto-moved into
+# 'processing' — gives the customer a window to cancel (see
+# /api/orders/<order_id>/cancel) before the shop starts fulfilling it.
+# Per the Oct 25 adviser consultation: 30 minutes (was 2 hours).
+PENDING_AUTO_PROCESS_MINUTES = 30
+
+def _auto_advance_pending_orders():
+    """Lazy/opportunistic check for the automatic Pending -> Processing
+    transition on ONLINE orders (same no-scheduler pattern as
+    _auto_advance_processing_orders — runs inline whenever admin or staff
+    orders are fetched). Any online order still 'pending' after
+    PENDING_AUTO_PROCESS_MINUTES gets moved into 'processing' here, the
+    exact same way the manual batch-process endpoints do: capped at the
+    shared DAILY_PROCESSING_CAP, oldest-first, with stock actually deducted
+    at the moment of the transition (skipping — not force-moving — any
+    order whose stock has since run out, so it stays pending for
+    staff/admin to resolve by hand instead of silently overselling).
+
+    POS/walk-in orders (order_type != 'online') are untouched — a customer
+    never gets a cancel window on those, so there's nothing to wait out."""
+    try:
+        today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
+        today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
+
+        already_today = supabase.table('order').select('order_id') \
+            .gte('processing_started_at', today_start) \
+            .lte('processing_started_at', today_end).execute()
+        remaining = DAILY_PROCESSING_CAP - len(already_today.data or [])
+        if remaining <= 0:
+            return
+
+        cutoff = (datetime.utcnow() - timedelta(minutes=PENDING_AUTO_PROCESS_MINUTES)).isoformat()
+        due = supabase.table('order').select(
+            'order_id, branch_id, order_item(product_id, qty, selected_options, product(product_name))'
+        ).eq('status', 'pending').eq('order_type', 'online').lte('created_at', cutoff).order('created_at', desc=False).execute()
+        due_orders = due.data or []
+        if not due_orders:
+            return
+
+        moved_ids = []
+        for o in due_orders:
+            if len(moved_ids) >= remaining:
+                break
+            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [])
+            if ok:
+                moved_ids.append(o['order_id'])
+            else:
+                print(f'Auto pending->processing skip ({o["order_id"]}): {err}')
+
+        if not moved_ids:
+            return
+
+        now_iso = datetime.utcnow().isoformat()
+        supabase.table('order').update({
+            'status': 'processing',
+            'processing_started_at': now_iso
+        }).in_('order_id', moved_ids).execute()
+
+        # Notify affected customers (best-effort, same pattern as the manual
+        # batch-process endpoints).
+        try:
+            notif_res = supabase.table('order').select(
+                'order_id, customer(fcm_token, fname)'
+            ).in_('order_id', moved_ids).execute()
+            notif_title, notif_body = ORDER_STATUS_MESSAGES['processing']
+            for o in (notif_res.data or []):
+                customer = o.get('customer')
+                if isinstance(customer, list): customer = customer[0] if customer else {}
+                fcm_token = customer.get('fcm_token') if customer else None
+                if fcm_token:
+                    send_push_notification(fcm_token, notif_title, notif_body, {'order_id': o['order_id'], 'status': 'processing'})
+        except Exception as notif_err:
+            print(f'Auto pending->processing notification error: {notif_err}')
+    except Exception as e:
+        print(f'Auto-advance (pending -> processing) warning: {e}')
+
+
 @app.route('/')
 def landing():
     return render_template('landing.html')
@@ -2203,13 +2280,15 @@ def _is_within_south_cotabato(address):
 def _compute_shipping_fee(address, cart_items):
     """Recomputes the shipping fee from scratch server-side — never trusts
     the client-sent amount — mirroring the mobile app's CheckoutScreen.js
-    calculateShipping() zone + weight formula exactly. Four zones, modeled
-    on real courier (J&T) pricing — same-region cheapest, same-island
-    mid-tier, inter-island priciest — plus a light-item bracket under 500g
-    so a small item isn't charged the same as something near 5kg:
-      - Within South Cotabato: always free, any weight.
-      - Region XII (SOCCSKSARGEN) otherwise: PHP 70 flat under 500g,
-        else PHP 120 base +PHP 30/kg over 5kg.
+    calculateShipping() zone + weight formula exactly. Five zones, modeled
+    on real courier (J&T) pricing — same-city cheapest, out from there in
+    widening rings — plus a light-item bracket under 500g so a small item
+    isn't charged the same as something near 5kg:
+      - Koronadal City: always free, any weight.
+      - Rest of South Cotabato (outside Koronadal): PHP 40 flat under 500g,
+        else PHP 70 base +PHP 20/kg over 5kg.
+      - Region XII (SOCCSKSARGEN) outside South Cotabato: PHP 70 flat under
+        500g, else PHP 120 base +PHP 30/kg over 5kg.
       - Rest of Mindanao mainland (Region IX/X/XI, CARAGA, BARMM): PHP 90
         flat under 500g, else PHP 150 base +PHP 32/kg over 5kg.
       - Luzon/Visayas (inter-island): PHP 120 flat under 500g, else
@@ -2230,8 +2309,12 @@ def _compute_shipping_fee(address, cart_items):
         w_kg = (w / 1000) if unit in ('gram', 'ml') else w
         total_weight += w_kg * float(item.get('quantity', 1) or 1)
 
-    parts  = (address or '').lower().split('|')
-    in_sc  = any('south cotabato' in p or 'southcotabato' in p for p in parts)
+    parts        = (address or '').lower().split('|')
+    in_sc        = any('south cotabato' in p or 'southcotabato' in p for p in parts)
+    # Address is Street|Barangay|City|Province|Region|Zip, but we scan every
+    # part (not just the City slot) for 'koronadal', same tolerance the other
+    # zone checks already use for addresses missing a field.
+    in_koronadal = any('koronadal' in p for p in parts)
     in_r12 = any(('xii' in p) or ('soccsksargen' in p) or ('region 12' in p) or ('region xii' in p) for p in parts)
     # Rest of Mindanao mainland — Region IX (Zamboanga Peninsula), Region X
     # (Northern Mindanao), Region XI (Davao Region), CARAGA, BARMM. Checked
@@ -2246,9 +2329,11 @@ def _compute_shipping_fee(address, cart_items):
         for p in parts
     )
 
-    if in_sc:
+    if in_sc and in_koronadal:
         return 0.0
-    if in_r12:
+    if in_sc:
+        light, base, over_kg, rate = 40, 70, 5, 20
+    elif in_r12:
         light, base, over_kg, rate = 70, 120, 5, 30
     elif in_mindanao:
         light, base, over_kg, rate = 90, 150, 5, 32
@@ -2787,6 +2872,24 @@ def admin_update_stock_request(request_id):
 # PURCHASE ORDER ROUTES
 # ══════════════════════════════════════════════════════
 
+@app.route('/api/admin/products/<product_id>/supplier', methods=['GET'])
+@admin_required
+def admin_get_product_supplier(product_id):
+    """The supplier recorded the FIRST time this product was ever stocked in
+    (earliest 'inventory' restock/adjustment row that has a supplier set) —
+    used to auto-fill the Create PO modal's Supplier field as soon as a
+    product is added to the draft, per the Oct 25 adviser consultation."""
+    try:
+        res = supabase.table('inventory').select('supplier, created_at') \
+            .eq('product_id', product_id) \
+            .not_.is_('supplier', 'null') \
+            .order('created_at', desc=False).limit(1).execute()
+        supplier = res.data[0]['supplier'] if res.data else None
+        return jsonify({'supplier': supplier}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/admin/purchase-orders', methods=['GET'])
 @admin_required
 def admin_get_purchase_orders():
@@ -2833,12 +2936,16 @@ def admin_create_purchase_order():
         # Insert PO items
         for item in items:
             supabase.table('po_item').insert({
-                'po_id':             po_id,
-                'product_id':        item['product_id'],
-                'quantity':          int(item['quantity']),
-                'unit_cost':         float(item.get('unit_cost', 0)),
-                'variant_options':   item.get('variant_options') or None,
-                'received_quantity': 0,
+                'po_id':                  po_id,
+                'product_id':             item['product_id'],
+                'quantity':               int(item['quantity']),
+                'unit_cost':              float(item.get('unit_cost', 0)),
+                'variant_options':        item.get('variant_options') or None,
+                'received_quantity':      0,
+                # Set only when this item came from a staff stock request —
+                # lets the Receive & Distribute step pre-fill that branch's
+                # share instead of defaulting every branch to 0.
+                'requesting_branch_id':   item.get('requesting_branch_id') or None,
             }).execute()
 
         # Mark any approved stock requests pulled into this PO so they drop
@@ -3935,6 +4042,7 @@ def admin_add_inventory():
         from_branch_id = data.get('from_branch_id')
         to_branch_id   = data.get('to_branch_id')
         note           = data.get('note', '')
+        supplier       = (data.get('supplier') or '').strip() or None
         inv_type       = data.get('type', 'restock')  # restock | transfer | adjustment
 
         if not product_id or qty_change == 0:
@@ -4026,7 +4134,10 @@ def admin_add_inventory():
             except Exception as prod_err:
                 print(f'product.quantity sync warning: {prod_err}')
 
-        # Log to inventory table
+        # Log to inventory table — supplier is recorded here (restock/adjustment
+        # entries only; a transfer moves existing stock and names no supplier)
+        # so admin_create_purchase_order can look up "this product's supplier"
+        # from whichever restock recorded it first, without a separate table.
         supabase.table('inventory').insert({
             'product_id':      product_id,
             'staff_id':        session.get('staff_id'),
@@ -4036,6 +4147,7 @@ def admin_add_inventory():
             'from_branch_id':  from_branch_id,
             'to_branch_id':    to_branch_id,
             'note':            note,
+            'supplier':        supplier if inv_type != 'transfer' else None,
         }).execute()
 
         # Auto-activate product if total branch stock >= 1
@@ -4097,6 +4209,7 @@ def admin_get_orders():
         if limit > 500:
             limit = 500
 
+        _auto_advance_pending_orders()
         _auto_advance_processing_orders()
 
         res = supabase.table('order').select(
@@ -4912,6 +5025,7 @@ def staff_get_orders():
 
         staff_id = session.get('staff_id')
 
+        _auto_advance_pending_orders()
         _auto_advance_processing_orders()
 
         # Get staff's assigned branch

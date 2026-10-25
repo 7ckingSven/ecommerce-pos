@@ -1177,11 +1177,28 @@ function populateCategories(products) {
       });
       catWrap.appendChild(menu);
 
-      // Desktop hover path — the flyout is position: fixed (see staff.css
-      // for why), so its on-screen spot has to be computed in JS rather
-      // than via CSS top/left; do it right as the hover starts so it's in
-      // place before :hover makes it visible (no mispositioned flash).
-      catWrap.addEventListener('mouseenter', function() { positionSubcatMenu(catWrap, menu); });
+      // Desktop hover path — hover-intent with a short close delay, not
+      // plain CSS :hover. The flyout sits a few px below the trigger (see
+      // staff.css), and that gap is a dead zone no element occupies: moving
+      // the mouse diagonally from the tab down into the menu crosses it,
+      // which breaks a pure CSS :hover chain mid-move and was exactly why
+      // the flyout kept disappearing before the pointer got there. Opening
+      // immediately but closing on a delay (cancelled if the pointer lands
+      // on either the trigger or the menu) rides straight over that gap.
+      let closeTimer = null;
+      const cancelClose = () => { if (closeTimer) { clearTimeout(closeTimer); closeTimer = null; } };
+      const scheduleClose = () => {
+        cancelClose();
+        closeTimer = setTimeout(() => catWrap.classList.remove('open'), 220);
+      };
+      catWrap.addEventListener('mouseenter', function() {
+        cancelClose();
+        positionSubcatMenu(catWrap, menu);
+        catWrap.classList.add('open');
+      });
+      catWrap.addEventListener('mouseleave', scheduleClose);
+      menu.addEventListener('mouseenter', cancelClose);
+      menu.addEventListener('mouseleave', scheduleClose);
     }
 
     wrap.appendChild(catWrap);
@@ -2905,8 +2922,12 @@ function renderInvProducts(products) {
         const { qty, level, variantDriven } = staffStockInfo(p);
         const levelColor = level === 'out' ? 'var(--text)' : level === 'critical' ? '#ef4444' : level === 'low' ? '#f59e0b' : 'var(--g-400)';
         const variantNote = variantDriven ? ' <span style="font-size:10px;opacity:0.75;">(variant)</span>' : '';
+        const bulkChk = (level === 'critical' || level === 'out')
+          ? `<input type="checkbox" id="bulkReqChk_${p.product_id}" onclick="event.stopPropagation();toggleBulkReqSelect('${p.product_id}',this.checked)" ${_bulkReqSelected.has(p.product_id) ? 'checked' : ''}/>`
+          : '';
         return `
         <tr>
+          <td style="text-align:center;" onclick="event.stopPropagation();">${bulkChk}</td>
           <td>
             ${p.image_url
               ? `<img src="${p.image_urls?.length ? p.image_urls[0] : p.image_url}" class="product-img-cell" style="width:32px;height:32px;" alt="${p.product_name}"/>`
@@ -2945,14 +2966,76 @@ function renderInvProducts(products) {
           </td>
         </tr>
         <tr id="staffVarRow_${p.product_id}" style="display:none;background:var(--surface);">
-          <td colspan="8" style="padding:0;">
+          <td colspan="9" style="padding:0;">
             <div class="staff-variant-content" style="padding:8px 16px;"></div>
           </td>
         </tr>`;
       }).join('')
-    : '<tr><td colspan="8" class="table-empty">No products found</td></tr>';
+    : '<tr><td colspan="9" class="table-empty">No products found</td></tr>';
   renderPager('staffInvPagination', products.length, staffInvPage, 'changeStaffInvPage');
+  updateBulkReqToolbar();
 }
+
+// ─── Bulk "Request Stock for Selected" (critical / out-of-stock rows) ───
+var _bulkReqSelected = (typeof _bulkReqSelected !== 'undefined') ? _bulkReqSelected : new Set();
+
+function toggleBulkReqSelect(productId, checked) {
+  if (checked) _bulkReqSelected.add(productId); else _bulkReqSelected.delete(productId);
+  updateBulkReqToolbar();
+}
+window.toggleBulkReqSelect = toggleBulkReqSelect;
+
+function clearBulkReqSelection() {
+  _bulkReqSelected.clear();
+  document.querySelectorAll('[id^="bulkReqChk_"]').forEach(cb => cb.checked = false);
+  updateBulkReqToolbar();
+}
+window.clearBulkReqSelection = clearBulkReqSelection;
+
+function updateBulkReqToolbar() {
+  const bar = document.getElementById('bulkReqToolbar');
+  const countEl = document.getElementById('bulkReqCount');
+  if (!bar) return;
+  const n = _bulkReqSelected.size;
+  bar.style.display = n > 0 ? 'flex' : 'none';
+  if (countEl) countEl.textContent = n;
+}
+
+// Opens the Request Stock modal pre-filled with one row per selected
+// critical/out product (each expanded per critical variant, same as
+// openRequestModalForProduct does for a single product) — no supplier
+// grouping needed since this is a staff stock request, not a PO.
+async function requestStockForSelected() {
+  if (!_bulkReqSelected.size) return;
+  const productIds = Array.from(_bulkReqSelected);
+  await openRequestModal();
+  document.getElementById('reqItems').innerHTML = '';
+  reqRowCount = 0;
+
+  const levelOf = q => {
+    q = Number(q);
+    if (q === 0) return 'out';
+    if (q > 0 && q <= 5) return 'critical';
+    return 'ok';
+  };
+
+  productIds.forEach(pid => {
+    const p = invProducts.find(pr => pr.product_id === pid);
+    if (!p) return;
+    const criticalVariants = (p.variant_stock || [])
+      .filter(v => (!staffBranchId || v.branch_id === staffBranchId) && levelOf(v.quantity) !== 'ok');
+    if (criticalVariants.length) {
+      criticalVariants.forEach(v => fillReqRowForProduct(p, v));
+    } else {
+      fillReqRowForProduct(p, null);
+    }
+  });
+
+  clearBulkReqSelection();
+  if (typeof _reqUpdateBtn === 'function') _reqUpdateBtn();
+  captureModalSnapshot('requestModal');
+}
+window.requestStockForSelected = requestStockForSelected;
 
 /* ── Read-only Product Details modal (Staff) ───────────── */
 function viewStaffProductDetails(productId) {
@@ -3148,13 +3231,72 @@ function sortOrdersHierarchy(orders) {
   });
 }
 
-function orderStatusSelectHtml(orderId, status, updateFnName) {
-  const locked = status === 'completed' || status === 'cancelled' || status === 'returned_failed';
-  const next   = ORDER_STATUS_FLOW[status];
-  const options = `<option value="${status}" selected>${ORDER_STATUS_LABELS[status] || status}</option>`
-    + (next ? `<option value="${next}">${ORDER_STATUS_LABELS[next]}</option>` : '');
-  return `<select class="filter-select" style="font-size:11px;padding:4px 8px;" ${locked ? 'disabled' : ''}
-      onchange="${updateFnName}('${orderId}', this.value, this)">${options}</select>`;
+// Per the Oct 25 adviser consultation: a free-form status dropdown is "not
+// supposed to be" the way an order moves forward — each step now needs its
+// own explicit trigger action instead. Pending -> Processing is already
+// system-driven (30-min auto-advance in app.py, or the "Move to Processing"
+// batch button above the table), so it gets no manual button here at all;
+// Processing -> Out for Delivery is the one step this row-level action still
+// drives, as a single contextual button. Everything past that (Delivered,
+// Not Delivered) already goes through the dedicated Deliveries-for-Today
+// actions, not this cell.
+function orderStatusActionHtml(order, updateFnName) {
+  const status = order.status;
+  if (status === 'pending') {
+    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>`;
+  }
+  const next = ORDER_STATUS_FLOW[status];
+  if (!next) return '';
+  return `<button class="btn btn-solid-green" style="font-size:11px;padding:5px 10px;white-space:nowrap;"
+      onclick="${updateFnName}('${order.order_id}', '${next}')">Mark ${ORDER_STATUS_LABELS[next]}</button>`;
+}
+
+// ─── Print Parcel Label ─────────────────────────────────
+// Only ever offered while an order is 'processing' (see renderStaffOrders) —
+// the window between stock being deducted and the order actually leaving,
+// which is when a label needs to go on the parcel. Opens a small print-only
+// window rather than reusing the receipt modal, since this is a shipping
+// label (recipient + items to pack), not a payment receipt.
+function printOrderLabel(order) {
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : (order.address || '');
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const phone    = order.customer?.phone_number || '';
+  const itemsHtml = (order.order_item || []).map(i => {
+    const opts = i.selected_options && Object.keys(i.selected_options).length
+      ? ' (' + Object.entries(i.selected_options).map(([k, v]) => `${k}: ${v}`).join(', ') + ')'
+      : '';
+    return `<tr><td style="padding:4px 0;">${i.product?.product_name || '—'}${opts}</td><td style="padding:4px 0;text-align:right;">x${i.qty}</td></tr>`;
+  }).join('');
+
+  const html = `
+    <html><head><title>Parcel Label — ${shortId(order.order_id)}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#111;}
+      h2{margin:0 0 4px;font-size:18px;}
+      .muted{color:#666;font-size:12px;}
+      .box{border:2px solid #111;border-radius:8px;padding:16px;margin-top:16px;}
+      table{width:100%;font-size:13px;margin-top:10px;border-top:1px solid #ccc;padding-top:6px;}
+      .label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;}
+    </style></head><body>
+      <h2>TEFC E-Commerce — Parcel Label</h2>
+      <div class="muted">Order #${shortId(order.order_id)} · ${(order.order_type || '').toUpperCase()}</div>
+      <div class="box">
+        <div class="label">Deliver To</div>
+        <div style="font-size:15px;font-weight:bold;margin:2px 0 6px;">${customer}</div>
+        <div>${addrString || 'No address provided'}</div>
+        ${order.address_note ? `<div class="muted">Note: ${order.address_note}</div>` : ''}
+        ${phone ? `<div class="muted">Phone: ${phone}</div>` : ''}
+        <table>${itemsHtml}</table>
+      </div>
+      <script>window.onload = () => { window.print(); };</script>
+    </body></html>`;
+  const win = window.open('', '_blank', 'width=480,height=640');
+  if (!win) { showToast('Allow pop-ups to print the parcel label.', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
 }
 
 function renderStaffOrders(orders) {
@@ -3183,10 +3325,14 @@ function renderStaffOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
-            ${orderStatusSelectHtml(o.order_id, o.status, 'updateOrderStatus')}
+            ${orderStatusActionHtml(o, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
+            ${o.status === 'processing' ? `
+            <button class="btn-icon" onclick="printOrderLabel(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Print Parcel Label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            </button>` : ''}
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
@@ -3373,10 +3519,14 @@ function renderStaffOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td style="display:flex;gap:6px;align-items:center;">
-            ${orderStatusSelectHtml(o.order_id, o.status, 'updateOrderStatus')}
+            ${orderStatusActionHtml(o, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
+            ${o.status === 'processing' ? `
+            <button class="btn-icon" onclick="printOrderLabel(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Print Parcel Label">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            </button>` : ''}
           </td>
         </tr>`).join('')
     : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
@@ -3662,15 +3812,11 @@ function applyStaffOrderFilters() {
 }
 window.filterStaffOrderType = filterStaffOrderType;
 
-async function updateOrderStatus(id, status, selectEl) {
-  // selectEl is the <select> itself (see orderStatusSelectHtml) — its value
-  // has already visually changed to `status` by the time onchange fires, so
-  // a cancel here needs to snap it back to the option it started on.
+async function updateOrderStatus(id, status) {
+  // Fired from the single contextual trigger button in orderStatusActionHtml
+  // (e.g. "Mark Out for Delivery") — no dropdown to snap back on cancel.
   const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
-  if (!confirmed) {
-    if (selectEl && selectEl.options.length) selectEl.value = selectEl.options[0].value;
-    return;
-  }
+  if (!confirmed) return;
   try {
     const res  = await fetch(`/api/staff/orders/${id}`, {
       method: 'PUT',
@@ -4210,9 +4356,13 @@ function buildReqProductAutocomplete(container, { inputId, hiddenId, onSelect })
   function showSuggestions(q) {
     const term = (q || '').toLowerCase().trim();
     list.innerHTML = '';
-    if (!term) { list.style.display = 'none'; return; }
-    const matches = invProducts.filter(p =>
-      (p.product_name || '').toLowerCase().includes(term)
+    // Per the Oct 25 adviser consultation: clicking into the field (or
+    // clearing it) should still show a browsable dropdown of products, not
+    // just filtered results once you start typing — so an empty term lists
+    // the first 10 products instead of hiding the list outright.
+    const matches = (term
+      ? invProducts.filter(p => (p.product_name || '').toLowerCase().includes(term))
+      : invProducts
     ).slice(0, 10);
     if (!matches.length) {
       list.innerHTML = `<div style="padding:9px 13px;font-size:13px;color:var(--text-muted);">No products found</div>`;
