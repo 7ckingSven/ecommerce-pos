@@ -17,7 +17,8 @@ branch ────────────────────────�
   │                                                                       
   ├──< inventory (from_branch / to_branch)
   ├──< stock_request >── staff
-  └──< purchase_order >──< po_item >── product
+  ├──< stock_transfer (from_branch / to_branch) >── staff (requested_by / resolved_by)
+  └──< purchase_order >──< po_item (supplier, requesting_branch_id per line item) >── product
 
 user ──< staff
 user ──< customer (role-shared: `user.role` is admin / staff / customer)
@@ -31,7 +32,7 @@ price_history (product_id, changed_by — no declared FK, joined by hand)
 login_sessions ──< user / staff / branch (Admin + Staff login audit trail)
 ```
 
-> **Source of truth note:** this document was reconciled against a live `pg_dump`-style export of the actual Supabase schema. A few tables and columns existed in production but weren't previously documented here — those are now included below (`sales_transaction`, `variant_stock`, and several columns on `order`, `product`, `payment`, `customer`, `user`). Anywhere this doc previously described something incorrectly (e.g. `otp_codes` keying, `cart.status` values), it's been corrected to match what the database actually enforces.
+> **Source of truth note:** this document was reconciled against a live `pg_dump`-style export of the actual Supabase schema. A few tables and columns existed in production but weren't previously documented here — those are now included below (`sales_transaction`, `variant_stock`, `stock_transfer`, and several columns on `order`, `product`, `payment`, `customer`, `user`, `po_item`). Anywhere this doc previously described something incorrectly (e.g. `otp_codes` keying, `cart.status` values), it's been corrected to match what the database actually enforces. **This latest reconciliation pass (Oct 26 2026) also surfaced a real, unfixed production bug — see the ⚠️ warning under the `order` table below.**
 
 ---
 
@@ -217,15 +218,19 @@ Stores all customer orders (online via mobile and walk-in via POS).
 | `shipping_fee` | DECIMAL(10,2) | DEFAULT 0 | Shipping fee for online orders |
 | `address` | TEXT | NULLABLE | Delivery address (pipe-separated PSGC format) |
 | `address_note` | TEXT | DEFAULT '' | Free-text delivery note/landmark |
-| `status` | VARCHAR | NOT NULL, DEFAULT 'pending', CHECK | `pending`, `processing`, `out_for_delivery`, `completed`, `cancelled` |
+| `status` | VARCHAR | NOT NULL, DEFAULT 'pending', CHECK ⚠️ | `pending`, `processing`, `out_for_delivery`, `not_remitted`, `completed`, `cancelled`, `returned_failed` — **see the ⚠️ constraint warning below the table** |
 | `cancel_reason` | TEXT | NULLABLE | Why the order was cancelled, when applicable |
 | `cancelled_by` | TEXT | NULLABLE | Who cancelled it (customer vs staff/admin) |
 | `is_offline_sync` | BOOLEAN | NOT NULL, DEFAULT false | True if this order was created by the POS's offline sale queue syncing back up after a connectivity outage, rather than placed live |
 | `processing_started_at` | TIMESTAMPTZ | NULLABLE | When the order entered `processing` — the stock-deduction-on-Processing business rule reads this to determine whether stock has already been taken for this order |
-| `dispatch_date` | DATE | NULLABLE | Which day's delivery batch this order belongs to, for the "Deliveries for Today" view |
-| `delivery_attempts` | INT | NOT NULL, DEFAULT 0 | Count of failed delivery attempts; after 3 the order auto-flips to Returned/Failed and stock is restored |
+| `dispatch_date` | DATE | NULLABLE | Which day's delivery batch this order belongs to. Also doubles as the retry-reschedule date: a non-final failed delivery attempt (1st/2nd of 3) sets this to **tomorrow's** date rather than clearing it, so the order surfaces in the "Scheduled for Retry" tab and reappears in "Out for Deliveries" on its own once that date arrives — no separate retry-queue table |
+| `delivery_attempts` | INT | NOT NULL, DEFAULT 0 | Count of failed delivery attempts; after 3 the order auto-flips to `returned_failed` and stock is restored |
+| `completed_at` | TIMESTAMPTZ | NULLABLE | Stamped the moment a Remit (single or bulk) succeeds and the order moves to `completed` — drives the "Delivered Today" tab and the Remittance summary's Actual/Remitted figures |
+| `last_attempt_at` | TIMESTAMPTZ | NULLABLE | Stamped on every Not-Delivered click (final or not) — the only timestamp recorded for a non-final failed attempt, since a retry reschedules `dispatch_date` rather than marking completion. Drives the "Failed Attempts Today" tab |
 | `date` | DATE | NOT NULL, DEFAULT CURRENT_DATE | Order date |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT now() | Precise timestamp for sorting |
+
+> ⚠️ **`status` CHECK constraint is out of date on the live database — found via this revision's live-schema audit, not yet fixed.** The live `pg_dump` export shows the constraint still only allows `'pending', 'processing', 'out_for_delivery', 'completed', 'cancelled'` — it was never widened for `'returned_failed'` (added in an earlier round, the delivery-retry logic) or `'not_remitted'` (added this round, the 5pm closing-hour auto-flag). This is the exact same class of bug as the `purchase_order.status` gap fixed earlier in this document (see the SQL section below) — any write of `returned_failed` or `not_remitted` is likely 500ing at the database level right now, even though the application code has been computing and sending both values. **This needs the same `DROP CONSTRAINT` / `ADD CONSTRAINT` fix run against the live Supabase project — see the SQL block below — before relying on the 3rd-failed-attempt or 5pm-closing-hour behavior in the live demo.**
 
 ---
 
@@ -322,7 +327,7 @@ Admin creates POs for restocking from suppliers.
 | `po_id` | UUID | **PK**, DEFAULT uuid_generate_v4() | Unique PO identifier |
 | `po_number` | VARCHAR | UNIQUE | PO number (e.g. PO-202608-001) |
 | `status` | VARCHAR | DEFAULT 'draft', CHECK | `draft`, `ordered`, `partially_received`, `received`, `cancelled` — **note:** `partially_received` was added to the database's `CHECK` constraint via a migration run after a production bug was found (see below); earlier database snapshots would reject that value |
-| `supplier` | VARCHAR | NULLABLE | Supplier name |
+| `supplier` | VARCHAR | NULLABLE, **legacy/unused** | Supplier name — originally set once per whole PO at creation time. **No longer written to** as of the "PO Unit Cost & Supplier moved to receive time" revision: a single PO can now contain items from different suppliers, so Supplier is tracked per line item instead (see `po_item.supplier` below). Column kept in the schema for backward compatibility with old PO rows; new POs leave it `NULL` |
 | `note` | TEXT | NULLABLE | PO notes |
 | `created_by` | UUID | NULLABLE, **FK** → staff.staff_id | Admin who created PO |
 | `created_at` | TIMESTAMP | DEFAULT now() | Date created |
@@ -339,9 +344,11 @@ Individual items within each purchase order.
 | `po_id` | UUID | NULLABLE, **FK** → purchase_order.po_id | Parent PO |
 | `product_id` | UUID | NULLABLE, **FK** → product.product_id | Product |
 | `quantity` | INT | NOT NULL | Units ordered from supplier |
-| `unit_cost` | DECIMAL(10,2) | DEFAULT 0 | Cost per unit |
+| `unit_cost` | DECIMAL(10,2) | DEFAULT 0 | Cost per unit — entered at **Receive & Distribute** time (not at PO creation); `0` until received |
 | `variant_options` | JSONB | NULLABLE | Which variant this line item is for, if the product has variants |
 | `received_quantity` | INT | NOT NULL, DEFAULT 0 | Cumulative units actually received so far (may be < quantity if the supplier shorted the order — PO stays `partially_received` until this reaches `quantity`) |
+| `requesting_branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | Which branch this line item is being restocked for — auto-fills the Receive & Distribute split so that branch gets its share by default; set from a stock request's branch when a PO item originates from "Use Approved Requests," otherwise left `NULL` and filled manually |
+| `supplier` | TEXT | NULLABLE | Supplier name for **this line item specifically** — entered at Receive & Distribute time (datalist-backed, sourced from `GET /api/admin/suppliers`). Different items on the same PO can have different suppliers; this is what replaced the old per-PO `purchase_order.supplier` field above |
 
 ---
 
@@ -409,6 +416,28 @@ Login/logout audit trail for Admin + Staff web accounts (not customers). Added 2
 | `user_agent` | TEXT | NULLABLE | Browser user-agent at login |
 
 > **Note:** purely additive — no existing table was altered to add this. Surfaced in Admin → User Management as a "Login Activity" view (`GET /api/admin/login-sessions`).
+
+---
+
+### 22. `stock_transfer`
+Staff-initiated branch-to-branch stock transfer request, requiring the **destination** branch to approve before stock actually moves. Distinct from Admin's own "Transfer Stock" action (instant, no approval needed — uses `inventory` directly, doesn't touch this table). This table existed in production but was missing from earlier versions of this document.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `transfer_id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique transfer identifier |
+| `product_id` | UUID | NOT NULL, **FK** → product.product_id | Product being transferred |
+| `variant_options` | JSONB | NULLABLE | Which variant, if the product has variants — null for a non-variant product |
+| `from_branch_id` | UUID | NOT NULL, **FK** → branch.branch_id | Source branch — always the requesting staff member's own branch, read server-side from session, never trusted from the request body |
+| `to_branch_id` | UUID | NOT NULL, **FK** → branch.branch_id | Destination branch |
+| `quantity` | INT | NOT NULL | Units requested |
+| `status` | TEXT | NOT NULL, DEFAULT 'pending' | `pending`, `approved`, `rejected`, `cancelled` |
+| `requested_by` | UUID | NULLABLE, **FK** → staff.staff_id | Staff who filed the request (source branch) |
+| `requested_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | When filed |
+| `resolved_by` | UUID | NULLABLE, **FK** → staff.staff_id | Staff who approved/rejected (destination branch) — null while still `pending` |
+| `resolved_at` | TIMESTAMPTZ | NULLABLE | When approved/rejected — null while still `pending` |
+| `rejection_note` | TEXT | NULLABLE | Optional note from the destination branch when rejecting |
+
+> **Note on stock timing:** stock numbers stay untouched at the source branch while a transfer is `pending` — they only move at the moment of approval (re-validated against the source branch's *current* stock at that moment, not just at request time). One `inventory` row is logged per approved transfer (`from_branch_id`/`to_branch_id` both set on the same row), matching Admin's own instant-transfer logging convention. The source branch can cancel its own request while still `pending`; the destination branch is the only one who can approve/reject.
 
 ---
 
@@ -556,6 +585,68 @@ CREATE TABLE price_history (
   changed_by_role  VARCHAR,
   created_at       TIMESTAMP NOT NULL DEFAULT now()
 );
+
+-- po_item — requesting branch, for the Receive & Distribute auto-fill
+-- (After-Consultation batch). Confirmed run on the live project.
+ALTER TABLE po_item ADD COLUMN IF NOT EXISTS requesting_branch_id UUID REFERENCES branch(branch_id);
+
+-- stock_transfer table (new) — staff-initiated branch-to-branch transfer,
+-- requiring the destination branch to approve before stock moves. Confirmed
+-- run on the live project.
+CREATE TABLE IF NOT EXISTS stock_transfer (
+  transfer_id     UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id      UUID NOT NULL REFERENCES product(product_id),
+  variant_options JSONB,
+  from_branch_id  UUID NOT NULL REFERENCES branch(branch_id),
+  to_branch_id    UUID NOT NULL REFERENCES branch(branch_id),
+  quantity        INTEGER NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | cancelled
+  requested_by    UUID REFERENCES staff(staff_id),
+  requested_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  resolved_by     UUID REFERENCES staff(staff_id),
+  resolved_at     TIMESTAMPTZ,
+  rejection_note  TEXT
+);
+
+-- order — Remittance-summary timestamps (Today's Remittance summary
+-- feature). Confirmed run on the live project.
+ALTER TABLE "order" ADD COLUMN IF NOT EXISTS completed_at   TIMESTAMPTZ;
+ALTER TABLE "order" ADD COLUMN IF NOT EXISTS last_attempt_at TIMESTAMPTZ;
+
+-- po_item — per-line-item supplier (PO Unit Cost & Supplier moved to
+-- receive time, third adviser-feedback round, 2026-10-26). Supplier is no
+-- longer a single per-PO value — different items on the same PO can come
+-- from different suppliers — so it moved from purchase_order.supplier
+-- (left in place, now unused/legacy) down to po_item.supplier.
+ALTER TABLE po_item ADD COLUMN IF NOT EXISTS supplier TEXT;
+
+-- order — widen the status CHECK constraint to allow 'returned_failed' and
+-- 'not_remitted'. Both values have been computed and written by the
+-- application for some time (returned_failed since the delivery-retry
+-- feature; not_remitted since the 5pm-closing-hour auto-flag added this
+-- round), but — same class of bug as the purchase_order fix above — the
+-- constraint itself was never updated to allow them. Found via this
+-- revision's live-schema audit. NOT YET RUN against the live Supabase
+-- project — this is the urgent one; until this runs, any order that
+-- reaches its 3rd failed delivery attempt or crosses the 5pm closing-hour
+-- cutoff while still out for delivery will 500 at the database level.
+-- Constraint name assumed from Postgres's default <table>_<column>_check
+-- auto-naming (same convention the purchase_order fix above already relies
+-- on) since it's inline/unnamed in the schema dump — if this DROP errors
+-- with "constraint does not exist", look up the real name first:
+--   SELECT conname FROM pg_constraint WHERE conrelid = '"order"'::regclass AND contype = 'c';
+ALTER TABLE public."order" DROP CONSTRAINT order_status_check;
+ALTER TABLE public."order"
+  ADD CONSTRAINT order_status_check
+  CHECK (status::text = ANY (ARRAY[
+    'pending'::character varying,
+    'processing'::character varying,
+    'out_for_delivery'::character varying,
+    'not_remitted'::character varying,
+    'completed'::character varying,
+    'cancelled'::character varying,
+    'returned_failed'::character varying
+  ]::text[]));
 ```
 
 > **Note on completeness:** the tables/columns documented above that aren't reflected in the migration log — `sales_transaction`, `variant_stock`, `product.staff_id`/`available_at`/`variants`, `order.cart_id`/`ref_no`/`address_note`/`cancel_reason`/`cancelled_by`/`is_offline_sync`/`processing_started_at`/`dispatch_date`/`delivery_attempts`, `payment`'s `cash_on_delivery` method, `customer.address_note`, `user.active_session_token`, `staff.position` — were already present in production before this changelog started being kept during the panel-revision work this term. Their original creation SQL isn't tracked here; they're documented above purely from the live schema audit.
@@ -573,18 +664,25 @@ CREATE TABLE price_history (
 | **Barcode scope** | `POST /api/admin/products/<id>/generate-barcode` takes a `scope`: `"product"` writes `product.barcode`; `"choice"` writes onto one `option_groups[].choices[]` entry (by group index + choice value); `"combo"` writes onto (or creates) one `variant_overrides[]` entry (matched by its `options` object). Lets a product, one variant choice, and one specific variant combination each carry their own distinct scannable code |
 | **GCash verification** | No manually-typed reference numbers. GCash payments (staff POS and mobile checkout) go through a PayMongo Payment Intent; `payment.ref_no` is only set after PayMongo confirms the intent status is `succeeded`, and `payment.status` is set to `paid` at that point |
 | **Payment methods** | `walk_in_cash`, `cash_on_delivery` (COD, online orders), or `gcash` |
-| **Order status flow** | pending → processing → out_for_delivery → completed (customer marks received) or cancelled |
-| **Delivery retry/return** | `order.delivery_attempts` increments on each failed delivery; at 3 the order is marked Returned/Failed and stock is restored. `order.dispatch_date` groups orders into a day's delivery batch for the Deliveries for Today view |
+| **Order status flow** | `pending` → `processing` → `out_for_delivery` → (`not_remitted` if still unresolved past 5pm Manila time, see below) → `completed` (Remit succeeds) or `returned_failed` (3rd failed delivery attempt); `cancelled` can happen before dispatch. **⚠️ `returned_failed` and `not_remitted` are not yet accepted by the live `order.status` CHECK constraint — see the warning under the `order` table above** |
+| **Process Now (per-order bypass)** | A `pending` order can be pushed into `processing` immediately via a "Process Now" button, instead of waiting for the 30-minute auto-advance — same underlying PUT route and `DAILY_PROCESSING_CAP` as the automatic path, so the daily cap is enforced either way |
+| **Delivery retry/return (courier-retry model)** | The courier physically holds the parcel across all 3 attempts rather than returning it to the warehouse between tries. `order.delivery_attempts` increments on each failed delivery and `order.last_attempt_at` is stamped every time, final or not. On a non-final failure (1st/2nd of 3), `order.dispatch_date` is rescheduled to **tomorrow** (not cleared) so the order shows in "Scheduled for Retry" and reappears in "Out for Deliveries" on its own once that date arrives — it never goes back to "To Dispatch". At the 3rd failed attempt, the order is marked `returned_failed` and stock is restored |
+| **Not Remitted — 5pm closing-hour auto-flag** | A lazy/opportunistic check (no background scheduler, same pattern as the Pending→Processing auto-advance) runs whenever admin/staff orders are fetched: any order still `out_for_delivery` with `dispatch_date` on or before today, past 5:00 PM Philippines time (fixed UTC+8, no DST), auto-flips to `not_remitted`. It stays visible in "Out for Deliveries" with a red badge and remains fully actionable (Remit / Not Delivered) the next working day |
+| **Bulk Remit / Bulk Not Delivered** | Multi-select checkboxes on the Out for Deliveries tab let admin/staff act on several orders at once. Bulk Remit skips the per-order typed-amount confirmation the single-order Remit modal requires — it trusts each order's server-computed grand total and completes every eligible selected order outright. Bulk Not Delivered applies the same per-order attempt-increment/courier-retry logic as the single-order action, to every checked order |
+| **Remittance summary (Expected vs Actual)** | "Expected Today" = grand total of every order dispatched today (`dispatch_date == today` AND status in `out_for_delivery`/`not_remitted`/`completed`) — fixed once dispatched, doesn't shrink as orders get remitted. "Remitted So Far" is derived directly from today's `completed` orders (not from a separate `completed_at`-only query, to avoid the two figures ever drifting apart). Shown on both Admin (store-wide) and Staff (branch-scoped) Deliveries cards, alongside headline counts (Total Deliveries Today, Completed/Remitted, Failed Attempts, Returned/Failed) and read-only Delivered Today / Failed Attempts Today / Returned-Failed Today tabs so every figure traces back to an actual order row |
 | **One-session-per-user** | `user.active_session_token` holds the current valid session; logging in elsewhere issues a new token and invalidates the old session |
 | **OTP expiry** | Mobile: 5 minutes, Web: 15 minutes |
 | **Web login MFA** | An unrecognized browser (no matching `mfa_device` row) must verify a 6-digit email code before login completes; once verified, that specific browser is trusted indefinitely via the `tefc_mfa_token` cookie |
 | **Stock deduction timing** | Deducted from `branch_stock` (and `variant_stock` for variant products) only once an order enters `processing` (tracked via `order.processing_started_at`), not at checkout/Pending |
-| **PO stock received** | Admin selects which branch(es) receive the stock per item (`po_item.received_quantity` tracks the cumulative total across batches); updates `branch_stock`, `variant_stock`, and logs an `inventory` row per branch distributed to |
+| **PO stock received** | Admin selects which branch(es) receive the stock per item (`po_item.received_quantity` tracks the cumulative total across batches); every received line requires `unit_cost > 0` and a non-empty `supplier` before it's accepted (see the PO Unit Cost & Supplier rule below). Updates `branch_stock`, `variant_stock`, and logs an `inventory` row per branch distributed to |
 | **Partial PO receiving** | A receive batch can arrive short of what was ordered. Each item's write is isolated, so one item failing to save can't roll back a sibling item that already succeeded. `purchase_order.status` is computed from the actual `received_quantity` totals after the batch (`received` only once every item's running total meets its ordered quantity, otherwise `partially_received`) — never just set blindly to `received`. A receipt is issued for the batch either way, not only on a full receive |
+| **Whole-number quantity validation** | Every direct quantity-entry endpoint (stock request creation, Add Stock, branch stock add, stock transfer creation, PO item quantities) rejects non-whole-number input server-side (decimals, non-numeric strings, booleans) rather than silently coercing it, mirrored client-side by a sanitizing input handler that strips non-digit characters as they're typed |
 | **Stock request batching** | Multiple items submitted together in one "Generate Stock Request" action share a `batch_id`; admin reviews and approves/rejects the whole batch as one action unless some items in it were already decided (e.g. a dropped connection left some approved and some pending), in which case only the still-pending ones remain actionable |
 | **Returns (post-completion)** | Separate from Cancel, which only applies before an order ships/completes. Admin/staff can process a return only on a `completed` order, per item, up to `qty - returned_qty` remaining. Restores `branch_stock`/`variant_stock`/`product.quantity` and logs an `inventory` row tagged `Return — Order #...` so Stock Movement History can tell it apart from a Sale or Cancellation. Each item's write is isolated (same per-item pattern as partial PO receiving) |
 | **product.quantity sync** | This aggregate field is kept in sync with the real `branch_stock` total on every stock-changing action — sale, cancel, return, and manual restock/transfer/adjustment (transfers are net-zero across branches, so `product.quantity` isn't touched for those) |
 | **Product creation — Status & Net Weight deferred** | Per panelist feedback at the mock defense: Net Weight is no longer required at product creation (it previously blocked Save). The Add Product modal hides both the Status display and the Net Weight field entirely — Status is auto-computed from stock and doesn't apply yet, and Net Weight can be filled in later. Both reappear in the Edit Product modal once the product exists. Products missing a net weight are visually flagged in the products table (tinted row + "⚠️ Needs weight" label) so admins know which ones still need it set via Edit |
-| **Base Price → PO Unit Cost auto-fill** | When a product with `base_price` set is selected in a Create PO row (or pulled in via "Use Approved Requests" / the branch-stock quick-create shortcut), Unit Cost auto-fills from `base_price` — still editable by hand. A product with no `base_price` yet is left blank rather than auto-filled with 0, so it doesn't read as "free" |
+| **PO Unit Cost & Supplier — entered at receive time, not creation** | ⚠️ **Supersedes the earlier "Base Price → PO Unit Cost auto-fill" rule** (removed in the third adviser-feedback round): Create PO no longer has Unit Cost or Supplier fields at all — every `po_item` is inserted with `unit_cost: 0` and `supplier: NULL`. Both are entered per line item on the **Receive & Distribute** modal instead (Unit Cost input + a Supplier `<datalist>` sourced from `GET /api/admin/suppliers`), since a single PO can source different products from different suppliers. The Create PO modal instead shows a color-coded stock-level tag (OUT OF STOCK/CRITICAL/LOW/OK) per item, and `po_item.requesting_branch_id` auto-fills the receiving split when the item came from an approved stock request |
+| **PO viewing/search** | Purchase Orders toolbar has a search box (matches PO number, note, or PO ID) plus the existing status/date filters, and a "View All" button that clears all three filters at once |
+| **Stock transfer (staff-initiated, destination-approved)** | Separate from Admin's own instant "Transfer Stock" action. A staff member at the source branch files a `stock_transfer` request; stock stays untouched until a staff member at the **destination branch** approves it (re-validating current source-branch stock at that exact moment) or rejects it with an optional note. The source branch can cancel its own request while still `pending`. One `inventory` row is logged per approved transfer, matching Admin's own transfer-logging convention |
 | **POS category/sub-category browsing** | Staff POS shows only the category level in the chip row (per panelist feedback). A category with sub-categories gets a hover/tap flyout listing them; picking a sub-category filters by category + sub-category together, picking the category chip itself filters by the whole category (unchanged from before) |
 | **Offline POS sales** | A sale made during a connectivity outage is queued locally and synced once connectivity returns; the resulting `order` row is marked `is_offline_sync = true` |

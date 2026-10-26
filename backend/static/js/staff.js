@@ -757,11 +757,11 @@ function badge(text) {
   const map = {
     active: 'green', inactive: 'gray', pending: 'yellow',
     processing: 'blue', completed: 'green', cancelled: 'red',
-    out_for_delivery: 'blue', returned_failed: 'red',
+    out_for_delivery: 'blue', returned_failed: 'red', not_remitted: 'red',
     online: 'blue', walk_in: 'green', paid: 'green', failed: 'red',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
   };
-  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text.replace(/_/g, ' ');
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text === 'not_remitted' ? 'Not Remitted' : text.replace(/_/g, ' ');
   return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 
@@ -3553,7 +3553,7 @@ function updateOrdersBadge(orders) {
 // action, which enforces the COD remittance-confirmation step.
 // Completed/cancelled/returned_failed orders are terminal and the dropdown locks.
 const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
-const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
 
 // Orders list hierarchy — active orders (pending/processing/out for delivery)
 // always float above Completed/Cancelled, and within the same tier the
@@ -3586,7 +3586,12 @@ function sortOrdersHierarchy(orders) {
 function orderStatusActionHtml(order, updateFnName) {
   const status = order.status;
   if (status === 'pending') {
-    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>`;
+    // Adviser follow-up (Oct 26 2026): give a manual bypass instead of
+    // only ever waiting out the 30-min auto-advance — same endpoint/cap
+    // enforcement as the auto-advance, just triggered per-order by hand.
+    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>
+      <button class="btn btn-outline-green" style="font-size:11px;padding:4px 9px;white-space:nowrap;" title="Move to Processing now instead of waiting"
+          onclick="${updateFnName}('${order.order_id}', 'processing')">Process Now</button>`;
   }
   const next = ORDER_STATUS_FLOW[status];
   if (!next) return '';
@@ -4218,14 +4223,16 @@ function staffFullDeliveryAddress(order) {
 function renderStaffDeliveriesForToday(orders) {
   if (!document.getElementById('staffDeliveriesAvailableBody')) return; // card not on this page
   const todayUTC = new Date().toISOString().slice(0, 10);
-  const ofd = orders.filter(o => o.status === 'out_for_delivery');
+  // 'not_remitted' folded in — see renderDeliveriesForToday in admin.js.
+  const ofd = orders.filter(o => o.status === 'out_for_delivery' || o.status === 'not_remitted');
   // Courier-retry model — see renderDeliveriesForToday in admin.js for
   // the full reasoning. "To Dispatch" (no dispatch_date) is now only
   // ever brand-new orders; a failed-and-rescheduled one shows under
   // "Scheduled for Retry" until its date arrives.
-  const available = ofd.filter(o => !o.dispatch_date);
-  const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
-  const scheduled  = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
+  const available = ofd.filter(o => o.status === 'out_for_delivery' && !o.dispatch_date);
+  const today      = ofd.filter(o => o.status === 'not_remitted'
+                        || (o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC));
+  const scheduled  = ofd.filter(o => o.status === 'out_for_delivery' && o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
 
   loadStaffRemittanceSummary();
 
@@ -4262,9 +4269,14 @@ function renderStaffDeliveriesForToday(orders) {
   }
 
   document.getElementById('staffDeliveriesTodayBody').innerHTML = today.length
-    ? today.map(o => `
+    ? today.map(o => {
+        const notRemittedBadge = o.status === 'not_remitted'
+          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(220,38,38,0.12);color:#dc2626;">NOT REMITTED</span>`
+          : '';
+        return `
         <tr>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td><input type="checkbox" class="staff-delivery-today-select-cb" value="${o.order_id}"/></td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${notRemittedBadge}</td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${staffFullDeliveryAddress(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
@@ -4273,9 +4285,61 @@ function renderStaffDeliveriesForToday(orders) {
             <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="staffOpenRemitModal('${o.order_id}')">Remit</button>
             <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="staffMarkOrderNotDelivered('${o.order_id}')">Not Delivered</button>
           </td>
-        </tr>`).join('')
-    : '<tr><td colspan="6" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
 }
+
+function staffToggleAllTodayDeliverySelections(cb) {
+  document.querySelectorAll('.staff-delivery-today-select-cb').forEach(el => { el.checked = cb.checked; });
+}
+window.staffToggleAllTodayDeliverySelections = staffToggleAllTodayDeliverySelections;
+
+// Bulk Remit/Not-Delivered — branch-scoped mirror of admin.js's
+// bulkRemitSelectedOrders/bulkNotDeliveredSelectedOrders. Bulk Remit skips
+// the per-order typed-amount entry (adviser follow-up, Oct 26 2026).
+async function staffBulkRemitSelectedOrders() {
+  const ids = Array.from(document.querySelectorAll('.staff-delivery-today-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one order to remit.', 'error'); return; }
+  const confirmed = await showConfirmDialog('Confirm Bulk Remit', `Mark ${ids.length} order(s) as remitted/completed? Each order's full computed total will be used — no amount entry needed.`);
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/staff/orders/remit-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Remitted ${body.completed.length} order(s)${body.skipped.length ? `, skipped ${body.skipped.length} (not eligible)` : ''}.`);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to bulk remit.', 'error');
+    }
+  } catch (e) { showToast('Error during bulk remit.', 'error'); }
+}
+window.staffBulkRemitSelectedOrders = staffBulkRemitSelectedOrders;
+
+async function staffBulkNotDeliveredSelectedOrders() {
+  const ids = Array.from(document.querySelectorAll('.staff-delivery-today-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one order to mark not delivered.', 'error'); return; }
+  const confirmed = await showConfirmDialog('Confirm Bulk Not Delivered', `Record a failed delivery attempt for ${ids.length} order(s)?`);
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/staff/orders/not-delivered-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const finalCount = (body.results || []).filter(r => r.final).length;
+      showToast(`Recorded ${body.results.length} attempt(s)${finalCount ? ` — ${finalCount} returned/failed` : ''}.`);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to bulk-record not-delivered.', 'error');
+    }
+  } catch (e) { showToast('Error during bulk not-delivered.', 'error'); }
+}
+window.staffBulkNotDeliveredSelectedOrders = staffBulkNotDeliveredSelectedOrders;
 
 // "Today's Remittance" strip — branch-scoped mirror of admin's
 // loadRemittanceSummary. See _remittance_summary in app.py.
@@ -4298,6 +4362,8 @@ async function loadStaffRemittanceSummary() {
       document.getElementById('staffDeliveriesCountCompleted').textContent = body.completed_count || 0;
       document.getElementById('staffDeliveriesCountFailed').textContent    = body.failed_attempts_count || 0;
       document.getElementById('staffDeliveriesCountReturned').textContent  = body.returned_count || 0;
+      const nrEl = document.getElementById('staffDeliveriesCountNotRemitted');
+      if (nrEl) nrEl.textContent = body.not_remitted_count || 0;
     }
 
     // Order-level breakdown tabs — branch-scoped mirror of admin's.
@@ -4945,7 +5011,7 @@ function addReqItemRow() {
     <div class="form-row-2" style="margin:0;">
       <div class="form-group" style="margin:0;">
         <label class="form-label" style="font-size:12px;">Quantity Needed <span class="req">*</span></label>
-        <input type="number" class="form-input req-qty" min="1" required placeholder="e.g. 20"/>
+        <input type="number" class="form-input req-qty" min="1" required placeholder="e.g. 20" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
       </div>
       <div class="form-group" style="margin:0;">
         <label class="form-label" style="font-size:12px;">Current Stock</label>

@@ -906,14 +906,14 @@ function badge(text, type) {
     active: 'green', inactive: 'gray',
     pending: 'yellow', processing: 'blue',
     completed: 'green', cancelled: 'red',
-    out_for_delivery: 'blue', returned_failed: 'red',
+    out_for_delivery: 'blue', returned_failed: 'red', not_remitted: 'red',
     online: 'blue', walk_in: 'green',
     paid: 'green', failed: 'red',
     admin: 'blue', staff: 'green', customer: 'gray',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
     draft: 'gray', ordered: 'blue', partially_received: 'yellow', received: 'green',
   };
-  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text.replace(/_/g, ' ');
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text === 'not_remitted' ? 'Not Remitted' : text.replace(/_/g, ' ');
   return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 
@@ -2921,49 +2921,26 @@ function updateBulkPOToolbar() {
   if (countEl) countEl.textContent = n;
 }
 
-async function generatePOForSelectedCritical() {
+// Used to group selections "one PO per supplier" — no longer needed
+// (Oct 26 2026 adviser follow-up: supplier is decided per item at Receive
+// time, not at Create PO), so this now opens a single draft with every
+// selected item in one go.
+function generatePOForSelectedCritical() {
   if (!_bulkPOSelected.size) return;
   const entries = Array.from(_bulkPOSelected).map(key => {
     const [productId, branchId] = key.split('|');
     return { productId, branchId };
   });
 
-  // Resolve each product's recorded supplier (first stock-in / first add
-  // stock), then group selections by supplier — "one PO per supplier."
-  const supplierByProduct = {};
-  await Promise.all([...new Set(entries.map(e => e.productId))].map(async pid => {
-    try {
-      const res = await fetch('/api/admin/products/' + pid + '/supplier');
-      const data = await res.json().catch(() => ({}));
-      supplierByProduct[pid] = (data && data.supplier) || '';
-    } catch (e) { supplierByProduct[pid] = ''; }
-  }));
-
-  const groups = {};
-  entries.forEach(e => {
-    const supplier = supplierByProduct[e.productId] || 'Unspecified Supplier';
-    (groups[supplier] = groups[supplier] || []).push(e);
-  });
-  const supplierNames = Object.keys(groups);
-  const firstSupplier = supplierNames[0];
-  const firstGroup = groups[firstSupplier];
-
-  // Consume just this supplier's group — the rest stay selected so clicking
-  // "Generate PO for Selected" again opens the next supplier's draft.
-  firstGroup.forEach(e => {
-    _bulkPOSelected.delete(e.productId + '|' + e.branchId);
-    const cb = document.getElementById('bulkPOChk_' + e.productId + '_' + e.branchId);
-    if (cb) cb.checked = false;
-  });
+  _bulkPOSelected.clear();
+  document.querySelectorAll('[id^="bulkPOChk_"]').forEach(cb => cb.checked = false);
   updateBulkPOToolbar();
 
   openCreatePOModal();
   const itemsWrap = document.getElementById('poItemsWrap');
   if (itemsWrap) itemsWrap.innerHTML = '';
-  const supplierInput = document.getElementById('poSupplier');
-  if (supplierInput) supplierInput.value = (firstSupplier === 'Unspecified Supplier') ? '' : firstSupplier;
 
-  firstGroup.forEach(e => {
+  entries.forEach(e => {
     const p = (allBranchProducts || []).find(pr => pr.product_id === e.productId);
     if (!p) return;
     addPOItemRow();
@@ -2975,16 +2952,9 @@ async function generatePOForSelectedCritical() {
       sel.value = p.product_id;
       if (typeof updatePORowStock === 'function') updatePORowStock(sel);
       if (typeof loadPORowVariants === 'function') loadPORowVariants(sel);
-      if (typeof autofillPORowCost === 'function') autofillPORowCost(sel);
-      if (typeof autofillPOSupplier === 'function') autofillPOSupplier(sel.value);
     }
   });
   if (typeof updatePOTotal === 'function') updatePOTotal();
-
-  if (supplierNames.length > 1 && typeof showToast === 'function') {
-    showToast('PO draft opened for "' + firstSupplier + '". ' + (supplierNames.length - 1)
-      + ' more supplier group(s) still selected — submit this one, then click "Generate PO for Selected" again.');
-  }
 }
 window.generatePOForSelectedCritical = generatePOForSelectedCritical;
 
@@ -3569,7 +3539,7 @@ function addStockItemRow() {
     </div>
     <div class="form-group" style="margin:0;">
       <label class="form-label" style="font-size:12px;">Quantity <span class="req">*</span></label>
-      <input type="number" class="form-input add-stock-qty" min="1" required placeholder="e.g. 10"/>
+      <input type="number" class="form-input add-stock-qty" min="1" required placeholder="e.g. 10" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
     </div>
   `;
   wrap.appendChild(row);
@@ -4145,7 +4115,12 @@ function fullDeliveryAddress(order) {
 function renderDeliveriesForToday(orders) {
   if (!document.getElementById('deliveriesAvailableBody')) return; // card not on this page
   const todayUTC = new Date().toISOString().slice(0, 10);
-  const ofd = orders.filter(o => o.status === 'out_for_delivery');
+  // 'not_remitted' folded in here too (adviser follow-up, Oct 26 2026 —
+  // closing-hour auto-flag, see _auto_flag_not_remitted_orders in app.py):
+  // it's the same "Out for Deliveries" order, just past the 5pm cutoff
+  // unresolved, so it stays in this same tab rather than getting a
+  // separate one — a NOT REMITTED badge below marks it out.
+  const ofd = orders.filter(o => o.status === 'out_for_delivery' || o.status === 'not_remitted');
   // Courier-retry model: a non-final failed attempt no longer clears
   // dispatch_date — it reschedules it to the next day instead (see
   // admin_mark_not_delivered in app.py). So "To Dispatch" (no
@@ -4154,9 +4129,10 @@ function renderDeliveriesForToday(orders) {
   // tab until its scheduled date actually arrives, at which point it
   // moves itself into "Out for Deliveries" with zero extra code — the
   // date comparison below just naturally matches it that day.
-  const available = ofd.filter(o => !o.dispatch_date);
-  const today      = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC);
-  const scheduled  = ofd.filter(o => o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
+  const available = ofd.filter(o => o.status === 'out_for_delivery' && !o.dispatch_date);
+  const today      = ofd.filter(o => o.status === 'not_remitted'
+                        || (o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC));
+  const scheduled  = ofd.filter(o => o.status === 'out_for_delivery' && o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
 
   loadRemittanceSummary();
 
@@ -4193,9 +4169,14 @@ function renderDeliveriesForToday(orders) {
   }
 
   document.getElementById('deliveriesTodayBody').innerHTML = today.length
-    ? today.map(o => `
+    ? today.map(o => {
+        const notRemittedBadge = o.status === 'not_remitted'
+          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(220,38,38,0.12);color:#dc2626;">NOT REMITTED</span>`
+          : '';
+        return `
         <tr>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
+          <td><input type="checkbox" class="delivery-today-select-cb" value="${o.order_id}"/></td>
+          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${notRemittedBadge}</td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${fullDeliveryAddress(o)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
@@ -4204,9 +4185,63 @@ function renderDeliveriesForToday(orders) {
             <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openRemitModal('${o.order_id}')">Remit</button>
             <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="markOrderNotDelivered('${o.order_id}')">Not Delivered</button>
           </td>
-        </tr>`).join('')
-    : '<tr><td colspan="6" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
+        </tr>`;
+      }).join('')
+    : '<tr><td colspan="7" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
 }
+
+function toggleAllTodayDeliverySelections(cb) {
+  document.querySelectorAll('.delivery-today-select-cb').forEach(el => { el.checked = cb.checked; });
+}
+window.toggleAllTodayDeliverySelections = toggleAllTodayDeliverySelections;
+
+// Bulk Remit/Not-Delivered (adviser follow-up, Oct 26 2026). Bulk Remit
+// intentionally skips the per-order typed-amount entry the single-order
+// Remit modal still requires (per the clarifying answer: "skip per-order
+// amount entry") — it trusts each order's server-computed grand total and
+// completes every eligible selected order in one request.
+async function bulkRemitSelectedOrders() {
+  const ids = Array.from(document.querySelectorAll('.delivery-today-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one order to remit.', 'error'); return; }
+  const confirmed = await showConfirmDialog('Confirm Bulk Remit', `Mark ${ids.length} order(s) as remitted/completed? Each order's full computed total will be used — no amount entry needed.`);
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/admin/orders/remit-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Remitted ${body.completed.length} order(s)${body.skipped.length ? `, skipped ${body.skipped.length} (not eligible)` : ''}.`);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to bulk remit.', 'error');
+    }
+  } catch (e) { showToast('Error during bulk remit.', 'error'); }
+}
+window.bulkRemitSelectedOrders = bulkRemitSelectedOrders;
+
+async function bulkNotDeliveredSelectedOrders() {
+  const ids = Array.from(document.querySelectorAll('.delivery-today-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one order to mark not delivered.', 'error'); return; }
+  const confirmed = await showConfirmDialog('Confirm Bulk Not Delivered', `Record a failed delivery attempt for ${ids.length} order(s)?`);
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/admin/orders/not-delivered-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      const finalCount = (body.results || []).filter(r => r.final).length;
+      showToast(`Recorded ${body.results.length} attempt(s)${finalCount ? ` — ${finalCount} returned/failed` : ''}.`);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to bulk-record not-delivered.', 'error');
+    }
+  } catch (e) { showToast('Error during bulk not-delivered.', 'error'); }
+}
+window.bulkNotDeliveredSelectedOrders = bulkNotDeliveredSelectedOrders;
 
 // "Today's Remittance" strip (adviser follow-up, same day as the delivery
 // notification categories). Expected = full amount due across every order
@@ -4236,6 +4271,8 @@ async function loadRemittanceSummary() {
       document.getElementById('deliveriesCountCompleted').textContent = body.completed_count || 0;
       document.getElementById('deliveriesCountFailed').textContent    = body.failed_attempts_count || 0;
       document.getElementById('deliveriesCountReturned').textContent  = body.returned_count || 0;
+      const nrEl = document.getElementById('deliveriesCountNotRemitted');
+      if (nrEl) nrEl.textContent = body.not_remitted_count || 0;
     }
 
     // Order-level breakdown — the "where did this amount come from" tabs
@@ -4613,7 +4650,7 @@ function viewOrderItems(order) {
 // action, which enforces the COD remittance-confirmation step. The row dropdown
 // still locks once an order reaches out_for_delivery (no 'next' option to offer).
 const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
-const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
 
 // Orders list hierarchy — active orders (pending/processing/out for delivery)
 // always float above Completed/Cancelled, and within the same tier the
@@ -4646,7 +4683,12 @@ function sortOrdersHierarchy(orders) {
 function orderStatusActionHtml(order, updateFnName) {
   const status = order.status;
   if (status === 'pending') {
-    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>`;
+    // Adviser follow-up (Oct 26 2026): give a manual bypass instead of
+    // only ever waiting out the 30-min auto-advance — same endpoint/cap
+    // enforcement as the auto-advance, just triggered per-order by hand.
+    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>
+      <button class="btn btn-outline-green" style="font-size:11px;padding:4px 9px;white-space:nowrap;" title="Move to Processing now instead of waiting"
+          onclick="${updateFnName}('${order.order_id}', 'processing')">Process Now</button>`;
   }
   const next = ORDER_STATUS_FLOW[status];
   if (!next) return '';
@@ -6917,12 +6959,34 @@ const PO_PAGE_SIZE   = 10;
 let srPage           = 1;
 const SR_PAGE_SIZE   = 10;
 let poItems          = []; // items in create PO modal
+let allSuppliers     = []; // distinct supplier names seen so far, for the Receive & Distribute dropdown
+
+// Fetches the distinct supplier names recorded across past receives, for
+// the Receive & Distribute "Supplier" field's dropdown (adviser follow-up,
+// Oct 26 2026 — a plain <datalist> so admin can still type a new one).
+// Cheap/best-effort — refetched each time the PO Detail modal opens so a
+// supplier typed in an earlier receive this session shows up right away.
+async function loadPOSuppliersDatalist() {
+  try {
+    const res = await fetch('/api/admin/suppliers');
+    if (!res.ok) return;
+    allSuppliers = await res.json();
+    const dl = document.getElementById('poSupplierDatalist');
+    if (dl) dl.innerHTML = allSuppliers.map(s => `<option value="${s}"></option>`).join('');
+  } catch (e) { /* best-effort — admin can still type a supplier by hand */ }
+}
 let srStatusFilterVal = '';
 let poStatusFilterVal = '';
 // PO Created Date filter — plain yyyy-mm-dd strings from the <input
 // type="date"> fields, or '' when that bound is unset.
 let poDateFromVal = '';
 let poDateToVal   = '';
+// Adviser follow-up (Oct 26 2026): "PO viewing scope — per request/PO number
+// per request, with an option to view All." Default is still the full list
+// (scoping by status/date already existed); this adds a plain text search
+// so a specific PO number or request/supplier note can be looked up on its
+// own, plus an explicit "View All" to clear every PO filter at once.
+let poSearchVal = '';
 
 
 // ─── PO & SR page change handlers ─────────────────────────────────────────
@@ -6949,9 +7013,45 @@ function applyPODateFilter(pos) {
     return d >= fromDate && d <= toDate;
   });
 }
-function getFilteredPOs() {
-  return applyPODateFilter(applyPOStatusFilter(allPOs));
+// Matches PO number (exact or partial), the originating request's note, or
+// requesting-branch name — so "search by request/PO number" covers a batch
+// created from an approved stock request as well as a manually-typed PO.
+function applyPOSearchFilter(pos) {
+  if (!poSearchVal) return pos;
+  const q = poSearchVal.trim().toLowerCase();
+  if (!q) return pos;
+  return pos.filter(po => {
+    const hay = [po.po_number, po.note, po.po_id]
+      .filter(Boolean).join(' ').toLowerCase();
+    return hay.includes(q);
+  });
 }
+function getFilteredPOs() {
+  return applyPOSearchFilter(applyPODateFilter(applyPOStatusFilter(allPOs)));
+}
+function filterPOBySearch(value) {
+  poSearchVal = value || '';
+  poPage = 1;
+  renderPOs(getFilteredPOs());
+}
+window.filterPOBySearch = filterPOBySearch;
+function viewAllPOs() {
+  poSearchVal   = '';
+  poStatusFilterVal = '';
+  poDateFromVal = '';
+  poDateToVal   = '';
+  const searchEl = document.getElementById('poNumberSearch');
+  const statusEl = document.getElementById('poStatusFilter');
+  const fromEl   = document.getElementById('poDateFrom');
+  const toEl     = document.getElementById('poDateTo');
+  if (searchEl) searchEl.value = '';
+  if (statusEl) statusEl.value = '';
+  if (fromEl)   fromEl.value   = '';
+  if (toEl)     toEl.value     = '';
+  poPage = 1;
+  renderPOs(getFilteredPOs());
+}
+window.viewAllPOs = viewAllPOs;
 function applyPODateRange() {
   poDateFromVal = document.getElementById('poDateFrom').value;
   poDateToVal   = document.getElementById('poDateTo').value;
@@ -7130,6 +7230,22 @@ function toggleSRGroupRow(groupKey, btnEl) {
 }
 window.toggleSRGroupRow = toggleSRGroupRow;
 
+// Supplier moved from the PO header to each line item (Oct 26 2026 adviser
+// follow-up — different products on one PO may not share a supplier, and
+// it isn't known until Receive time anyway). These helpers summarize the
+// per-item suppliers/costs for list/detail display.
+function _poSupplierLabel(items) {
+  const suppliers = [...new Set(items.map(i => i.supplier).filter(Boolean))];
+  if (!suppliers.length) return 'Pending receipt';
+  return suppliers.length === 1 ? suppliers[0] : `Mixed (${suppliers.length})`;
+}
+function _poCostSoFar(items) {
+  // Only items that have actually been received carry a real unit_cost —
+  // an item still awaiting receipt has unit_cost 0/null, so this is "cost
+  // recorded so far," not a pre-receipt estimate.
+  return items.reduce((s, i) => s + (Number(i.unit_cost) || 0) * Number(i.quantity), 0);
+}
+
 function renderPOs(pos) {
   const statusColors = { draft:'gray', ordered:'blue', received:'green', cancelled:'red' };
   if (poPage > Math.ceil(pos.length / PO_PAGE_SIZE)) poPage = 1;
@@ -7138,14 +7254,14 @@ function renderPOs(pos) {
   document.getElementById('poBody').innerHTML = paged.length
     ? paged.map(po => {
         const items    = po.po_item || [];
-        const total    = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
+        const total     = _poCostSoFar(items);
         const itemCount = items.length;
         return `
         <tr>
           <td><strong>${po.po_number || '—'}</strong></td>
-          <td>${po.supplier || '—'}</td>
+          <td>${_poSupplierLabel(items)}</td>
           <td>${itemCount} item${itemCount !== 1 ? 's' : ''}</td>
-          <td>${peso(total)}</td>
+          <td>${total > 0 ? peso(total) : '—'}</td>
           <td>${badge(po.status)}</td>
           <td>${toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</td>
           <td>
@@ -7170,10 +7286,10 @@ function exportPOListExcel() {
   const rows = [['PO Number', 'Supplier', 'Items', 'Total Cost', 'Status', 'Created']];
   pos.forEach(po => {
     const items = po.po_item || [];
-    const total = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
+    const total = _poCostSoFar(items);
     rows.push([
       po.po_number || '—',
-      po.supplier || '—',
+      _poSupplierLabel(items),
       items.length,
       Number(total).toFixed(2),
       (po.status || '').replace(/_/g, ' '),
@@ -7201,13 +7317,13 @@ function printPOList() {
 
   const rowsHtml = pos.length ? pos.map(po => {
     const items = po.po_item || [];
-    const total = items.reduce((s, i) => s + (Number(i.unit_cost) * Number(i.quantity)), 0);
+    const total = _poCostSoFar(items);
     return `
       <tr>
         <td>${po.po_number || '—'}</td>
-        <td>${po.supplier || '—'}</td>
+        <td>${_poSupplierLabel(items)}</td>
         <td>${items.length}</td>
-        <td>${peso(total)}</td>
+        <td>${total > 0 ? peso(total) : '—'}</td>
         <td>${(po.status || '').replace(/_/g, ' ')}</td>
         <td>${po.created_at ? toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' }) : '—'}</td>
       </tr>`;
@@ -7421,10 +7537,9 @@ async function submitReview(status) {
 
 function openCreatePOModal() {
   poItems = [];
-  document.getElementById('poSupplier').value = '';
   document.getElementById('poNote').value     = '';
   document.getElementById('poItemsWrap').innerHTML = '';
-  document.getElementById('poTotal').textContent   = '₱0.00';
+  document.getElementById('poTotal').textContent   = '0 item(s)';
   addPOItemRow(); // start with one row
   updatePOTotal(); // reset Create PO button to disabled until a row is filled in
   document.getElementById('createPOModalOverlay')?.classList.add('open');
@@ -7463,26 +7578,26 @@ function addPOItemRow() {
   const wrap = document.getElementById('poItemsWrap');
   const idx  = wrap.children.length;
   const row  = document.createElement('div');
-  row.style.cssText = 'display:grid;grid-template-columns:0.8fr 80px 160px 32px;gap:8px;margin-bottom:8px;align-items:center;';
+  // Unit Cost column removed (Oct 26 2026 adviser follow-up) — cost is now
+  // entered per item at Receive & Distribute time instead of at creation.
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);autofillPORowCost(this);autofillPOSupplier(this.value);">
+      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);">
         <option value="">Select product</option>
         ${allProducts.map(p => {
           const bs = p.branch_stock || [];
           const totalStock = bs.length
             ? bs.reduce((s, b) => s + Number(b.quantity), 0)
             : Number(p.quantity || 0);
-          const basePriceAttr = (p.base_price !== null && p.base_price !== undefined && p.base_price !== '') ? Number(p.base_price) : '';
-          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}' data-groups='${JSON.stringify(p.option_groups||[])}' data-base-price="${basePriceAttr}">${p.product_name}</option>`;
+          return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}' data-groups='${JSON.stringify(p.option_groups||[])}'>${p.product_name}</option>`;
         }).join('')}
       </select>
       <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
-      <span class="po-stock-info" style="font-size:12px;color:var(--text-muted);padding-left:4px;"></span>
+      <span class="po-stock-info" style="font-size:12px;padding-left:4px;"></span>
     </div>
-    <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="updatePOTotal()"/>
-    <input type="number" class="form-input po-cost" min="0" step="0.01" placeholder="Unit Cost" oninput="updatePOTotal()"/>
-    <button type="button" onclick="this.parentElement.remove();updatePOTotal();" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
+    <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()"/>
+    <button type="button" onclick="this.parentElement.remove();updatePOTotal();" title="Remove this item" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
   `;
   wrap.appendChild(row);
 }
@@ -7541,8 +7656,6 @@ function fillPORowForProduct(product, variantRow, requestId, qty) {
     sel.value = product.product_id;
     updatePORowStock(sel);
     loadPORowVariants(sel);
-    autofillPORowCost(sel);
-    autofillPOSupplier(product.product_id);
   }
 
   if (variantRow && variantRow.options) {
@@ -7557,7 +7670,7 @@ function fillPORowForProduct(product, variantRow, requestId, qty) {
     if (qtyEl) qtyEl.value = qty;
   }
 
-  row.querySelector('.po-cost')?.focus();
+  row.querySelector('.po-qty')?.focus();
 }
 window.fillPORowForProduct = fillPORowForProduct;
 
@@ -7701,8 +7814,21 @@ function useSelectedApprovedRequests() {
 }
 window.useSelectedApprovedRequests = useSelectedApprovedRequests;
 
+// Adviser follow-up (Oct 26 2026): show current stock / threshold level
+// right on the Create PO row — prevents double-ordering something that's
+// already well-stocked, and makes it obvious which products actually
+// need the order. Reuses the same ≤5 critical / ≤10 low tiering used
+// everywhere else in the app (Stock Alerts, Branch Stock Summary).
+function _poStockLevelTag(totalStock) {
+  const n = Number(totalStock);
+  if (n <= 0)  return { label: 'OUT OF STOCK', color: '#ef4444' };
+  if (n <= 5)  return { label: 'CRITICAL',      color: '#ef4444' };
+  if (n <= 10) return { label: 'LOW',           color: '#eab308' };
+  return { label: 'OK', color: '#16a34a' };
+}
+
 function updatePORowStock(sel) {
-  const opt  = sel.options[sel.selectedIndex];
+  const opt   = sel.options[sel.selectedIndex];
   const stock = opt?.dataset?.stock || '0';
   const bsRaw = opt?.dataset?.bs;
   let info    = `Current stock: ${stock} units`;
@@ -7714,60 +7840,26 @@ function updatePORowStock(sel) {
       }
     } catch {}
   }
+  const tag = _poStockLevelTag(stock);
   const row = sel.closest('[style]');
   const infoEl = row?.querySelector('.po-stock-info');
-  if (infoEl) infoEl.textContent = opt.value ? info : '';
-}
-
-// Auto-fills Unit Cost from the selected product's base_price (set in the
-// Add/Edit Product modal), the same idea as "Use Approved Requests"
-// auto-fill for qty/variant — still editable by hand afterward. Does NOT
-// fill in 0 for a product with no base_price set yet, since that would
-// read as "free" rather than "unknown".
-function autofillPORowCost(sel) {
-  const opt = sel.options[sel.selectedIndex];
-  const row = sel.closest('[style]');
-  const costEl = row?.querySelector('.po-cost');
-  if (!costEl) return;
-  const basePrice = opt?.dataset?.basePrice;
-  if (basePrice !== undefined && basePrice !== '') {
-    costEl.value = basePrice;
-    updatePOTotal();
+  if (infoEl) {
+    infoEl.innerHTML = opt.value
+      ? `<span style="color:${tag.color};font-weight:700;">${tag.label}</span> <span style="color:var(--text-muted);">— ${info}</span>`
+      : '';
   }
 }
-window.autofillPORowCost = autofillPORowCost;
-
-// Auto-fills the PO's (single, whole-order) Supplier field from whichever
-// supplier was recorded the FIRST time this product was ever stocked in
-// (Add Stock modal's new "Supplier Name" field -> inventory.supplier),
-// per the Oct 25 adviser consultation. Only fills it while the field is
-// still empty — doesn't overwrite a supplier the admin already typed, or
-// one a different product on this same draft already filled in.
-async function autofillPOSupplier(productId) {
-  if (!productId) return;
-  const supplierEl = document.getElementById('poSupplier');
-  if (!supplierEl || supplierEl.value.trim()) return;
-  try {
-    const res = await fetch(`/api/admin/products/${productId}/supplier`);
-    if (!res.ok) return;
-    const data = await res.json();
-    if (data.supplier && !supplierEl.value.trim()) supplierEl.value = data.supplier;
-  } catch (e) { /* best-effort — admin can still type it manually */ }
-}
-window.autofillPOSupplier = autofillPOSupplier;
 
 function updatePOTotal() {
   const rows  = document.getElementById('poItemsWrap').children;
-  let total   = 0;
+  let count   = 0;
   let hasValidItem = false;
   for (const row of rows) {
     const product = row.querySelector('.po-product')?.value;
     const qty     = parseFloat(row.querySelector('.po-qty')?.value || 0);
-    const cost    = parseFloat(row.querySelector('.po-cost')?.value || 0);
-    total += qty * cost;
-    if (product && qty > 0 && cost > 0) hasValidItem = true;
+    if (product && qty > 0) { hasValidItem = true; count++; }
   }
-  document.getElementById('poTotal').textContent = peso(total);
+  document.getElementById('poTotal').textContent = `${count} item(s)`;
 
   // Create PO button stays disabled until at least one row has a
   // selected product, a quantity, and a unit cost all filled in.
@@ -7777,9 +7869,9 @@ function updatePOTotal() {
 
 async function submitCreatePO() {
   const createBtn = document.querySelector('#createPOModal .btn-solid-green');
-  const supplier = document.getElementById('poSupplier').value.trim();
   const note     = document.getElementById('poNote').value.trim();
-  if (!supplier) { showToast('Supplier name is required.', 'error'); return; }
+  // Supplier is no longer collected here (Oct 26 2026 adviser follow-up) —
+  // it's entered per line item at Receive & Distribute time instead.
 
   const rows  = document.getElementById('poItemsWrap').children;
   const items = [];
@@ -7790,7 +7882,6 @@ async function submitCreatePO() {
   for (const row of rows) {
     const productId = row.querySelector('.po-product')?.value;
     const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
-    const unitCost  = parseFloat(row.querySelector('.po-cost')?.value || 0);
     if (productId && qty > 0) {
       // Get variant options for this row
       const variantSelects = row.querySelectorAll('.po-variant-opt');
@@ -7808,13 +7899,13 @@ async function submitCreatePO() {
         : null;
       const requestingBranchId = row.dataset.requestingBranchId
         || (sourceReq ? (sourceReq.branch_id || sourceReq.branch?.branch_id || null) : null);
-      items.push({ product_id: productId, quantity: qty, unit_cost: unitCost, unitCost, variant_options: Object.keys(variantOpts).length ? variantOpts : null, requesting_branch_id: requestingBranchId });
+      items.push({ product_id: productId, quantity: qty, variant_options: Object.keys(variantOpts).length ? variantOpts : null, requesting_branch_id: requestingBranchId });
       if (row.dataset.requestId) stockRequestIds.push(row.dataset.requestId);
     }
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
 
-  const confirmed = await showConfirmDialog('Confirm Create PO', `Create this purchase order with ${items.length} item(s)?`);
+  const confirmed = await showConfirmDialog('Confirm Create PO', `Create this purchase order with ${items.length} item(s)? Cost and supplier will be entered when it's received.`);
   if (!confirmed) return;
 
   // Validation passed — now (and only now) enter the loading state, so a
@@ -7824,21 +7915,19 @@ async function submitCreatePO() {
     const res = await fetch('/api/admin/purchase-orders', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ supplier, note, items, stock_request_ids: stockRequestIds }),
+      body: JSON.stringify({ note, items, stock_request_ids: stockRequestIds }),
     });
     if (res.ok) {
       const data = await res.json();
       showToast(`PO ${data.po_number} created!`);
       closeCreatePOModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
-      // Show digital receipt
+      // Show digital receipt — no cost/total yet, that's filled in at Receive.
       const receiptItems = items.map(i => ({
         product_name: allProducts.find(p => p.product_id === i.product_id)?.product_name || '—',
         quantity:     i.quantity,
-        unit_cost:    i.unitCost || i.unit_cost,
       }));
-      const receiptTotal = items.reduce((s, i) => s + (i.unitCost || i.unit_cost || 0) * i.quantity, 0);
-      showPOReceipt({ po_number: data.po_number, supplier, note, status: 'draft' }, receiptItems, receiptTotal);
+      showPOReceipt({ po_number: data.po_number, note, status: 'draft' }, receiptItems, null);
     } else {
       const err = await res.json();
       showToast(err.error || 'Failed to create PO.', 'error');
@@ -7854,16 +7943,23 @@ function showPOReceipt(po, items, total) {
   const dateStr = now.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
   const timeStr = now.toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' });
 
+  // Unit Cost/Subtotal columns are only meaningful once the PO has actually
+  // been received (cost is now entered at Receive time, not creation) —
+  // `total === null` signals the draft-creation call, which has no cost
+  // data at all yet.
+  const hasCost = total !== null && total !== undefined;
   const itemsHtml = items.map(i => `
     <tr>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);">
         ${i.product?.product_name || i.product_name || '—'}
         ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}</div>` : ''}
         ${i.branch_note ? `<div style="font-size:10px;color:var(--text-muted);">→ ${i.branch_note}</div>` : ''}
+        ${i.supplier ? `<div style="font-size:10px;color:var(--text-muted);">Supplier: ${i.supplier}</div>` : ''}
       </td>
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
+      ${hasCost ? `
       <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>
+      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>` : ''}
     </tr>`).join('');
 
   showModal(`
@@ -7880,9 +7976,9 @@ function showPOReceipt(po, items, total) {
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem;font-size:13px;">
         <div><span style="color:var(--text-muted);">PO Number</span><br/><strong>${po.po_number || '—'}</strong></div>
         <div><span style="color:var(--text-muted);">Status</span><br/>${badge(po.status)}</div>
-        <div><span style="color:var(--text-muted);">Supplier</span><br/><strong>${po.supplier || '—'}</strong></div>
         <div><span style="color:var(--text-muted);">Date</span><br/><strong>${dateStr} ${timeStr}</strong></div>
         ${po.note ? `<div style="grid-column:1/-1;"><span style="color:var(--text-muted);">Note</span><br/>${po.note}</div>` : ''}
+        ${!hasCost ? `<div style="grid-column:1/-1;font-size:12px;color:var(--text-muted);">Cost &amp; supplier are recorded per item when this PO is received.</div>` : ''}
       </div>
 
       <!-- Items Table -->
@@ -7891,17 +7987,18 @@ function showPOReceipt(po, items, total) {
           <tr style="background:var(--surface-2);">
             <th style="padding:8px;text-align:left;font-size:12px;">Product</th>
             <th style="padding:8px;text-align:center;font-size:12px;">Qty</th>
-            <th style="padding:8px;text-align:right;font-size:12px;">Unit Cost</th>
-            <th style="padding:8px;text-align:right;font-size:12px;">Subtotal</th>
+            ${hasCost ? `<th style="padding:8px;text-align:right;font-size:12px;">Unit Cost</th>
+            <th style="padding:8px;text-align:right;font-size:12px;">Subtotal</th>` : ''}
           </tr>
         </thead>
         <tbody>${itemsHtml}</tbody>
+        ${hasCost ? `
         <tfoot>
           <tr style="background:var(--surface-2);">
             <td colspan="3" style="padding:8px;text-align:right;font-weight:700;">TOTAL</td>
             <td style="padding:8px;text-align:right;font-weight:700;color:var(--g-400);font-size:15px;">${peso(total)}</td>
           </tr>
-        </tfoot>
+        </tfoot>` : ''}
       </table>
 
       <!-- Footer -->
@@ -7992,26 +8089,26 @@ async function loadPOLinkedInventory(po) {
 function openPODetail(poId) {
   const po = allPOs.find(p => p.po_id === poId);
   if (!po) return;
-  document.getElementById('poDetailTitle').textContent = `${po.po_number} — ${po.supplier}`;
-
   const items = po.po_item || [];
-  const total = items.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0);
+  document.getElementById('poDetailTitle').textContent = `${po.po_number} — ${_poSupplierLabel(items)}`;
+
+  const total = _poCostSoFar(items);
 
   document.getElementById('poDetailContent').innerHTML = `
     <div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:1rem;font-size:14px;">
-      <div><strong>Supplier:</strong> ${po.supplier}</div>
       <div><strong>Status:</strong> ${badge(po.status)}</div>
       <div><strong>Created:</strong> ${toUtcDate(po.created_at).toLocaleString('en-PH', { dateStyle: 'medium', timeStyle: 'short' })}</div>
       ${po.note ? `<div><strong>Note:</strong> ${po.note}</div>` : ''}
     </div>
     <table class="data-table" style="margin-bottom:1rem;">
-      <thead><tr><th>Product</th><th>Qty</th><th>Received</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
+      <thead><tr><th>Product</th><th>Qty</th><th>Received</th><th>Supplier</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
       <tbody>
         ${items.map(i => {
           const orderedQty  = Number(i.quantity);
           const receivedQty = Number(i.received_quantity || 0);
           const complete    = receivedQty >= orderedQty;
           const recvColor   = complete ? 'var(--g-400)' : receivedQty > 0 ? '#eab308' : 'var(--text-muted)';
+          const hasCost     = receivedQty > 0;
           return `
           <tr>
             <td>
@@ -8020,13 +8117,14 @@ function openPODetail(poId) {
             </td>
             <td>${orderedQty}</td>
             <td style="color:${recvColor};font-weight:600;">${receivedQty} / ${orderedQty}</td>
-            <td>${peso(i.unit_cost)}</td>
-            <td>${peso(Number(i.unit_cost) * orderedQty)}</td>
+            <td>${i.supplier || (hasCost ? '—' : '<span style="color:var(--text-muted);">Not received yet</span>')}</td>
+            <td>${hasCost ? peso(i.unit_cost) : '—'}</td>
+            <td>${hasCost ? peso(Number(i.unit_cost) * receivedQty) : '—'}</td>
           </tr>`;
         }).join('')}
         <tr style="font-weight:700;">
-          <td colspan="4" style="text-align:right;">Total</td>
-          <td>${peso(total)}</td>
+          <td colspan="5" style="text-align:right;">Total (received so far)</td>
+          <td>${total > 0 ? peso(total) : '—'}</td>
         </tr>
       </tbody>
     </table>
@@ -8073,6 +8171,16 @@ function openPODetail(poId) {
           </div>`;
       }
 
+      // Adviser follow-up (Oct 26 2026): show each branch's CURRENT stock
+      // next to its distribution input, so admin can see at a glance
+      // whether a branch actually needs this much (avoids overstocking one
+      // branch while another stays short).
+      const prodRecord  = allProducts.find(p => p.product_id === item.product_id);
+      const branchStockMap = {};
+      (prodRecord?.branch_stock || []).forEach(bs => {
+        branchStockMap[bs.branch_id || bs.branch?.branch_id] = bs.quantity;
+      });
+
       // If this item came from a staff stock request, requesting_branch_id
       // (set at Create-PO time — see submitCreatePO) names which branch
       // actually asked for it. Pre-fill that branch's distribution with the
@@ -8081,17 +8189,29 @@ function openPODetail(poId) {
       const branchInputs = allBranches.map(b => {
         const isRequestingBranch = item.requesting_branch_id && b.branch_id === item.requesting_branch_id;
         const defaultVal = isRequestingBranch ? outstanding : 0;
+        const currentStock = branchStockMap[b.branch_id];
         return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
           <label style="font-size:13px;font-weight:500;min-width:120px;">${b.branch_name}${isRequestingBranch ? ' <span style="color:var(--g-400);font-size:11px;">(requested)</span>' : ''}</label>
           <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="${defaultVal}"
             data-item="${idx}" data-branch="${b.branch_id}"
-            style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"
-            oninput="validatePODistribution()"/>
-          <span style="font-size:12px;color:var(--text-muted);">units</span>
+            oninput="this.value=this.value.replace(/[^0-9]/g,'');validatePODistribution()"
+            style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"/>
+          <span style="font-size:12px;color:var(--text-muted);">units ${currentStock !== undefined ? `<span style="color:var(--text-muted);">(currently ${currentStock})</span>` : ''}</span>
         </div>`;
       }).join('');
+
+      // Unit Cost + Supplier are entered HERE instead of at Create PO (Oct
+      // 26 2026 adviser follow-up) — different products on one PO may come
+      // from different suppliers, and the real cost isn't confirmed until
+      // the delivery actually arrives. Both still get a helpful prefill
+      // (base_price / the product's last-known supplier) that can be
+      // overridden, same as the old Create-PO autofill used to do.
+      const basePrice      = prodRecord?.base_price;
+      const costPrefill    = (basePrice !== null && basePrice !== undefined && basePrice !== '') ? Number(basePrice) : '';
+      const supplierPrefill = item.supplier || '';
+
       return `
-        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}">
+        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}" data-product-id="${item.product_id}">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
             <span style="font-size:14px;font-weight:600;">${productLabel}</span>
             <span style="font-size:12px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
@@ -8099,9 +8219,23 @@ function openPODetail(poId) {
             <div style="display:flex;align-items:center;gap:6px;">
               <label style="font-size:12px;color:var(--text-muted);">Receiving now:</label>
               <input type="number" id="recv_${idx}" min="0" max="${outstanding}" value="${outstanding}"
-                style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:13px;font-weight:600;"
-                oninput="validatePODistribution()"/>
+                oninput="this.value=this.value.replace(/[^0-9]/g,'');validatePODistribution()"
+                style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:13px;font-weight:600;"/>
               <span style="font-size:12px;color:var(--text-muted);">/ ${outstanding} outstanding</span>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
+            <div style="display:flex;align-items:center;gap:6px;">
+              <label style="font-size:12px;color:var(--text-muted);">Unit Cost:</label>
+              <input type="number" id="cost_${idx}" min="0" step="0.01" value="${costPrefill}" placeholder="0.00"
+                oninput="validatePODistribution()"
+                style="width:90px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"/>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
+              <label style="font-size:12px;color:var(--text-muted);">Supplier:</label>
+              <input type="text" id="supplier_${idx}" list="poSupplierDatalist" value="${supplierPrefill}" placeholder="e.g. Natasha Distributor"
+                oninput="validatePODistribution()"
+                style="flex:1;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"/>
             </div>
           </div>
           <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
@@ -8120,9 +8254,12 @@ function openPODetail(poId) {
       <div style="width:100%;max-height:380px;overflow-y:auto;padding-right:2px;">
         <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
         ${itemRows}
-      </div>`;
+      </div>
+      <datalist id="poSupplierDatalist">${(allSuppliers || []).map(s => `<option value="${s}"></option>`).join('')}</datalist>`;
     footer.innerHTML += `
       <button id="markReceivedBtn" class="btn btn-solid-green" disabled onclick="submitPOReceive('${poId}')">Save Receipt ✓</button>`;
+
+    loadPOSuppliersDatalist();
 
     // Run initial validation to set counter labels
     setTimeout(validatePODistribution, 0);
@@ -8211,6 +8348,20 @@ function validatePODistribution() {
     // (e.g. receiving 20, distributed only 10) would silently lose track
     // of the other 10 units, so it's rejected the same as over-allocating.
     if (!skipped && !matches) allValid = false;
+
+    // Cost & Supplier are now entered HERE, not at Create PO (Oct 26 2026
+    // adviser follow-up) — require both for any line actually being
+    // received this batch, so a receipt never saves with an unknown cost
+    // or supplier silently defaulting to 0/blank.
+    if (!skipped) {
+      var costInput     = document.getElementById('cost_' + idx);
+      var supplierInput = document.getElementById('supplier_' + idx);
+      var costOk     = costInput && parseFloat(costInput.value) > 0;
+      var supplierOk = supplierInput && supplierInput.value.trim().length > 0;
+      if (costInput)     costInput.style.borderColor     = costOk     ? 'var(--border)' : '#ef4444';
+      if (supplierInput) supplierInput.style.borderColor = supplierOk ? 'var(--border)' : '#ef4444';
+      if (!costOk || !supplierOk) allValid = false;
+    }
   });
 
   if (btn) btn.disabled = !allValid || !anyReceiving;
@@ -8235,7 +8386,9 @@ async function submitPOReceive(poId) {
       var qty = parseInt(document.getElementById('dist_' + idx + '_' + b.branch_id)?.value || '0');
       if (qty > 0) branches.push({ branch_id: b.branch_id, quantity: qty });
     });
-    itemsPayload.push({ po_item_id: item.po_item_id, product_id: item.product_id, received_quantity: recvQty, branches: branches });
+    var unitCost = parseFloat(document.getElementById('cost_' + idx)?.value || '0');
+    var supplier = (document.getElementById('supplier_' + idx)?.value || '').trim();
+    itemsPayload.push({ po_item_id: item.po_item_id, product_id: item.product_id, received_quantity: recvQty, branches: branches, unit_cost: unitCost, supplier: supplier });
   });
 
   var btn = document.getElementById('markReceivedBtn');
@@ -8297,7 +8450,8 @@ async function submitPOReceive(poId) {
             product_name:    srcItem.product?.product_name,
             variant_options: srcItem.variant_options,
             quantity:        e.received_quantity,
-            unit_cost:       srcItem.unit_cost,
+            unit_cost:       e.unit_cost,
+            supplier:        e.supplier,
             branch_note:     noteText,
           };
         });
@@ -8342,11 +8496,11 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
       closePODetailModal();
       invalidateSection('purchase_orders'); await loadPurchaseOrders();
       if (status === 'received') { invalidateSection('inventory'); loadInventory(); }
-      // Show receipt when marked as ordered or received
-      if (status === 'ordered' || status === 'received') {
-        const items   = po?.po_item || [];
-        const total   = items.reduce((s, i) => s + Number(i.unit_cost) * Number(i.quantity), 0);
-        showPOReceipt({ ...po, status }, items, total);
+      // Show receipt when marked as ordered (cost/supplier aren't known
+      // yet at this stage — entered later at Receive & Distribute).
+      if (status === 'ordered') {
+        const items = po?.po_item || [];
+        showPOReceipt({ ...po, status }, items, null);
       }
     } else {
       const err = await res.json();

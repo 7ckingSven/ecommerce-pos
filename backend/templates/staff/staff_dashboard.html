@@ -464,7 +464,7 @@
           <div class="form-row-2">
             <div class="form-group">
               <label class="form-label">Quantity to Transfer <span class="req">*</span></label>
-              <input type="number" id="staffTransferQty" class="form-input" min="1" required/>
+              <input type="number" id="staffTransferQty" class="form-input" min="1" required oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
             </div>
             <div class="form-group">
               <label class="form-label">From Branch</label>
@@ -529,6 +529,7 @@
           <option value="pending">Pending</option>
           <option value="processing">Processing</option>
           <option value="out_for_delivery">Out for Delivery</option>
+          <option value="not_remitted">Not Remitted</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
           <option value="returned_failed">Returned / Failed</option>
@@ -586,6 +587,7 @@
           <span style="color:#16a34a;">Completed/Remitted: <strong id="staffDeliveriesCountCompleted">0</strong></span>
           <span style="color:#d97706;">Failed Attempts: <strong id="staffDeliveriesCountFailed">0</strong></span>
           <span style="color:#dc2626;">Returned/Failed: <strong id="staffDeliveriesCountReturned">0</strong></span>
+          <span style="color:#dc2626;">Not Remitted (past 5pm): <strong id="staffDeliveriesCountNotRemitted">0</strong></span>
         </div>
         <div id="staffRemittanceSummaryStrip" style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;display:flex;gap:1.5rem;flex-wrap:wrap;">
           <span>Expected Today: <span id="staffRemitExpectedTotal">₱0.00</span> <span id="staffRemitExpectedCount" style="font-weight:400;color:var(--text-muted);"></span></span>
@@ -626,12 +628,19 @@
         </div>
 
         <div id="staffDeliveriesTodayPanel" style="padding:1rem;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow.</span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="staffBulkRemitSelectedOrders()" title="Complete every selected order, trusting each order's computed total — no amount typing needed">Bulk Remit Selected</button>
+              <button class="btn btn-cancel" style="font-size:12px;padding:6px 14px;" onclick="staffBulkNotDeliveredSelectedOrders()">Bulk Not Delivered Selected</button>
+            </div>
+          </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
+                <tr><th style="width:30px;"><input type="checkbox" id="staffDeliveriesTodaySelectAll" onchange="staffToggleAllTodayDeliverySelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
               </thead>
-              <tbody id="staffDeliveriesTodayBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+              <tbody id="staffDeliveriesTodayBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>

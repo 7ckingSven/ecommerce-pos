@@ -545,6 +545,7 @@
           <option value="pending">Pending</option>
           <option value="processing">Processing</option>
           <option value="out_for_delivery">Out for Delivery</option>
+          <option value="not_remitted">Not Remitted</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
           <option value="returned_failed">Returned / Failed</option>
@@ -602,6 +603,7 @@
           <span style="color:#16a34a;">Completed/Remitted: <strong id="deliveriesCountCompleted">0</strong></span>
           <span style="color:#d97706;">Failed Attempts: <strong id="deliveriesCountFailed">0</strong></span>
           <span style="color:#dc2626;">Returned/Failed: <strong id="deliveriesCountReturned">0</strong></span>
+          <span style="color:#dc2626;">Not Remitted (past 5pm): <strong id="deliveriesCountNotRemitted">0</strong></span>
         </div>
         <div id="remittanceSummaryStrip" style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;display:flex;gap:1.5rem;flex-wrap:wrap;">
           <span>Expected Today: <span id="remitExpectedTotal">₱0.00</span> <span id="remitExpectedCount" style="font-weight:400;color:var(--text-muted);"></span></span>
@@ -644,12 +646,19 @@
 
         <!-- Today's Batch: dispatched for today, awaiting Delivered/Not Delivered -->
         <div id="deliveriesTodayPanel" style="padding:1rem;display:none;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+            <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow.</span>
+            <div style="display:flex;gap:8px;">
+              <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="bulkRemitSelectedOrders()" title="Complete every selected order, trusting each order's computed total — no amount typing needed">Bulk Remit Selected</button>
+              <button class="btn btn-cancel" style="font-size:12px;padding:6px 14px;" onclick="bulkNotDeliveredSelectedOrders()">Bulk Not Delivered Selected</button>
+            </div>
+          </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
+                <tr><th style="width:30px;"><input type="checkbox" id="deliveriesTodaySelectAll" onchange="toggleAllTodayDeliverySelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
               </thead>
-              <tbody id="deliveriesTodayBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
+              <tbody id="deliveriesTodayBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>
@@ -725,7 +734,8 @@
       <!-- Purchase Orders -->
       <div class="section-toolbar" style="margin-bottom:1rem;">
         <h3 style="font-size:15px;font-weight:700;color:var(--text-primary);">Purchase Orders</h3>
-        <select class="filter-select" id="poStatusFilter" onchange="filterPOByStatus(this.value)" style="margin-left:auto;font-size:12px;">
+        <input type="text" id="poNumberSearch" class="form-input" placeholder="Search PO # / request..." style="margin-left:auto;width:190px;padding:6px 10px;font-size:12px;" oninput="filterPOBySearch(this.value)" title="Look up one specific PO number or request note"/>
+        <select class="filter-select" id="poStatusFilter" onchange="filterPOByStatus(this.value)" style="font-size:12px;">
           <option value="">All Status</option>
           <option value="draft">Draft</option>
           <option value="ordered">Ordered</option>
@@ -737,6 +747,7 @@
         <input type="date" id="poDateFrom" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applyPODateRange()"/>
         <span style="font-size:12px;color:var(--text-muted);">to</span>
         <input type="date" id="poDateTo" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applyPODateRange()"/>
+        <button class="btn btn-cancel" onclick="viewAllPOs()" style="font-size:12px;padding:6px 12px;" title="Clear search, status, and date filters — show every PO">View All</button>
         <button class="btn btn-cancel" onclick="resetPODateFilter()" style="font-size:12px;padding:6px 12px;" title="Clear the PO Created Date filter">Reset</button>
         <button class="btn btn-outline-green" onclick="openApprovedRequestsModal()" style="position:relative;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
@@ -1512,7 +1523,7 @@
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Quantity to Transfer <span class="req">*</span></label>
-            <input type="number" id="transferQty" class="form-input" min="1" required/>
+            <input type="number" id="transferQty" class="form-input" min="1" required oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
           </div>
           <div class="form-group">
             <label class="form-label">From Branch <span class="req">*</span></label>
@@ -1566,7 +1577,7 @@
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Quantity to Deduct <span class="req">*</span></label>
-            <input type="number" id="adjustQty" class="form-input" min="1" required placeholder="e.g. 5"/>
+            <input type="number" id="adjustQty" class="form-input" min="1" required placeholder="e.g. 5" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
           </div>
           <div class="form-group">
             <label class="form-label">Reason <span class="req">*</span></label>
@@ -1729,12 +1740,14 @@
       </button>
     </div>
     <div class="modal-body">
+      <!-- Supplier + Unit Cost removed from PO creation per adviser
+           follow-up (Oct 26 2026) — out of scope this early; both are now
+           entered per line item at Receive & Distribute time instead,
+           since different products on the same PO may not share a
+           supplier and the real cost isn't known/confirmed until the
+           delivery actually arrives. -->
       <div class="form-row-2">
-        <div class="form-group">
-          <label class="form-label">Supplier Name <span class="req">*</span></label>
-          <input type="text" id="poSupplier" class="form-input" required placeholder="e.g. Natasha Distributor"/>
-        </div>
-        <div class="form-group">
+        <div class="form-group" style="grid-column:1/-1;">
           <label class="form-label">Note</label>
           <input type="text" id="poNote" class="form-input" placeholder="Optional remarks..."/>
         </div>
@@ -1751,9 +1764,9 @@
         <button type="button" class="btn-text" onclick="addPOItemRow()" style="margin-top:4px;">+ Add Item</button>
       </div>
 
-      <!-- Total -->
-      <div style="text-align:right;font-size:15px;font-weight:700;color:var(--text-primary);padding:9px 0;border-top:1px solid var(--border);">
-        Total: <span id="poTotal">₱0.00</span>
+      <!-- Item count (no cost total — unit cost is entered at Receive time) -->
+      <div style="text-align:right;font-size:13px;font-weight:600;color:var(--text-muted);padding:9px 0;border-top:1px solid var(--border);">
+        <span id="poTotal">0 item(s)</span> &middot; cost is recorded at Receive &amp; Distribute
       </div>
 
       <div class="modal-footer">

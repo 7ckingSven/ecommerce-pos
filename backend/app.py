@@ -892,6 +892,44 @@ def _auto_advance_processing_orders():
     except Exception as e:
         print(f'Auto-advance (processing -> out_for_delivery) warning: {e}')
 
+# Asia/Manila has no DST, so a fixed UTC+8 offset is accurate year-round —
+# no tz database dependency needed for this one lazy check.
+PH_UTC_OFFSET_HOURS = 8
+# "Define closing hours for delivery (5pm)" — adviser follow-up, Oct 26 2026.
+CLOSING_HOUR_PH = 17
+
+def _ph_now():
+    return datetime.utcnow() + timedelta(hours=PH_UTC_OFFSET_HOURS)
+
+def _auto_flag_not_remitted_orders():
+    """Lazy/opportunistic closing-hour check (adviser follow-up, Oct 26
+    2026: "Define closing hours for delivery (5 pm). Automatically set
+    status to 'not remitted' via batch trigger for remittance after
+    closing hour."). Same no-scheduler pattern as
+    _auto_advance_pending_orders/_auto_advance_processing_orders above —
+    runs inline whenever admin or staff orders are fetched.
+
+    Any order still 'out_for_delivery' with a dispatch_date on or before
+    today (Asia/Manila) gets flipped to the distinct 'not_remitted' status
+    once it's past CLOSING_HOUR_PH local time. It was expected to be
+    remitted today and wasn't, so — per the clarifying answer on this
+    point — it becomes its own status (separate from returned_failed or
+    completed) that needs a follow-up Remit or Not Delivered action,
+    rather than silently staying indistinguishable from an order that's
+    simply still out on time."""
+    try:
+        ph_now = _ph_now()
+        if ph_now.hour < CLOSING_HOUR_PH:
+            return
+        today_ph = ph_now.strftime('%Y-%m-%d')
+        res = supabase.table('order').select('order_id, dispatch_date').eq('status', 'out_for_delivery').execute()
+        due_ids = [o['order_id'] for o in (res.data or [])
+                   if o.get('dispatch_date') and str(o['dispatch_date'])[:10] <= today_ph]
+        if due_ids:
+            supabase.table('order').update({'status': 'not_remitted'}).in_('order_id', due_ids).execute()
+    except Exception as e:
+        print(f'Auto-flag (out_for_delivery -> not_remitted) warning: {e}')
+
 
 # How long a pending ONLINE order gets before it's auto-moved into
 # 'processing' — gives the customer a window to cancel (see
@@ -2806,7 +2844,8 @@ def staff_create_stock_request():
         data            = request.get_json()
         staff_id        = session.get('staff_id')
         product_id      = data.get('product_id')
-        quantity_needed = int(data.get('quantity_needed', 0))
+        quantity_needed, qty_err = _require_int_qty(data.get('quantity_needed', 0), 'Quantity needed')
+        if qty_err: return qty_err
         note            = data.get('note', '')
         branch_id       = data.get('branch_id')
         variant_options = data.get('variant_options') or None
@@ -2891,6 +2930,20 @@ def admin_get_product_supplier(product_id):
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/admin/suppliers', methods=['GET'])
+@admin_required
+def admin_get_suppliers():
+    """Distinct supplier names recorded so far (Add Stock + PO receiving
+    both write to inventory.supplier) — feeds the Receive & Distribute
+    modal's Supplier dropdown (Oct 26 2026 adviser follow-up: a plain
+    <datalist> so a new supplier can still be typed in)."""
+    try:
+        res = supabase.table('inventory').select('supplier').not_.is_('supplier', 'null').execute()
+        names = sorted({(r.get('supplier') or '').strip() for r in (res.data or []) if (r.get('supplier') or '').strip()})
+        return jsonify(names), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/purchase-orders', methods=['GET'])
 @admin_required
 def admin_get_purchase_orders():
@@ -2905,11 +2958,17 @@ def admin_get_purchase_orders():
 @app.route('/api/admin/purchase-orders', methods=['POST'])
 @admin_required
 def admin_create_purchase_order():
+    """Adviser follow-up (Oct 26 2026): Supplier and Unit Cost are no
+    longer collected here — out of scope this early, since the real cost
+    isn't confirmed until the delivery arrives and different products on
+    one PO may come from different suppliers. Both are now entered per
+    line item at Receive & Distribute time (see admin_update_purchase_order
+    below), so a freshly-created PO has no supplier and unit_cost 0 on
+    every item until it's actually received."""
     try:
         data              = request.get_json()
-        supplier          = data.get('supplier', '').strip()
         note              = data.get('note', '')
-        items             = data.get('items', [])  # [{product_id, quantity, unit_cost}]
+        items             = data.get('items', [])  # [{product_id, quantity}]
         # Approved stock requests this PO was built from (via the admin's
         # "Use Approved Requests" picker) — best-effort marked converted_to_po
         # below so they drop off that list and don't get pulled into a
@@ -2917,8 +2976,13 @@ def admin_create_purchase_order():
         stock_request_ids = data.get('stock_request_ids', []) or []
         staff_id          = session.get('staff_id')
 
-        if not supplier or not items:
-            return jsonify({'error': 'Supplier and items are required.'}), 400
+        if not items:
+            return jsonify({'error': 'At least one item is required.'}), 400
+
+        for item in items:
+            qty, qty_err = _require_int_qty(item.get('quantity'), 'Quantity')
+            if qty_err: return qty_err
+            item['quantity'] = qty
 
         # Generate PO number
         count   = supabase.table('purchase_order').select('po_id', count='exact').execute()
@@ -2926,7 +2990,6 @@ def admin_create_purchase_order():
 
         po_res  = supabase.table('purchase_order').insert({
             'po_number':  po_num,
-            'supplier':   supplier,
             'note':       note,
             'status':     'draft',
             'created_by': staff_id,
@@ -2934,13 +2997,13 @@ def admin_create_purchase_order():
 
         po_id = po_res.data[0]['po_id']
 
-        # Insert PO items
+        # Insert PO items — unit_cost/supplier are filled in later, at Receive.
         for item in items:
             supabase.table('po_item').insert({
                 'po_id':                  po_id,
                 'product_id':             item['product_id'],
-                'quantity':               int(item['quantity']),
-                'unit_cost':              float(item.get('unit_cost', 0)),
+                'quantity':               item['quantity'],
+                'unit_cost':              0,
                 'variant_options':        item.get('variant_options') or None,
                 'received_quantity':      0,
                 # Set only when this item came from a staff stock request —
@@ -2965,8 +3028,12 @@ def admin_create_purchase_order():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def _po_add_branch_stock(supabase, session, product_id, branch_id, qty_added, variant_options, po_label):
-    """Add qty_added to branch_stock (upsert), log to inventory, update variant_stock, auto-activate product."""
+def _po_add_branch_stock(supabase, session, product_id, branch_id, qty_added, variant_options, po_label, supplier=None):
+    """Add qty_added to branch_stock (upsert), log to inventory, update variant_stock, auto-activate product.
+    `supplier` (Oct 26 2026 adviser follow-up — restock price/supplier are
+    now recorded at the moment of receiving, per line item) is logged onto
+    the inventory row alongside the restock, same column Add Stock already
+    uses (inventory.supplier)."""
     import time as _t
     # Upsert branch_stock
     bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', branch_id).execute()
@@ -2988,6 +3055,7 @@ def _po_add_branch_stock(supabase, session, product_id, branch_id, qty_added, va
         'quantity_after':  qty_after,
         'to_branch_id':    branch_id,
         'variant_options': variant_options if variant_options else None,
+        'supplier':        supplier or None,
         'note':            f'PO received — {po_label}',
     }).execute()
 
@@ -3113,6 +3181,18 @@ def admin_update_purchase_order(po_id):
                 return jsonify({
                     'error': f'Branch distribution ({dist_total}) must equal the quantity arriving this batch ({this_batch}) for one or more items.'
                 }), 400
+            # Unit Cost & Supplier are collected HERE now (Oct 26 2026
+            # adviser follow-up), not at Create PO — required for any line
+            # actually arriving this batch, so a receipt can never save
+            # with an unknown cost/supplier silently defaulting to 0/blank.
+            try:
+                entry_cost = float(item_entry.get('unit_cost', 0))
+            except (TypeError, ValueError):
+                entry_cost = 0
+            if entry_cost <= 0:
+                return jsonify({'error': 'Unit cost is required for every item being received this batch.'}), 400
+            if not (item_entry.get('supplier') or '').strip():
+                return jsonify({'error': 'Supplier is required for every item being received this batch.'}), 400
 
         # Each item's write is now isolated in its own try/except. Before
         # this, one item throwing partway through (a transient Supabase
@@ -3140,16 +3220,27 @@ def admin_update_purchase_order(po_id):
                 product_id      = item_entry.get('product_id') or po_item['product_id']
                 branch_dist     = item_entry.get('branches', [])  # [{branch_id, quantity}]
                 variant_options = po_item.get('variant_options')
+                item_cost       = float(item_entry.get('unit_cost', 0))
+                item_supplier   = (item_entry.get('supplier') or '').strip()
 
                 for b in branch_dist:
                     b_id  = b.get('branch_id')
                     b_qty = int(b.get('quantity', 0))
                     if not b_id or b_qty <= 0:
                         continue
-                    _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id))
+                    _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id), supplier=item_supplier)
 
                 new_received = po_item['received_quantity'] + this_batch
-                supabase.table('po_item').update({'received_quantity': new_received}).eq('po_item_id', po_item['po_item_id']).execute()
+                # unit_cost/supplier are recorded on the po_item the moment
+                # it's actually received — overwrites any earlier partial
+                # batch's figures with the latest one (a supplier rarely
+                # changes mid-PO, but if it does, the most recent receipt
+                # wins rather than silently keeping the first).
+                supabase.table('po_item').update({
+                    'received_quantity': new_received,
+                    'unit_cost':          item_cost,
+                    'supplier':           item_supplier,
+                }).eq('po_item_id', po_item['po_item_id']).execute()
                 po_item['received_quantity'] = new_received  # keep local copy in sync for the completeness check below
                 any_succeeded = True
             except Exception as item_err:
@@ -3359,7 +3450,8 @@ def admin_add_branch_stock():
         data       = request.get_json()
         product_id = data.get('product_id')
         branch_id  = data.get('branch_id')
-        quantity   = int(data.get('quantity', 0))
+        quantity, qty_err = _require_int_qty(data.get('quantity', 0), 'Quantity')
+        if qty_err: return qty_err
 
         if not product_id or not branch_id or quantity <= 0:
             return jsonify({'error': 'Product, branch and quantity are required.'}), 400
@@ -4039,7 +4131,8 @@ def admin_add_inventory():
     try:
         data           = request.get_json()
         product_id     = data.get('product_id')
-        qty_change     = int(data.get('quantity', 0))
+        qty_change, qty_err = _require_int_qty(data.get('quantity', 0), 'Quantity')
+        if qty_err: return qty_err
         from_branch_id = data.get('from_branch_id')
         to_branch_id   = data.get('to_branch_id')
         note           = data.get('note', '')
@@ -4212,6 +4305,7 @@ def admin_get_orders():
 
         _auto_advance_pending_orders()
         _auto_advance_processing_orders()
+        _auto_flag_not_remitted_orders()
 
         res = supabase.table('order').select(
             'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url, image_urls, option_groups, variant_overrides)), payment(payment_method, total, status, ref_no, sender_number, receipt_image_url)'
@@ -4247,7 +4341,7 @@ def admin_update_order(order_id):
     try:
         data       = request.get_json()
         status     = data.get('status')
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled', 'returned_failed']
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'completed', 'cancelled', 'returned_failed']
         if status not in valid_statuses:
             return jsonify({'error': 'Invalid status.'}), 400
 
@@ -4495,6 +4589,21 @@ def _order_grand_total(order_data):
     here rather than trusted from any single column."""
     return round(float(order_data.get('total') or 0) + float(order_data.get('shipping_fee') or 0), 2)
 
+def _require_int_qty(raw, label='Quantity'):
+    """Adviser follow-up (Oct 26 2026): quantity fields must be whole
+    numbers, not strings/decimals slipping past client-side sanitization.
+    Returns (value:int, error_response_or_None) — mirrors the
+    _validate_remittance return shape so callers can `if err: return err`."""
+    if isinstance(raw, bool) or raw is None:
+        return None, (jsonify({'error': f'{label} must be a whole number.'}), 400)
+    if isinstance(raw, int):
+        value = raw
+    elif isinstance(raw, str) and raw.strip().lstrip('-').isdigit():
+        value = int(raw)
+    else:
+        return None, (jsonify({'error': f'{label} must be a whole number.'}), 400)
+    return value, None
+
 def _validate_remittance(data, order_data):
     """Shared Remit-modal validation for both admin and staff. Returns
     (ok: bool, error_response_or_None). amount_remitted must be present and
@@ -4654,6 +4763,76 @@ def _restore_order_item_stock(order_id, items, note_label):
         except Exception as item_err:
             print(f'Returned-failed stock restore warning ({pid}): {item_err}')
 
+# Adviser follow-up (Oct 26 2026): "Bulk selection for remittance, and not
+# delivered (checkbox)." Per the clarifying answer on this point, bulk Remit
+# skips the per-order typed-amount entry the single-order Remit modal still
+# requires — it trusts the server-computed grand total and completes every
+# eligible selected order outright. Shared by both admin and staff routes
+# below (branch_id=None means unscoped/admin; a branch id scopes to staff's
+# own branch, same convention as staff_dispatch_orders above).
+def _bulk_remit_orders(order_ids, branch_id=None):
+    if not order_ids:
+        return {'completed': [], 'skipped': []}
+    res = supabase.table('order').select(
+        'order_id, status, branch_id, payment(payment_method, status)'
+    ).in_('order_id', order_ids).execute()
+    rows = res.data or []
+    completed, skipped = [], []
+    for row in rows:
+        if row.get('status') not in ('out_for_delivery', 'not_remitted') or (branch_id and row.get('branch_id') != branch_id):
+            skipped.append(row['order_id'])
+            continue
+        payment = row.get('payment')
+        if isinstance(payment, list):
+            payment = payment[0] if payment else None
+        if (payment or {}).get('status') != 'paid':
+            supabase.table('payment').update({'status': 'paid'}).eq('order_id', row['order_id']).execute()
+        supabase.table('order').update({
+            'status': 'completed',
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('order_id', row['order_id']).execute()
+        completed.append(row['order_id'])
+    found_ids = {r['order_id'] for r in rows}
+    skipped.extend([oid for oid in order_ids if oid not in found_ids])
+    return {'completed': completed, 'skipped': skipped}
+
+def _bulk_not_delivered(order_ids, branch_id=None):
+    """Bulk mirror of admin_mark_not_delivered/staff_mark_not_delivered's
+    per-order attempt logic — same courier-retry model, just applied to each
+    selected order in one request instead of one click per order."""
+    if not order_ids:
+        return {'results': []}
+    res = supabase.table('order').select(
+        'order_id, status, branch_id, delivery_attempts, order_item(product_id, qty, selected_options)'
+    ).in_('order_id', order_ids).execute()
+    rows = res.data or []
+    results = []
+    for row in rows:
+        if row.get('status') not in ('out_for_delivery', 'not_remitted') or (branch_id and row.get('branch_id') != branch_id):
+            results.append({'order_id': row['order_id'], 'skipped': True})
+            continue
+        attempts = int(row.get('delivery_attempts') or 0) + 1
+        attempted_at = datetime.now(timezone.utc).isoformat()
+        if attempts >= 3:
+            supabase.table('order').update({
+                'status': 'returned_failed',
+                'delivery_attempts': attempts,
+                'last_attempt_at': attempted_at,
+            }).eq('order_id', row['order_id']).execute()
+            _restore_order_item_stock(row['order_id'], row, 'Returned — failed delivery')
+            results.append({'order_id': row['order_id'], 'final': True, 'delivery_attempts': attempts})
+        else:
+            next_dispatch = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
+            supabase.table('order').update({
+                'delivery_attempts': attempts,
+                'dispatch_date': next_dispatch,
+                'last_attempt_at': attempted_at,
+            }).eq('order_id', row['order_id']).execute()
+            results.append({'order_id': row['order_id'], 'final': False, 'delivery_attempts': attempts, 'next_dispatch': next_dispatch})
+    found_ids = {r['order_id'] for r in rows}
+    results.extend([{'order_id': oid, 'skipped': True} for oid in order_ids if oid not in found_ids])
+    return {'results': results}
+
 @app.route('/api/admin/orders/dispatch', methods=['POST'])
 @admin_required
 def admin_dispatch_orders():
@@ -4695,8 +4874,8 @@ def admin_mark_delivered(order_id):
             return jsonify({'error': 'Order not found.'}), 404
 
         order_data = order_res.data[0]
-        if order_data.get('status') != 'out_for_delivery':
-            return jsonify({'error': 'Only out-for-delivery orders can be marked delivered.'}), 400
+        if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
+            return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked delivered.'}), 400
 
         ok, err = _validate_remittance(data, order_data)
         if not ok:
@@ -4725,8 +4904,9 @@ def admin_mark_delivered(order_id):
 @admin_required
 def admin_mark_not_delivered(order_id):
     """Not Delivered action. Attempts 1-2: order stays out_for_delivery,
-    dispatch_date is cleared so it drops back into "To Dispatch" for a later
-    run. Attempt 3: order is marked returned_failed and its stock is
+    dispatch_date is rescheduled to tomorrow (courier-retry model — see
+    below) so it shows in "Scheduled for Retry" until that day arrives.
+    Attempt 3: order is marked returned_failed and its stock is
     restored, same as a cancellation."""
     try:
         order_res = supabase.table('order').select(
@@ -4736,8 +4916,8 @@ def admin_mark_not_delivered(order_id):
             return jsonify({'error': 'Order not found.'}), 404
 
         order_data = order_res.data[0]
-        if order_data.get('status') != 'out_for_delivery':
-            return jsonify({'error': 'Only out-for-delivery orders can be marked not delivered.'}), 400
+        if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
+            return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked not delivered.'}), 400
 
         attempts = int(order_data.get('delivery_attempts') or 0) + 1
         attempted_at = datetime.now(timezone.utc).isoformat()
@@ -4773,6 +4953,36 @@ def admin_mark_not_delivered(order_id):
                 'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
             return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Retry scheduled for {next_dispatch}.', 'delivery_attempts': attempts, 'final': False, 'next_dispatch': next_dispatch}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/orders/remit-bulk', methods=['POST'])
+@admin_required
+def admin_remit_bulk():
+    """Bulk Remit — adviser follow-up, Oct 26 2026. See _bulk_remit_orders
+    above for why this skips the per-order typed amount."""
+    try:
+        data = request.get_json(silent=True) or {}
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+        return jsonify(_bulk_remit_orders(order_ids)), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/orders/not-delivered-bulk', methods=['POST'])
+@admin_required
+def admin_not_delivered_bulk():
+    """Bulk Not Delivered — adviser follow-up, Oct 26 2026. See
+    _bulk_not_delivered above."""
+    try:
+        data = request.get_json(silent=True) or {}
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+        return jsonify(_bulk_not_delivered(order_ids)), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -5000,6 +5210,7 @@ def staff_get_orders():
 
         _auto_advance_pending_orders()
         _auto_advance_processing_orders()
+        _auto_flag_not_remitted_orders()
 
         # Get staff's assigned branch
         staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
@@ -5276,7 +5487,7 @@ def staff_update_order(order_id):
     try:
         data       = request.get_json()
         status     = data.get('status')
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'completed', 'cancelled', 'returned_failed']
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'completed', 'cancelled', 'returned_failed']
         if status not in valid_statuses:
             return jsonify({'error': 'Invalid status.'}), 400
 
@@ -5536,8 +5747,8 @@ def staff_mark_delivered(order_id):
             return jsonify({'error': 'Order not found.'}), 404
 
         order_data = order_res.data[0]
-        if order_data.get('status') != 'out_for_delivery':
-            return jsonify({'error': 'Only out-for-delivery orders can be marked delivered.'}), 400
+        if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
+            return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked delivered.'}), 400
 
         ok, err = _validate_remittance(data, order_data)
         if not ok:
@@ -5570,8 +5781,8 @@ def staff_mark_not_delivered(order_id):
             return jsonify({'error': 'Order not found.'}), 404
 
         order_data = order_res.data[0]
-        if order_data.get('status') != 'out_for_delivery':
-            return jsonify({'error': 'Only out-for-delivery orders can be marked not delivered.'}), 400
+        if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
+            return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked not delivered.'}), 400
 
         attempts = int(order_data.get('delivery_attempts') or 0) + 1
         attempted_at = datetime.now(timezone.utc).isoformat()
@@ -5596,6 +5807,45 @@ def staff_mark_not_delivered(order_id):
                 'last_attempt_at': attempted_at,
             }).eq('order_id', order_id).execute()
             return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Retry scheduled for {next_dispatch}.', 'delivery_attempts': attempts, 'final': False, 'next_dispatch': next_dispatch}), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+def _staff_branch_id():
+    staff_id = session.get('staff_id')
+    staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+    return staff_res.data[0]['branch_id'] if staff_res.data else None
+
+@app.route('/api/staff/orders/remit-bulk', methods=['POST'])
+@staff_required
+def staff_remit_bulk():
+    """Branch-scoped mirror of admin_remit_bulk above."""
+    try:
+        branch_id = _staff_branch_id()
+        if not branch_id:
+            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
+        data = request.get_json(silent=True) or {}
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+        return jsonify(_bulk_remit_orders(order_ids, branch_id=branch_id)), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders/not-delivered-bulk', methods=['POST'])
+@staff_required
+def staff_not_delivered_bulk():
+    """Branch-scoped mirror of admin_not_delivered_bulk above."""
+    try:
+        branch_id = _staff_branch_id()
+        if not branch_id:
+            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
+        data = request.get_json(silent=True) or {}
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+        return jsonify(_bulk_not_delivered(order_ids, branch_id=branch_id)), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
@@ -5631,7 +5881,8 @@ def staff_add_inventory():
     try:
         data           = request.get_json()
         product_id     = data.get('product_id')
-        qty_added      = int(data.get('quantity', 0))
+        qty_added, qty_err = _require_int_qty(data.get('quantity', 0), 'Quantity')
+        if qty_err: return qty_err
         from_branch_id = data.get('from_branch_id')
         to_branch_id   = data.get('to_branch_id')
         note           = data.get('note', '')
@@ -5844,7 +6095,8 @@ def staff_create_stock_transfer():
         data            = request.get_json()
         product_id      = data.get('product_id')
         to_branch_id    = data.get('to_branch_id')
-        quantity        = int(data.get('quantity', 0))
+        quantity, qty_err = _require_int_qty(data.get('quantity', 0), 'Quantity')
+        if qty_err: return qty_err
         variant_options = data.get('variant_options') or None
 
         if not product_id or not to_branch_id or quantity <= 0:
@@ -6075,7 +6327,10 @@ def _delivery_notification_counts(branch_id=None):
         category meaningfully transient without adding a notification table.
     """
     try:
-        ofd_q = supabase.table('order').select('order_id, dispatch_date').eq('status', 'out_for_delivery')
+        # Includes 'not_remitted' (adviser follow-up, Oct 26 2026 — closing-
+        # hour auto-flag) since those orders are still sitting unresolved in
+        # the same "Out for Deliveries" tab, just past the 5pm cutoff.
+        ofd_q = supabase.table('order').select('order_id, dispatch_date').in_('status', ['out_for_delivery', 'not_remitted'])
         if branch_id:
             ofd_q = ofd_q.eq('branch_id', branch_id)
         ofd_rows = ofd_q.execute().data or []
@@ -6179,15 +6434,21 @@ def _remittance_summary(branch_id=None):
         today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
         today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
 
+        # 'not_remitted' included in Expected (adviser follow-up, Oct 26
+        # 2026 — closing-hour auto-flag, see _auto_flag_not_remitted_orders):
+        # the money was still expected today even though it slipped past
+        # 5pm unresolved, so it must keep counting toward Expected/Pending
+        # rather than silently vanishing from the strip.
         exp_q = supabase.table('order').select(_REMIT_ORDER_SELECT) \
-            .eq('dispatch_date', today).in_('status', ['out_for_delivery', 'completed'])
+            .eq('dispatch_date', today).in_('status', ['out_for_delivery', 'not_remitted', 'completed'])
         if branch_id:
             exp_q = exp_q.eq('branch_id', branch_id)
         expected_rows  = exp_q.execute().data or []
         expected_total = round(sum(_order_grand_total(o) for o in expected_rows), 2)
 
-        delivered_rows = [o for o in expected_rows if o.get('status') == 'completed']
-        pending_rows   = [o for o in expected_rows if o.get('status') == 'out_for_delivery']
+        delivered_rows   = [o for o in expected_rows if o.get('status') == 'completed']
+        pending_rows     = [o for o in expected_rows if o.get('status') == 'out_for_delivery']
+        not_remitted_rows = [o for o in expected_rows if o.get('status') == 'not_remitted']
         delivered_total = round(sum(_order_grand_total(o) for o in delivered_rows), 2)
 
         rf_q = supabase.table('order').select(_REMIT_ORDER_SELECT) \
@@ -6215,6 +6476,7 @@ def _remittance_summary(branch_id=None):
             'completed_count':          len(delivered_rows),
             'failed_attempts_count':    len(failed_attempt_rows),
             'returned_count':           len(returned_rows),
+            'not_remitted_count':       len(not_remitted_rows),
             # Breakdown lists — every count above sums exactly one of
             # these, so every number on the strip can be clicked through
             # to the rows behind it. pending_orders mirrors the live "Out
@@ -6225,13 +6487,15 @@ def _remittance_summary(branch_id=None):
             'delivered_orders':       [_serialize_remit_order(o) for o in delivered_rows],
             'returned_orders':        [_serialize_remit_order(o) for o in returned_rows],
             'failed_attempt_orders':  [_serialize_remit_order(o) for o in failed_attempt_rows],
+            'not_remitted_orders':    [_serialize_remit_order(o) for o in not_remitted_rows],
         }
     except Exception as e:
         print(f'Remittance-summary query warning: {e}')
         return {'expected_total': 0, 'expected_count': 0, 'actual_total': 0, 'actual_count': 0,
                 'remaining_total': 0, 'total_deliveries_count': 0, 'completed_count': 0,
-                'failed_attempts_count': 0, 'returned_count': 0,
-                'pending_orders': [], 'delivered_orders': [], 'returned_orders': [], 'failed_attempt_orders': []}
+                'failed_attempts_count': 0, 'returned_count': 0, 'not_remitted_count': 0,
+                'pending_orders': [], 'delivered_orders': [], 'returned_orders': [], 'failed_attempt_orders': [],
+                'not_remitted_orders': []}
 
 @app.route('/api/admin/notifications')
 @admin_required
