@@ -590,10 +590,9 @@
         <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 1rem 0;">
           <h3 class="card-title" style="margin:0;">Deliveries</h3>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button id="deliveriesTabAvailableBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('available')">To Dispatch</button>
-            <button id="deliveriesTabScheduledBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('scheduled')">Scheduled for Retry</button>
             <button id="deliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('today')">Out for Deliveries</button>
             <button id="deliveriesTabDeliveredBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('delivered')">Delivered Today</button>
+            <button id="deliveriesTabScheduledBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('scheduled')">Scheduled for Retry</button>
             <button id="deliveriesTabFailedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('failed')">Failed Attempts Today</button>
             <button id="deliveriesTabReturnedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('returned')">Returned/Failed Today</button>
           </div>
@@ -614,38 +613,12 @@
           Total Deliveries Today = Out for Deliveries + Delivered Today. Completed/Remitted = Delivered Today. Failed Attempts = a Not-Delivered click recorded today, rescheduled to retry (not yet final). Returned/Failed = 3rd attempt failed. Full order history for any date is still in the Orders table's status filter above.
         </div>
 
-        <!-- Available: out_for_delivery, not yet picked for a run -->
-        <div id="deliveriesAvailablePanel" style="padding:1rem;">
-          <div style="display:flex;justify-content:flex-end;margin-bottom:8px;">
-            <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="dispatchSelectedOrders()">Dispatch Selected</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th style="width:30px;"><input type="checkbox" id="deliveriesAvailableSelectAll" onchange="toggleAllDeliverySelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Total</th></tr>
-              </thead>
-              <tbody id="deliveriesAvailableBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Scheduled for Retry: failed once/twice (not final), the
-             courier keeps it and retries on the rescheduled dispatch_date.
-             Read-only — it reappears in "Out for Deliveries" on its own
-             once that day arrives, no manual redispatch needed. -->
-        <div id="deliveriesScheduledPanel" style="padding:1rem;display:none;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Retry Date</th><th>Total</th></tr>
-              </thead>
-              <tbody id="deliveriesScheduledBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Today's Batch: dispatched for today, awaiting Delivered/Not Delivered -->
-        <div id="deliveriesTodayPanel" style="padding:1rem;display:none;">
+        <!-- Out for Deliveries: dispatched for today, awaiting Remit/Not
+             Delivered. An order lands here directly once it becomes
+             out_for_delivery (via the Orders module or the lazy auto-
+             advance) — the separate "To Dispatch" staging tab was removed
+             Oct 26 2026, so this is now the Deliveries card's first tab. -->
+        <div id="deliveriesTodayPanel" style="padding:1rem;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
             <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow.</span>
             <div style="display:flex;gap:8px;">
@@ -676,9 +649,24 @@
           </div>
         </div>
 
+        <!-- Scheduled for Retry: failed once/twice (not final), the
+             courier keeps it and retries on the rescheduled dispatch_date.
+             Read-only — it reappears in "Out for Deliveries" on its own
+             once that day arrives, no manual redispatch needed. -->
+        <div id="deliveriesScheduledPanel" style="padding:1rem;display:none;">
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Retry Date</th><th>Total</th></tr>
+              </thead>
+              <tbody id="deliveriesScheduledBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+
         <!-- Failed Attempts Today: non-final Not-Delivered events (attempt
-             1 or 2) recorded today — sent back to "To Dispatch" for a
-             retry, not yet final. Read-only. -->
+             1 or 2) recorded today — rescheduled for retry, not yet final.
+             Read-only. -->
         <div id="deliveriesFailedPanel" style="padding:1rem;display:none;">
           <div class="table-wrap">
             <table class="data-table">
