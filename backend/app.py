@@ -904,9 +904,10 @@ def _auto_advance_pending_orders():
     transition on ONLINE orders (same no-scheduler pattern as
     _auto_advance_processing_orders — runs inline whenever admin or staff
     orders are fetched). Any online order still 'pending' after
-    PENDING_AUTO_PROCESS_MINUTES gets moved into 'processing' here, the
-    exact same way the manual batch-process endpoints do: capped at the
-    shared DAILY_PROCESSING_CAP, oldest-first, with stock actually deducted
+    PENDING_AUTO_PROCESS_MINUTES gets moved into 'processing' here — the
+    only path into 'processing' now that the manual batch-process buttons
+    were removed (Oct 26 2026): capped at the shared DAILY_PROCESSING_CAP,
+    oldest-first, with stock actually deducted
     at the moment of the transition (skipping — not force-moving — any
     order whose stock has since run out, so it stays pending for
     staff/admin to resolve by hand instead of silently overselling).
@@ -951,8 +952,8 @@ def _auto_advance_pending_orders():
             'processing_started_at': now_iso
         }).in_('order_id', moved_ids).execute()
 
-        # Notify affected customers (best-effort, same pattern as the manual
-        # batch-process endpoints).
+        # Notify affected customers (best-effort, same pattern used
+        # elsewhere for order-status notifications).
         try:
             notif_res = supabase.table('order').select(
                 'order_id, customer(fcm_token, fname)'
@@ -2439,8 +2440,8 @@ def api_place_order():
         # Stock is NOT deducted here at checkout anymore — an order only
         # actually takes stock off the shelf once it's moved into
         # 'processing' (see _deduct_order_item_stock, called from
-        # admin_update_order / staff_update_order / the batch-process
-        # endpoints). A still-'pending' order is a reservation request only;
+        # admin_update_order / staff_update_order / the 30-min auto-advance
+        # check). A still-'pending' order is a reservation request only;
         # this keeps the customer cancel window (pending-only) simple — no
         # stock to restore — and matches the inventory not being committed
         # until a staff member actually starts working the order.
@@ -4231,103 +4232,14 @@ def admin_get_orders():
         print(f'Admin orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/admin/orders/batch-process', methods=['POST'])
-@admin_required
-def admin_batch_process_orders():
-    """Move the oldest pending orders into 'processing', capped at
-    DAILY_PROCESSING_CAP per day (shop's delivery capacity limit). Counts
-    how many orders have already been moved into processing today (by
-    processing_started_at date) and only takes up to the remaining slots."""
-    try:
-        today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
-        today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
-
-        already_today = supabase.table('order').select('order_id') \
-            .gte('processing_started_at', today_start) \
-            .lte('processing_started_at', today_end).execute()
-        used_today = len(already_today.data or [])
-        remaining  = DAILY_PROCESSING_CAP - used_today
-
-        if remaining <= 0:
-            return jsonify({
-                'moved': 0,
-                'used_today': used_today,
-                'cap': DAILY_PROCESSING_CAP,
-                'message': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'
-            }), 200
-
-        # Fetch every pending order (not just `remaining` of them) so a
-        # skip due to insufficient stock doesn't shrink the batch below the
-        # cap — we keep pulling from the oldest-first queue until we've
-        # filled `remaining` slots or run out of candidates.
-        pending_res = supabase.table('order').select(
-            'order_id, branch_id, order_item(product_id, qty, selected_options, product(product_name))'
-        ).eq('status', 'pending').order('created_at', desc=False).execute()
-        pending_orders = pending_res.data or []
-
-        if not pending_orders:
-            return jsonify({
-                'moved': 0,
-                'used_today': used_today,
-                'cap': DAILY_PROCESSING_CAP,
-                'message': 'No pending orders to move.'
-            }), 200
-
-        # Stock is taken off the shelf right here — the moment each order
-        # actually enters 'processing' — not at checkout. An order whose
-        # stock has since run out is skipped (not force-moved), so the
-        # batch never oversells.
-        moved_ids = []
-        skipped   = []
-        for o in pending_orders:
-            if len(moved_ids) >= remaining:
-                break
-            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [])
-            if ok:
-                moved_ids.append(o['order_id'])
-            else:
-                skipped.append({'order_id': o['order_id'], 'reason': err})
-
-        if not moved_ids:
-            return jsonify({
-                'moved': 0,
-                'used_today': used_today,
-                'cap': DAILY_PROCESSING_CAP,
-                'skipped': skipped,
-                'message': 'No pending orders could be moved' + (' — all candidates are out of stock.' if skipped else '.')
-            }), 200
-
-        now_iso = datetime.utcnow().isoformat()
-        supabase.table('order').update({
-            'status': 'processing',
-            'processing_started_at': now_iso
-        }).in_('order_id', moved_ids).execute()
-
-        # Notify affected customers (best-effort, same pattern as admin_update_order)
-        try:
-            notif_res = supabase.table('order').select(
-                'order_id, customer(fcm_token, fname)'
-            ).in_('order_id', moved_ids).execute()
-            notif_title, notif_body = ORDER_STATUS_MESSAGES['processing']
-            for o in (notif_res.data or []):
-                customer = o.get('customer')
-                if isinstance(customer, list): customer = customer[0] if customer else {}
-                fcm_token = customer.get('fcm_token') if customer else None
-                if fcm_token:
-                    send_push_notification(fcm_token, notif_title, notif_body, {'order_id': o['order_id'], 'status': 'processing'})
-        except Exception as notif_err:
-            print(f'Batch-process notification error: {notif_err}')
-
-        return jsonify({
-            'moved': len(moved_ids),
-            'used_today': used_today + len(moved_ids),
-            'cap': DAILY_PROCESSING_CAP,
-            'order_ids': moved_ids,
-            'skipped': skipped
-        }), 200
-    except Exception as e:
-        print(f'Admin batch-process error: {e}')
-        return jsonify({'error': str(e)}), 500
+# NOTE: the manual "Move to Processing" batch action (POST
+# /api/admin/orders/batch-process) was removed Oct 26 2026 (team decision)
+# — Pending -> Processing is now purely system-driven by the 30-min
+# auto-advance check elsewhere in this file, which already enforces
+# DAILY_PROCESSING_CAP on its own. The per-order PUT route below still
+# accepts 'processing' as a status value and enforces the same cap, since
+# that's a separate general-purpose order-update endpoint, not this
+# removed batch button.
 
 @app.route('/api/admin/orders/<order_id>', methods=['PUT'])
 @admin_required
@@ -5132,107 +5044,9 @@ def staff_get_orders():
         print(f'Staff orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/staff/orders/batch-process', methods=['POST'])
-@staff_required
-def staff_batch_process_orders():
-    """Same capped batch move as the admin endpoint, scoped to the staff
-    member's own branch — but counted against the one store-wide daily cap
-    (per the business rule: 30/day total, regardless of who triggered which
-    batch), not a separate per-branch allowance."""
-    try:
-        staff_id  = session.get('staff_id')
-        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
-        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
-
-        # Fail safe, not fail open — an unassigned staff account must not be
-        # able to move another branch's pending orders into processing.
-        if not branch_id:
-            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
-
-        today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
-        today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
-
-        already_today = supabase.table('order').select('order_id') \
-            .gte('processing_started_at', today_start) \
-            .lte('processing_started_at', today_end).execute()
-        used_today = len(already_today.data or [])
-        remaining  = DAILY_PROCESSING_CAP - used_today
-
-        if remaining <= 0:
-            return jsonify({
-                'moved': 0,
-                'used_today': used_today,
-                'cap': DAILY_PROCESSING_CAP,
-                'message': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'
-            }), 200
-
-        pending_query = supabase.table('order').select(
-            'order_id, branch_id, order_item(product_id, qty, selected_options, product(product_name))'
-        ).eq('status', 'pending').eq('branch_id', branch_id)
-        pending_res = pending_query.order('created_at', desc=False).execute()
-        pending_orders = pending_res.data or []
-
-        if not pending_orders:
-            return jsonify({
-                'moved': 0,
-                'used_today': used_today,
-                'cap': DAILY_PROCESSING_CAP,
-                'message': 'No pending orders to move.'
-            }), 200
-
-        # Stock is taken off the shelf right here — the moment each order
-        # actually enters 'processing' — not at checkout. Same skip-on-
-        # shortage behavior as the admin batch route.
-        moved_ids = []
-        skipped   = []
-        for o in pending_orders:
-            if len(moved_ids) >= remaining:
-                break
-            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [])
-            if ok:
-                moved_ids.append(o['order_id'])
-            else:
-                skipped.append({'order_id': o['order_id'], 'reason': err})
-
-        if not moved_ids:
-            return jsonify({
-                'moved': 0,
-                'used_today': used_today,
-                'cap': DAILY_PROCESSING_CAP,
-                'skipped': skipped,
-                'message': 'No pending orders could be moved' + (' — all candidates are out of stock.' if skipped else '.')
-            }), 200
-
-        now_iso = datetime.utcnow().isoformat()
-        supabase.table('order').update({
-            'status': 'processing',
-            'processing_started_at': now_iso
-        }).in_('order_id', moved_ids).execute()
-
-        try:
-            notif_res = supabase.table('order').select(
-                'order_id, customer(fcm_token, fname)'
-            ).in_('order_id', moved_ids).execute()
-            notif_title, notif_body = ORDER_STATUS_MESSAGES['processing']
-            for o in (notif_res.data or []):
-                customer = o.get('customer')
-                if isinstance(customer, list): customer = customer[0] if customer else {}
-                fcm_token = customer.get('fcm_token') if customer else None
-                if fcm_token:
-                    send_push_notification(fcm_token, notif_title, notif_body, {'order_id': o['order_id'], 'status': 'processing'})
-        except Exception as notif_err:
-            print(f'Staff batch-process notification error: {notif_err}')
-
-        return jsonify({
-            'moved': len(moved_ids),
-            'used_today': used_today + len(moved_ids),
-            'cap': DAILY_PROCESSING_CAP,
-            'order_ids': moved_ids,
-            'skipped': skipped
-        }), 200
-    except Exception as e:
-        print(f'Staff batch-process error: {e}')
-        return jsonify({'error': str(e)}), 500
+# NOTE: the manual "Move to Processing" batch action (POST
+# /api/staff/orders/batch-process) was removed Oct 26 2026, mirroring the
+# admin-side removal above — see that note for the reasoning.
 
 @app.route('/api/staff/paymongo/gcash/create', methods=['POST'])
 @staff_required

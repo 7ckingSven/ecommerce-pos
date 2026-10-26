@@ -4092,39 +4092,15 @@ async function loadOrders() {
     populateOrderDayOptions();
     applyAdminOrderFilters();
     updateAdminOrdersBadge(allOrders);
-    updateProcessingCapIndicator(allOrders);
     renderDeliveriesForToday(allOrders);
   } catch (e) { console.error('Orders error:', e); }
 }
 
-// ─── Pending → Processing (capped batch) ──────────────
-function updateProcessingCapIndicator(orders) {
-  const el = document.getElementById('processingCapIndicator');
-  if (!el) return;
-  const todayUTC = new Date().toISOString().slice(0, 10);
-  const usedToday = orders.filter(o => o.processing_started_at && o.processing_started_at.slice(0, 10) === todayUTC).length;
-  el.textContent = `(${usedToday}/30 today)`;
-  const btn = document.getElementById('moveToProcessingBtn');
-  if (btn) btn.disabled = usedToday >= 30;
-}
-
-async function runBatchProcessOrders() {
-  const confirmed = await showConfirmDialog('Confirm', 'Move the next batch of pending orders to Processing?');
-  if (!confirmed) return;
-
-  try {
-    const res  = await fetch('/api/admin/orders/batch-process', { method: 'POST' });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      const skippedCount = (body.skipped || []).length;
-      const skippedNote  = skippedCount > 0 ? ` (${skippedCount} skipped — out of stock)` : '';
-      showToast(body.moved > 0 ? `Moved ${body.moved} order(s) to Processing.${skippedNote}` : (body.message || 'Nothing to move.'), skippedCount > 0 && body.moved === 0 ? 'error' : undefined);
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to move orders to processing.', 'error');
-    }
-  } catch (e) { showToast('Error moving orders to processing.', 'error'); }
-}
+// Pending → Processing manual batch action removed (team decision, Oct 26
+// 2026) — the 30-min auto-advance in app.py already handles this step on
+// its own, so the "Move to Processing" button was redundant. The
+// DAILY_PROCESSING_CAP enforcement stays, it just lives purely in the
+// auto-advance check now, with no manual trigger left on this side.
 
 // ─── Deliveries for Today ──────────────────────────────
 let deliveriesActiveTab = 'available';
@@ -4660,13 +4636,13 @@ function sortOrdersHierarchy(orders) {
 
 // Per the Oct 25 adviser consultation: a free-form status dropdown is "not
 // supposed to be" the way an order moves forward — each step now needs its
-// own explicit trigger action instead. Pending -> Processing is already
-// system-driven (30-min auto-advance in app.py, or the "Move to Processing"
-// batch button above the table), so it gets no manual button here at all;
-// Processing -> Out for Delivery is the one step this row-level action still
-// drives, as a single contextual button. Everything past that (Delivered,
-// Not Delivered) already goes through the dedicated Deliveries-for-Today
-// actions, not this cell.
+// own explicit trigger action instead. Pending -> Processing is purely
+// system-driven (30-min auto-advance in app.py — the manual "Move to
+// Processing" batch button was removed Oct 26 2026), so it gets no manual
+// button here at all; Processing -> Out for Delivery is the one step this
+// row-level action still drives, as a single contextual button. Everything
+// past that (Delivered, Not Delivered) already goes through the dedicated
+// Deliveries-for-Today actions, not this cell.
 function orderStatusActionHtml(order, updateFnName) {
   const status = order.status;
   if (status === 'pending') {
