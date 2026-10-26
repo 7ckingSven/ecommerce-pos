@@ -4037,10 +4037,8 @@ async function loadOrders() {
   // ── Skeleton ──
   skTable('ordersBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
                          'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
-  // Deliveries for Today — both panels (skTable no-ops if the tbody isn't
-  // on the current page, same as every other call site in this file).
-  skTable('deliveriesAvailableBody', ['sk-cell-sm','sk-cell-sm','sk-cell-md',
-                                      'sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
+  // Deliveries for Today (skTable no-ops if the tbody isn't on the current
+  // page, same as every other call site in this file).
   skTable('deliveriesTodayBody', ['sk-cell-sm','sk-cell-md','sk-cell-full',
                                   'sk-cell-sm','sk-cell-sm','sk-cell-md'], 5);
   // ─────────────
@@ -4073,23 +4071,25 @@ async function loadOrders() {
 // auto-advance check now, with no manual trigger left on this side.
 
 // ─── Deliveries for Today ──────────────────────────────
-let deliveriesActiveTab = 'available';
+// "To Dispatch" tab removed (team decision, Oct 26 2026) — dispatching now
+// happens the moment an order becomes out_for_delivery via the Orders
+// module itself, so there's no separate pre-dispatch queue to page through
+// here. "Out for Deliveries" is the first/default tab.
+let deliveriesActiveTab = 'today';
 
 function switchDeliveriesTab(tab) {
   deliveriesActiveTab = tab;
   const btns = {
-    available: document.getElementById('deliveriesTabAvailableBtn'),
-    scheduled: document.getElementById('deliveriesTabScheduledBtn'),
     today:     document.getElementById('deliveriesTabTodayBtn'),
     delivered: document.getElementById('deliveriesTabDeliveredBtn'),
+    scheduled: document.getElementById('deliveriesTabScheduledBtn'),
     failed:    document.getElementById('deliveriesTabFailedBtn'),
     returned:  document.getElementById('deliveriesTabReturnedBtn'),
   };
   const panels = {
-    available: document.getElementById('deliveriesAvailablePanel'),
-    scheduled: document.getElementById('deliveriesScheduledPanel'),
     today:     document.getElementById('deliveriesTodayPanel'),
     delivered: document.getElementById('deliveriesDeliveredPanel'),
+    scheduled: document.getElementById('deliveriesScheduledPanel'),
     failed:    document.getElementById('deliveriesFailedPanel'),
     returned:  document.getElementById('deliveriesReturnedPanel'),
   };
@@ -4113,7 +4113,7 @@ function fullDeliveryAddress(order) {
 }
 
 function renderDeliveriesForToday(orders) {
-  if (!document.getElementById('deliveriesAvailableBody')) return; // card not on this page
+  if (!document.getElementById('deliveriesTodayBody')) return; // card not on this page
   const todayUTC = new Date().toISOString().slice(0, 10);
   // 'not_remitted' folded in here too (adviser follow-up, Oct 26 2026 —
   // closing-hour auto-flag, see _auto_flag_not_remitted_orders in app.py):
@@ -4123,30 +4123,18 @@ function renderDeliveriesForToday(orders) {
   const ofd = orders.filter(o => o.status === 'out_for_delivery' || o.status === 'not_remitted');
   // Courier-retry model: a non-final failed attempt no longer clears
   // dispatch_date — it reschedules it to the next day instead (see
-  // admin_mark_not_delivered in app.py). So "To Dispatch" (no
-  // dispatch_date at all) is now ONLY ever brand-new, never-attempted
-  // orders; a failed-and-rescheduled order shows in the new "Tomorrow"
-  // tab until its scheduled date actually arrives, at which point it
-  // moves itself into "Out for Deliveries" with zero extra code — the
-  // date comparison below just naturally matches it that day.
-  const available = ofd.filter(o => o.status === 'out_for_delivery' && !o.dispatch_date);
+  // admin_mark_not_delivered in app.py). And since Oct 26 2026, an order
+  // becoming out_for_delivery (via the Orders module's own action, or the
+  // lazy Processing -> Out for Delivery auto-advance) gets dispatch_date
+  // stamped in that same moment — the separate "To Dispatch" staging tab
+  // was removed, so every out_for_delivery order always has a dispatch_date
+  // and lands straight into "Out for Deliveries" or "Scheduled for Retry"
+  // below, whichever its dispatch_date matches.
   const today      = ofd.filter(o => o.status === 'not_remitted'
                         || (o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC));
   const scheduled  = ofd.filter(o => o.status === 'out_for_delivery' && o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
 
   loadRemittanceSummary();
-
-  document.getElementById('deliveriesAvailableBody').innerHTML = available.length
-    ? available.map(o => `
-        <tr>
-          <td><input type="checkbox" class="delivery-select-cb" value="${o.order_id}"/></td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
-          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td>${fullDeliveryAddress(o)}</td>
-          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
-          <td>${peso(o.total)}</td>
-        </tr>`).join('')
-    : '<tr><td colspan="6" class="table-empty">No out-for-delivery orders waiting to be picked.</td></tr>';
 
   const scheduledBody = document.getElementById('deliveriesScheduledBody');
   if (scheduledBody) {
@@ -4327,36 +4315,10 @@ async function loadRemittanceSummary() {
   } catch (e) { console.error('Remittance summary error:', e); }
 }
 
-function toggleAllDeliverySelections(cb) {
-  document.querySelectorAll('.delivery-select-cb').forEach(el => { el.checked = cb.checked; });
-}
-
-async function dispatchSelectedOrders() {
-  const ids = Array.from(document.querySelectorAll('.delivery-select-cb:checked')).map(el => el.value);
-  if (!ids.length) {
-    showToast('Select at least one order to dispatch.', 'error');
-    return;
-  }
-
-  const confirmed = await showConfirmDialog('Confirm Dispatch', `Dispatch ${ids.length} order(s) for delivery today?`);
-  if (!confirmed) return;
-
-  try {
-    const res  = await fetch('/api/admin/orders/dispatch', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: ids }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast(`Dispatched ${body.dispatched} order(s) for today.`);
-      switchDeliveriesTab('today');
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to dispatch orders.', 'error');
-    }
-  } catch (e) { showToast('Error dispatching orders.', 'error'); }
-}
+// (toggleAllDeliverySelections / dispatchSelectedOrders and the "To
+// Dispatch" tab they served were removed Oct 26 2026 — an order now
+// dispatches itself the moment it becomes out_for_delivery; see
+// renderDeliveriesForToday and admin_update_order in app.py.)
 
 // ─── Remit Modal ──────────────────────────────────────
 // Replaces the old instant/COD-only "Delivered" button (adviser revision,
@@ -8517,7 +8479,7 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
 document.addEventListener('DOMContentLoaded', async function () {
   await loadBranches();
   _loadedSections.add('products'); loadProducts();
-  switchDeliveriesTab('available');
+  switchDeliveriesTab('today');
   _startNotifPolling();
 
   // Restore last section from URL hash or localStorage

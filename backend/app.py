@@ -888,7 +888,14 @@ def _auto_advance_processing_orders():
         stale = supabase.table('order').select('order_id').eq('status', 'processing').lte('processing_started_at', cutoff).execute()
         ids = [o['order_id'] for o in (stale.data or [])]
         if ids:
-            supabase.table('order').update({'status': 'out_for_delivery'}).in_('order_id', ids).execute()
+            # dispatch_date is stamped here too (team decision, Oct 26 2026:
+            # removed the separate "To Dispatch" staging tab/step) — an order
+            # becoming out_for_delivery, whether via this auto-advance or the
+            # manual per-order action in admin_update_order/staff_update_order,
+            # now goes straight into "Out for Deliveries" instead of sitting in
+            # an extra pre-dispatch queue.
+            today = datetime.utcnow().strftime('%Y-%m-%d')
+            supabase.table('order').update({'status': 'out_for_delivery', 'dispatch_date': today}).in_('order_id', ids).execute()
     except Exception as e:
         print(f'Auto-advance (processing -> out_for_delivery) warning: {e}')
 
@@ -4398,6 +4405,14 @@ def admin_update_order(order_id):
         if status == 'processing':
             update_data['processing_started_at'] = datetime.utcnow().isoformat()
 
+        # Team decision, Oct 26 2026: removed the separate "To Dispatch"
+        # staging tab — this per-order "Mark Out for Delivery" action (the
+        # Orders module's own button) IS the dispatch now, so stamp
+        # dispatch_date the same moment the status changes rather than
+        # requiring a second bulk-dispatch step on the Deliveries card.
+        if status == 'out_for_delivery':
+            update_data['dispatch_date'] = datetime.utcnow().strftime('%Y-%m-%d')
+
         supabase.table('order').update(update_data).eq('order_id', order_id).execute()
 
         # Send push notification to customer
@@ -4570,7 +4585,11 @@ def admin_return_order_items(order_id):
 # (items + shipping) before the order is allowed to complete. This closes
 # the gap where a staff member could tap through "Delivered" without
 # actually reconciling what was collected/returned for the order.
-#   1. Dispatch — admin/staff picks today's run from the To Dispatch list.
+#   1. Dispatch — an order becomes out_for_delivery via the Orders module's
+#      own per-order action (or the lazy Processing -> Out for Delivery
+#      auto-advance) and is dispatched (dispatch_date stamped) in that same
+#      moment — the separate "To Dispatch" staging tab was removed Oct 26
+#      2026, so it now lands directly in "Out for Deliveries".
 #   2. Remit    — opens a modal with the full order details + amount due;
 #      the order only completes once the typed amount matches exactly
 #      (see _order_grand_total / _validate_remittance below).
@@ -4769,7 +4788,7 @@ def _restore_order_item_stock(order_id, items, note_label):
 # requires — it trusts the server-computed grand total and completes every
 # eligible selected order outright. Shared by both admin and staff routes
 # below (branch_id=None means unscoped/admin; a branch id scopes to staff's
-# own branch, same convention as staff_dispatch_orders above).
+# own branch).
 def _bulk_remit_orders(order_ids, branch_id=None):
     if not order_ids:
         return {'completed': [], 'skipped': []}
@@ -4832,30 +4851,6 @@ def _bulk_not_delivered(order_ids, branch_id=None):
     found_ids = {r['order_id'] for r in rows}
     results.extend([{'order_id': oid, 'skipped': True} for oid in order_ids if oid not in found_ids])
     return {'results': results}
-
-@app.route('/api/admin/orders/dispatch', methods=['POST'])
-@admin_required
-def admin_dispatch_orders():
-    """Set dispatch_date = today for the selected out_for_delivery orders —
-    this is what moves them from "To Dispatch" into "Out for Deliveries" on
-    the Deliveries screen."""
-    try:
-        data       = request.get_json()
-        order_ids  = data.get('order_ids', [])
-        if not order_ids:
-            return jsonify({'error': 'At least one order_id is required.'}), 400
-
-        today = datetime.utcnow().strftime('%Y-%m-%d')
-        res = supabase.table('order').select('order_id, status').in_('order_id', order_ids).execute()
-        eligible = [o['order_id'] for o in (res.data or []) if o.get('status') == 'out_for_delivery']
-        if not eligible:
-            return jsonify({'error': 'No eligible out-for-delivery orders in the selection.'}), 400
-
-        supabase.table('order').update({'dispatch_date': today}).in_('order_id', eligible).execute()
-        return jsonify({'dispatched': len(eligible), 'order_ids': eligible, 'dispatch_date': today}), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/admin/orders/<order_id>/delivered', methods=['POST'])
 @admin_required
@@ -5536,6 +5531,13 @@ def staff_update_order(order_id):
         if status == 'processing':
             update_data['processing_started_at'] = datetime.utcnow().isoformat()
 
+        # Same "To Dispatch" removal as the admin route (team decision, Oct
+        # 26 2026) — stamp dispatch_date the moment the order becomes
+        # out_for_delivery, here too, so staff's own "Mark Out for Delivery"
+        # button dispatches it directly instead of leaving it in a staging step.
+        if status == 'out_for_delivery':
+            update_data['dispatch_date'] = datetime.utcnow().strftime('%Y-%m-%d')
+
         supabase.table('order').update(update_data).eq('order_id', order_id).execute()
 
         # Send push notification to customer
@@ -5698,38 +5700,12 @@ def staff_return_order_items(order_id):
 
 # ─── Deliveries (staff) ─────────────────────────────────
 # Branch-scoped mirror of the admin endpoints above — a staff member only
-# ever dispatches/acts on their own branch's orders.
-
-@app.route('/api/staff/orders/dispatch', methods=['POST'])
-@staff_required
-def staff_dispatch_orders():
-    try:
-        data      = request.get_json()
-        order_ids = data.get('order_ids', [])
-        if not order_ids:
-            return jsonify({'error': 'At least one order_id is required.'}), 400
-
-        staff_id  = session.get('staff_id')
-        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
-        branch_id = staff_res.data[0]['branch_id'] if staff_res.data else None
-
-        if not branch_id:
-            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
-
-        today = datetime.utcnow().strftime('%Y-%m-%d')
-        res = supabase.table('order').select('order_id, status, branch_id').in_('order_id', order_ids).execute()
-        eligible = [
-            o['order_id'] for o in (res.data or [])
-            if o.get('status') == 'out_for_delivery' and o.get('branch_id') == branch_id
-        ]
-        if not eligible:
-            return jsonify({'error': 'No eligible out-for-delivery orders in the selection.'}), 400
-
-        supabase.table('order').update({'dispatch_date': today}).in_('order_id', eligible).execute()
-        return jsonify({'dispatched': len(eligible), 'order_ids': eligible, 'dispatch_date': today}), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+# ever acts on their own branch's orders.
+# (The old /api/admin|staff/orders/dispatch bulk-dispatch routes were removed
+# Oct 26 2026, along with the "To Dispatch" staging tab they fed — see
+# admin_update_order/staff_update_order, which now stamp dispatch_date the
+# moment an order becomes out_for_delivery instead of requiring a second
+# manual dispatch step.)
 
 @app.route('/api/staff/orders/<order_id>/delivered', methods=['POST'])
 @staff_required
