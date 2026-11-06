@@ -152,6 +152,12 @@ export default function HomeScreen({ navigation }) {
   const [brands,      setBrands]      = useState([]);
   const [selectedCat,   setSelectedCat]   = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
+  // Branch filter bar (user request, Oct 29 2026) — '' = "All Branch" (both
+  // branches combined, the pre-existing default). branchList is built from
+  // the live product data itself (branch_stock[].branch), not hardcoded, so
+  // it stays correct if branch names ever change — see loadProducts below.
+  const [selectedBranch, setSelectedBranch] = useState('');
+  const [branchList,     setBranchList]     = useState([]); // [{branch_id, branch_name}]
   const [search,      setSearch]      = useState('');
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
@@ -241,10 +247,10 @@ export default function HomeScreen({ navigation }) {
   // tabPress listener below, which may be holding an older closure — always
   // reads the LATEST filter/sort values instead of whatever existed when
   // that listener was created.
-  const liveFiltersRef = useRef({ cat: '', brand: '', search: '', sort: 'relevance' });
+  const liveFiltersRef = useRef({ cat: '', brand: '', search: '', sort: 'relevance', branch: '' });
   useEffect(() => {
-    liveFiltersRef.current = { cat: selectedCat, brand: selectedBrand, search, sort: selectedSort };
-  }, [selectedCat, selectedBrand, search, selectedSort]);
+    liveFiltersRef.current = { cat: selectedCat, brand: selectedBrand, search, sort: selectedSort, branch: selectedBranch };
+  }, [selectedCat, selectedBrand, search, selectedSort, selectedBranch]);
 
   // Load once whenever the Home screen gains focus — no background polling
   // (matches the web dashboards: data loads on view, refresh is on-demand).
@@ -314,6 +320,19 @@ export default function HomeScreen({ navigation }) {
       const brnds  = [...new Set(data.map(p => p.brand?.trim()).filter(Boolean))].sort();
       setCategories(cats);
       setBrands(brnds);
+
+      // Build the branch filter bar's options from the live data (not
+      // hardcoded "Triple E"/"Fiel Collince") — one entry per distinct
+      // branch_id actually carrying stock right now.
+      const branchMap = new Map();
+      data.forEach(p => {
+        (p.branch_stock || []).forEach(bs => {
+          if (bs.branch_id && bs.branch?.branch_name && !branchMap.has(bs.branch_id)) {
+            branchMap.set(bs.branch_id, bs.branch.branch_name);
+          }
+        });
+      });
+      setBranchList([...branchMap.entries()].map(([branch_id, branch_name]) => ({ branch_id, branch_name })));
     } catch (e) {
       console.error('Load products error:', e);
       setError(true);
@@ -343,19 +362,35 @@ export default function HomeScreen({ navigation }) {
         });
       });
       setAllProducts(expanded);
+
+      const branchMap = new Map();
+      data.forEach(p => {
+        (p.branch_stock || []).forEach(bs => {
+          if (bs.branch_id && bs.branch?.branch_name && !branchMap.has(bs.branch_id)) {
+            branchMap.set(bs.branch_id, bs.branch.branch_name);
+          }
+        });
+      });
+      setBranchList([...branchMap.entries()].map(([branch_id, branch_name]) => ({ branch_id, branch_name })));
+
       // Re-apply current filters silently — read from the ref (always live),
       // not the closed-over state vars, which may be stale inside this timer.
-      const { cat, brand, search: q, sort } = liveFiltersRef.current;
-      applyFilters(cat, brand, q, expanded, sort);
+      const { cat, brand, search: q, sort, branch } = liveFiltersRef.current;
+      applyFilters(cat, brand, q, expanded, sort, branch);
     } catch (e) {
       // Silent fail - don't disrupt user
     }
   }
 
-  function applyFilters(cat, brand, q, sourceProducts, sort) {
+  function applyFilters(cat, brand, q, sourceProducts, sort, branch) {
     let filtered = sourceProducts || allProducts; // already expanded by branch
     if (cat)   filtered = filtered.filter(p => p.category?.trim() === cat);
     if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand);
+    // Branch filter bar — '' (All Branch) leaves both branches' cards in;
+    // otherwise keep only the card whose own _branchId matches (products
+    // are already expanded one card per branch, see loadProducts above).
+    const branchFilter = branch !== undefined ? branch : selectedBranch;
+    if (branchFilter) filtered = filtered.filter(p => p._branchId === branchFilter);
     if (q)     filtered = filtered.filter(p =>
       p.product_name?.toLowerCase().includes(q.toLowerCase()) ||
       p.brand?.toLowerCase().includes(q.toLowerCase()) ||
@@ -365,6 +400,11 @@ export default function HomeScreen({ navigation }) {
     setProducts(filtered);
   }
 
+  // Branch filter bar tap handler (user request, Oct 29 2026).
+  function handleBranchFilter(branchId) {
+    setSelectedBranch(branchId);
+    applyFilters(selectedCat, selectedBrand, search, null, selectedSort, branchId);
+  }
 
   function updateSuggestions(q, page = 1) {
     const filtered = q.trim()
@@ -591,6 +631,32 @@ export default function HomeScreen({ navigation }) {
           </TouchableOpacity>
         </View>
       </View>
+
+      {/* Branch Filter Bar (user request, Oct 29 2026) — "All Branch" shows
+          both branches' stock combined (the original/default behavior);
+          picking a branch narrows the list to just its cards. Options are
+          built from live branch data (branchList), not hardcoded names. */}
+      {branchList.length > 0 && (
+        <View style={styles.branchFilterRow}>
+          <TouchableOpacity
+            style={[styles.branchChip, !selectedBranch && styles.branchChipActive]}
+            onPress={() => handleBranchFilter('')}
+          >
+            <Text style={[styles.branchChipText, !selectedBranch && styles.branchChipTextActive]}>All Branch</Text>
+          </TouchableOpacity>
+          {branchList.map(b => (
+            <TouchableOpacity
+              key={b.branch_id}
+              style={[styles.branchChip, selectedBranch === b.branch_id && styles.branchChipActive]}
+              onPress={() => handleBranchFilter(b.branch_id)}
+            >
+              <Text style={[styles.branchChipText, selectedBranch === b.branch_id && styles.branchChipTextActive]} numberOfLines={1}>
+                {b.branch_name}
+              </Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+      )}
 
       {/* Search Overlay — Bug fix: top dynamically uses measured header height */}
       {searchFocused && (
@@ -943,6 +1009,14 @@ const makeStyles = (COLORS) => StyleSheet.create({
   activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   activeTag:              { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.primaryBorder },
   activeTagText:          { fontSize: 11, color: COLORS.primary, fontWeight: '600' },
+  // Branch Filter Bar (user request, Oct 29 2026) — equal-width segmented
+  // buttons (All Branch / each branch), not a scrollable chip row, since
+  // there are only ever a couple of branches to show at once.
+  branchFilterRow:        { flexDirection: 'row', paddingHorizontal: SPACING.md, paddingVertical: 8, gap: 8, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
+  branchChip:             { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: RADIUS.full, borderWidth: 1.3, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface },
+  branchChipActive:       { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
+  branchChipText:         { fontSize: 12.5, color: COLORS.textSecondary, fontWeight: '600' },
+  branchChipTextActive:   { color: COLORS.primary, fontWeight: '700' },
   filterOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   // Shopee-style filter panel: clean bottom sheet, uppercase section
   // labels, and chip grids in place of the old boxed dropdown lists.

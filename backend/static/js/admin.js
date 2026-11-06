@@ -4035,7 +4035,7 @@ function closeInventoryModal() { closeAddStockModal(); }
 // ─── ORDERS ───────────────────────────────────────────
 async function loadOrders() {
   // ── Skeleton ──
-  skTable('ordersBody', ['sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
+  skTable('ordersBody', ['sk-cell-sm','sk-cell-sm','sk-cell-full','sk-cell-md','sk-cell-sm',
                          'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
   // Deliveries for Today (skTable no-ops if the tbody isn't on the current
   // page, same as every other call site in this file).
@@ -4711,6 +4711,7 @@ function renderOrders(orders) {
   document.getElementById('ordersBody').innerHTML = paged.length
     ? paged.map(o => `
         <tr>
+          <td>${o.status === 'processing' ? `<input type="checkbox" class="order-select-cb" value="${o.order_id}"/>` : ''}</td>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${(() => { const s = Array.isArray(o.staff) ? o.staff[0] : o.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</td>
@@ -4745,9 +4746,43 @@ function renderOrders(orders) {
             </button>` : ''}
           </td>
         </tr>`).join('')
-    : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
+    : '<tr><td colspan="10" class="table-empty">No orders yet</td></tr>';
   renderPager('ordersPagination', orders.length, ordersPage, 'changeOrdersPage');
+  // Select-all checkbox follows the page it's on — reset it (rather than
+  // leaving a stale "checked" look) every time the page/table re-renders.
+  const selectAllCb = document.getElementById('ordersSelectAll');
+  if (selectAllCb) selectAllCb.checked = false;
 }
+
+// Bulk Mark Out for Delivery (user request, Oct 29 2026) — a batch version
+// of the per-order "Mark Out for Delivery" button in orderStatusActionHtml.
+// Checkboxes only render on 'processing' rows (see renderOrders above), so
+// selection is naturally restricted to orders that are actually eligible.
+function toggleAllOrderSelections(cb) {
+  document.querySelectorAll('.order-select-cb').forEach(el => { el.checked = cb.checked; });
+}
+window.toggleAllOrderSelections = toggleAllOrderSelections;
+
+async function bulkMarkOutForDeliverySelected() {
+  const ids = Array.from(document.querySelectorAll('.order-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one processing order first.', 'error'); return; }
+  const confirmed = await showConfirmDialog('Confirm Bulk Mark Out for Delivery', `Mark ${ids.length} order(s) as Out for Delivery?`);
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/admin/orders/out-for-delivery-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Marked ${body.updated.length} order(s) Out for Delivery${body.skipped.length ? `, skipped ${body.skipped.length} (not eligible)` : ''}.`);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to bulk mark out for delivery.', 'error');
+    }
+  } catch (e) { showToast('Error during bulk mark out for delivery.', 'error'); }
+}
+window.bulkMarkOutForDeliverySelected = bulkMarkOutForDeliverySelected;
 
 // Captured ONCE, right here — see the matching comment above
 // _trueRenderInventory for why this must never be re-read live.

@@ -1410,12 +1410,21 @@ function addToOrder(productId, name, price, maxStock, selectedOptions = {}, disc
   updateTotal();
 }
 
-function updateQty(productId, delta) {
-  const item = orderItems.find(i => i.product_id === productId);
+// Bug fix (user report, Oct 29 2026): these three used to look a cart line
+// up by product_id alone via orderItems.find(...). addToOrder already keys
+// a line by product_id + selected_options (so two variants of the same
+// product correctly land in separate lines), but find()-by-product_id-only
+// always returns the FIRST line with that product_id — so once a second
+// variant line existed, tapping its own +/-/remove silently acted on the
+// wrong (first) line instead. Now keyed by the cart line's own array index,
+// which is unambiguous no matter how many variants of the same product are
+// in the cart.
+function updateQty(idx, delta) {
+  const item = orderItems[idx];
   if (!item) return;
   item.quantity += delta;
   if (item.quantity <= 0) {
-    orderItems = orderItems.filter(i => i.product_id !== productId);
+    orderItems.splice(idx, 1);
   } else if (item.quantity > item.max) {
     item.quantity = item.max;
     showToast(`Maximum stock is ${item.max}.`, 'error');
@@ -1427,15 +1436,15 @@ function updateQty(productId, delta) {
 // Directly-typed quantity (replaces repeated "+" tapping for large quantities).
 // Validates/clamps to [1, item.max] the same way updateQty does, so the two
 // controls can never disagree on what counts as a valid quantity.
-function setQty(productId, rawValue, inputEl) {
-  const item = orderItems.find(i => i.product_id === productId);
+function setQty(idx, rawValue, inputEl) {
+  const item = orderItems[idx];
   if (!item) return;
   let qty = parseInt(rawValue, 10);
   if (isNaN(qty) || qty < 1) {
     // Empty, non-numeric, zero or negative — treat as "remove this item"
     // rather than silently snapping back to 1, since that's what the field
     // being cleared out usually means.
-    orderItems = orderItems.filter(i => i.product_id !== productId);
+    orderItems.splice(idx, 1);
     renderOrderItems();
     updateTotal();
     return;
@@ -1449,8 +1458,8 @@ function setQty(productId, rawValue, inputEl) {
   updateTotal();
 }
 
-function removeFromOrder(productId) {
-  orderItems = orderItems.filter(i => i.product_id !== productId);
+function removeFromOrder(idx) {
+  orderItems.splice(idx, 1);
   renderOrderItems();
   updateTotal();
 }
@@ -1467,19 +1476,19 @@ function renderOrderItems() {
     validateCheckoutButton();
     return;
   }
-  wrap.innerHTML = orderItems.map(item => `
+  wrap.innerHTML = orderItems.map((item, idx) => `
     <div class="pos-order-item">
       <div class="pos-order-item-name" title="${item.name}">${item.name}</div>
       <div class="pos-qty-ctrl">
-        <button class="pos-qty-btn" onclick="updateQty('${item.product_id}', -1)">−</button>
+        <button class="pos-qty-btn" onclick="updateQty(${idx}, -1)">−</button>
         <input type="text" inputmode="numeric" pattern="[0-9]*" class="pos-qty-input" value="${item.quantity}"
-               onchange="setQty('${item.product_id}', this.value, this)"
+               onchange="setQty(${idx}, this.value, this)"
                onkeydown="if(event.key==='Enter') this.blur()"
                onclick="this.select()"/>
-        <button class="pos-qty-btn" onclick="updateQty('${item.product_id}', 1)">+</button>
+        <button class="pos-qty-btn" onclick="updateQty(${idx}, 1)">+</button>
       </div>
       <div class="pos-order-item-price">${peso(item.price * item.quantity)}</div>
-      <button class="pos-remove-btn" onclick="removeFromOrder('${item.product_id}')">
+      <button class="pos-remove-btn" onclick="removeFromOrder(${idx})">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
     </div>`).join('');
@@ -3652,6 +3661,7 @@ function renderStaffOrders(orders) {
   document.getElementById('staffOrdersBody').innerHTML = paged.length
     ? paged.map(o => `
         <tr>
+          <td>${o.status === 'processing' ? `<input type="checkbox" class="staff-order-select-cb" value="${o.order_id}"/>` : ''}</td>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
@@ -3683,8 +3693,10 @@ function renderStaffOrders(orders) {
             </button>` : ''}
           </td>
         </tr>`).join('')
-    : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
+    : '<tr><td colspan="10" class="table-empty">No orders yet</td></tr>';
   renderPager('staffOrdersPagination', orders.length, staffOrdersPage, 'changeStaffOrdersPage');
+  const selectAllCb = document.getElementById('staffOrdersSelectAll');
+  if (selectAllCb) selectAllCb.checked = false;
 }
 
 // ─── View Staff Order Items Modal ─────────────────────
@@ -3799,7 +3811,7 @@ function viewStaffOrderItems(order) {
 
 async function loadOrders() {
   // ── Skeleton ──
-  skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
+  skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
                               'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
   // Deliveries for Today (skTable no-ops if the tbody isn't on the current
   // page, same as every other call site in this file).
@@ -3838,11 +3850,40 @@ function updateOrdersBadge(orders) {
   }
 }
 
+// Bulk Mark Out for Delivery (user request, Oct 29 2026) — see the matching
+// note in admin.js. Checkboxes only render on 'processing' rows below.
+function toggleAllStaffOrderSelections(cb) {
+  document.querySelectorAll('.staff-order-select-cb').forEach(el => { el.checked = cb.checked; });
+}
+window.toggleAllStaffOrderSelections = toggleAllStaffOrderSelections;
+
+async function staffBulkMarkOutForDeliverySelected() {
+  const ids = Array.from(document.querySelectorAll('.staff-order-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one processing order first.', 'error'); return; }
+  const confirmed = await showConfirmDialog('Confirm Bulk Mark Out for Delivery', `Mark ${ids.length} order(s) as Out for Delivery?`);
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/staff/orders/out-for-delivery-bulk', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: ids }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(`Marked ${body.updated.length} order(s) Out for Delivery${body.skipped.length ? `, skipped ${body.skipped.length} (not eligible)` : ''}.`);
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to bulk mark out for delivery.', 'error');
+    }
+  } catch (e) { showToast('Error during bulk mark out for delivery.', 'error'); }
+}
+window.staffBulkMarkOutForDeliverySelected = staffBulkMarkOutForDeliverySelected;
+
 function renderStaffOrders(orders) {
   const paged = paginate(orders, staffOrdersPage);
   document.getElementById('staffOrdersBody').innerHTML = paged.length
     ? paged.map(o => `
         <tr>
+          <td>${o.status === 'processing' ? `<input type="checkbox" class="staff-order-select-cb" value="${o.order_id}"/>` : ''}</td>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
@@ -3874,8 +3915,10 @@ function renderStaffOrders(orders) {
             </button>` : ''}
           </td>
         </tr>`).join('')
-    : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
+    : '<tr><td colspan="10" class="table-empty">No orders yet</td></tr>';
   renderPager('staffOrdersPagination', orders.length, staffOrdersPage, 'changeStaffOrdersPage');
+  const selectAllCb = document.getElementById('staffOrdersSelectAll');
+  if (selectAllCb) selectAllCb.checked = false;
 }
 
 // ─── View Staff Order Items Modal ─────────────────────

@@ -4852,6 +4852,62 @@ def _bulk_not_delivered(order_ids, branch_id=None):
     results.extend([{'order_id': oid, 'skipped': True} for oid in order_ids if oid not in found_ids])
     return {'results': results}
 
+# Bulk Mark Out for Delivery (user request, Oct 29 2026) — a batch version of
+# the Orders module's own per-order "Mark Out for Delivery" button
+# (admin_update_order/staff_update_order with status='out_for_delivery').
+# Only orders currently 'processing' are eligible, same as the single-order
+# path; anything else selected is silently skipped rather than erroring the
+# whole batch. Stamps dispatch_date exactly like the single-order path does
+# (see the "To Dispatch" removal, Oct 26 2026) so a batch of orders lands
+# straight into "Out for Deliveries" with no separate dispatch step.
+def _bulk_mark_out_for_delivery(order_ids, branch_id=None):
+    if not order_ids:
+        return {'updated': [], 'skipped': []}
+    res = supabase.table('order').select(
+        'order_id, status, branch_id, staff_id, customer(fcm_token, fname)'
+    ).in_('order_id', order_ids).execute()
+    rows = res.data or []
+    updated, skipped = [], []
+    today = datetime.utcnow().strftime('%Y-%m-%d')
+    session_staff_id = session.get('staff_id')
+    for row in rows:
+        if row.get('status') != 'processing' or (branch_id and row.get('branch_id') != branch_id):
+            skipped.append(row['order_id'])
+            continue
+        update_data = {'status': 'out_for_delivery', 'dispatch_date': today}
+        if session_staff_id and not row.get('staff_id'):
+            update_data['staff_id'] = session_staff_id
+        supabase.table('order').update(update_data).eq('order_id', row['order_id']).execute()
+        updated.append(row['order_id'])
+        try:
+            customer = row.get('customer')
+            if isinstance(customer, list):
+                customer = customer[0] if customer else {}
+            fcm_token = (customer or {}).get('fcm_token')
+            if fcm_token and 'out_for_delivery' in ORDER_STATUS_MESSAGES:
+                notif_title, notif_body = ORDER_STATUS_MESSAGES['out_for_delivery']
+                send_push_notification(fcm_token, notif_title, notif_body,
+                                        {'order_id': row['order_id'], 'status': 'out_for_delivery'})
+        except Exception as notif_err:
+            print(f'Notification error (bulk out-for-delivery): {notif_err}')
+    found_ids = {r['order_id'] for r in rows}
+    skipped.extend([oid for oid in order_ids if oid not in found_ids])
+    return {'updated': updated, 'skipped': skipped}
+
+@app.route('/api/admin/orders/out-for-delivery-bulk', methods=['POST'])
+@admin_required
+def admin_out_for_delivery_bulk():
+    """Bulk Mark Out for Delivery — see _bulk_mark_out_for_delivery above."""
+    try:
+        data = request.get_json(silent=True) or {}
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+        return jsonify(_bulk_mark_out_for_delivery(order_ids)), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/orders/<order_id>/delivered', methods=['POST'])
 @admin_required
 def admin_mark_delivered(order_id):
@@ -5822,6 +5878,23 @@ def staff_not_delivered_bulk():
         if not order_ids:
             return jsonify({'error': 'At least one order_id is required.'}), 400
         return jsonify(_bulk_not_delivered(order_ids, branch_id=branch_id)), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/orders/out-for-delivery-bulk', methods=['POST'])
+@staff_required
+def staff_out_for_delivery_bulk():
+    """Branch-scoped mirror of admin_out_for_delivery_bulk above."""
+    try:
+        branch_id = _staff_branch_id()
+        if not branch_id:
+            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
+        data = request.get_json(silent=True) or {}
+        order_ids = data.get('order_ids', [])
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+        return jsonify(_bulk_mark_out_for_delivery(order_ids, branch_id=branch_id)), 200
     except Exception as e:
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500

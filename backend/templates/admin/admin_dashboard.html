@@ -573,13 +573,19 @@
         </select>
         <button id="adminClearFiltersBtn" class="btn btn-cancel" onclick="clearAdminOrderFilters()" disabled style="font-size:12px;padding:6px 12px;opacity:0.5;cursor:not-allowed;margin-left:auto;">Clear Filters</button>
       </div>
+      <!-- Bulk Mark Out for Delivery (user request, Oct 29 2026) — acts on
+           whichever 'processing' rows are checked below, in one request,
+           instead of clicking "Mark Out for Delivery" per order. -->
+      <div class="section-toolbar" style="margin-top:-0.5rem;">
+        <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="bulkMarkOutForDeliverySelected()">Mark Out for Delivery (Selected)</button>
+      </div>
       <div class="card">
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th>Order ID</th><th>Customer</th><th>Staff</th><th>Type</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Actions</th></tr>
+              <tr><th style="width:30px;"><input type="checkbox" id="ordersSelectAll" onchange="toggleAllOrderSelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Staff</th><th>Type</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Actions</th></tr>
             </thead>
-            <tbody id="ordersBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
+            <tbody id="ordersBody"><tr><td colspan="10" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
         <div id="ordersPagination" style="padding:0 1rem;"></div>
