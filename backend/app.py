@@ -3970,19 +3970,33 @@ def admin_update_product(product_id):
         base_price_raw = request.form.get('base_price', '').strip()
         base_price     = float(base_price_raw) if base_price_raw else None
 
-        # Price-history logging — only when the resale price actually changes.
+        # Price-history logging — fires when the resale price and/or the base
+        # price changes (previously only tracked resale `price`, which is why
+        # a base-price-only edit, or sometimes both at once, never showed up
+        # in the modal: only the `price` branch was being checked/written).
         new_price = float(request.form.get('price', 0))
         try:
-            existing_res = supabase.table('product').select('price').eq('product_id', product_id).execute()
-            old_price = existing_res.data[0]['price'] if existing_res.data else None
+            existing_res = supabase.table('product').select('price, base_price').eq('product_id', product_id).execute()
+            existing_row = existing_res.data[0] if existing_res.data else None
+            old_price      = existing_row['price'] if existing_row else None
+            old_base_price = existing_row.get('base_price') if existing_row else None
         except Exception:
             old_price = None
-        if old_price is not None and float(old_price) != new_price:
+            old_base_price = None
+
+        price_changed = old_price is not None and float(old_price) != new_price
+        base_price_changed = (
+            (old_base_price is None) != (base_price is None)
+            or (old_base_price is not None and base_price is not None and float(old_base_price) != base_price)
+        )
+        if price_changed or base_price_changed:
             try:
                 supabase.table('price_history').insert({
                     'product_id':      product_id,
-                    'old_price':       old_price,
-                    'new_price':       new_price,
+                    'old_price':       old_price if price_changed else None,
+                    'new_price':       new_price if price_changed else None,
+                    'old_base_price':  old_base_price if base_price_changed else None,
+                    'new_base_price':  base_price if base_price_changed else None,
                     'changed_by':      session.get('staff_id'),
                     'changed_by_role': session.get('role', 'admin'),
                 }).execute()
@@ -4053,7 +4067,7 @@ def admin_update_product(product_id):
 @admin_required
 def admin_get_price_history():
     """Read path for the price_history rows admin_update_product() has been
-    writing on every resale-price change. Optional ?product_id=... filters
+    writing on every resale-price and/or base-price change. Optional ?product_id=... filters
     to one product (used by the per-row "Price History" button); omitted,
     it returns the most recent changes across every product (the Products
     page header's "Price History" button).

@@ -719,6 +719,23 @@ async function dashGoToBranchInventory(branchName) {
   }, 150);
 }
 
+async function dashGoToBranchSales(branchKey) {
+  // branchKey: 'TE' (Triple E) or 'FC' (Fiel Collince) — routes the Overview
+  // stat cards into the Sales Report module and highlights that branch's
+  // performance card there, same "jump + flash" pattern as
+  // dashGoToBranchInventory above.
+  await _ensureSectionLoaded('sales');
+  showSection('sales', _navEl('sales'));
+  setTimeout(() => {
+    const card = document.getElementById('branch' + branchKey + 'Card');
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    card.style.transition = 'box-shadow 0.3s ease';
+    card.style.boxShadow  = '0 0 0 3px ' + (branchKey === 'TE' ? 'var(--g-500)' : '#3b82f6');
+    setTimeout(() => { card.style.boxShadow = ''; }, 1600);
+  }, 150);
+}
+
 async function dashGoToProducts() {
   await _ensureSectionLoaded('products');
   showSection('products', _navEl('products'));
@@ -748,6 +765,7 @@ async function dashGoToPurchaseOrders() {
 }
 window.dashGoToInventory       = dashGoToInventory;
 window.dashGoToBranchInventory = dashGoToBranchInventory;
+window.dashGoToBranchSales     = dashGoToBranchSales;
 window.dashGoToProducts        = dashGoToProducts;
 window.dashGoToOrders          = dashGoToOrders;
 window.dashGoToSales           = dashGoToSales;
@@ -1436,8 +1454,9 @@ window.changeProductsPage = changeProductsPage;
 
 // ─── Price History (Products module) ──────────────────
 // Read path for the price_history rows admin_update_product() has been
-// writing on every resale-price change since Day 1/2 of the variant-pricing
-// work — this is the first UI that actually reads price_history back.
+// writing on every resale-price and/or base-price change since Day 1/2 of
+// the variant-pricing work — this is the first UI that actually reads
+// price_history back.
 // Called with no args from the Products header button (all products,
 // most recent first); called with (productId, productName) from a
 // product row's own "Price History" icon to filter to just that product.
@@ -1448,7 +1467,7 @@ async function openPriceHistoryModal(productId, productName) {
       <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
         <div>
           <h3 style="margin:0;font-size:17px;">Price History${titleSuffix}</h3>
-          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">Resale price changes, most recent first</p>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">Resale and base price changes, most recent first</p>
         </div>
         <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
       </div>
@@ -1480,29 +1499,54 @@ function renderPriceHistoryRows(rows, showProductCol) {
     wrap.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">No price changes recorded yet.</p>';
     return;
   }
+  // Each saved edit can change the resale price, the base price, or both at
+  // once — flatten into one display line per price type that actually
+  // changed on that save, so a base-price-only edit (previously invisible)
+  // and a combined edit (previously only showed the resale half) both show.
+  const lines = [];
+  rows.forEach(r => {
+    const hasResale = r.old_price !== null && r.old_price !== undefined && r.new_price !== null && r.new_price !== undefined;
+    const hasBase    = r.old_base_price !== null && r.old_base_price !== undefined && r.new_base_price !== null && r.new_base_price !== undefined;
+    if (hasResale) lines.push({ ...r, _type: 'Resale Price', _old: Number(r.old_price), _new: Number(r.new_price) });
+    if (hasBase)    lines.push({ ...r, _type: 'Base Price',   _old: Number(r.old_base_price), _new: Number(r.new_base_price) });
+    // Legacy rows written before base-price tracking existed carried
+    // old_price/new_price unconditionally — if neither flag matched (should
+    // not happen going forward) fall back to showing the raw resale fields
+    // so old data doesn't just vanish from the modal.
+    if (!hasResale && !hasBase) lines.push({ ...r, _type: 'Resale Price', _old: Number(r.old_price || 0), _new: Number(r.new_price || 0) });
+  });
+
+  if (!lines.length) {
+    wrap.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">No price changes recorded yet.</p>';
+    return;
+  }
+
   wrap.innerHTML = `
     <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
       <thead>
         <tr style="text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border);">
           <th style="padding:6px 8px;">Date</th>
           ${showProductCol ? '<th style="padding:6px 8px;">Product</th>' : ''}
-          <th style="padding:6px 8px;text-align:right;">Old Price</th>
-          <th style="padding:6px 8px;text-align:right;">New Price</th>
+          <th style="padding:6px 8px;">Type</th>
+          <th style="padding:6px 8px;text-align:right;">Old</th>
+          <th style="padding:6px 8px;text-align:right;">New</th>
           <th style="padding:6px 8px;text-align:right;">Change</th>
           <th style="padding:6px 8px;">Changed By</th>
         </tr>
       </thead>
       <tbody>
-        ${rows.map(r => {
-          const oldP  = Number(r.old_price || 0);
-          const newP  = Number(r.new_price || 0);
+        ${lines.map(r => {
+          const oldP  = r._old;
+          const newP  = r._new;
           const delta = newP - oldP;
           const deltaColor = delta > 0 ? '#ef4444' : (delta < 0 ? '#16a34a' : 'var(--text-muted)');
           const deltaStr   = delta > 0 ? `+${peso(delta)}` : (delta < 0 ? `-${peso(Math.abs(delta))}` : peso(0));
+          const typeBadgeColor = r._type === 'Base Price' ? '#3b82f6' : '#16a34a';
           return `
             <tr style="border-bottom:1px solid var(--border);">
               <td style="padding:7px 8px;white-space:nowrap;">${movementDateStr(r.created_at)}</td>
               ${showProductCol ? `<td style="padding:7px 8px;">${r.product_name || '—'}</td>` : ''}
+              <td style="padding:7px 8px;"><span style="font-size:11px;font-weight:600;color:${typeBadgeColor};background:${typeBadgeColor}1a;border-radius:4px;padding:2px 6px;white-space:nowrap;">${r._type}</span></td>
               <td style="padding:7px 8px;text-align:right;color:var(--text-muted);text-decoration:line-through;">${peso(oldP)}</td>
               <td style="padding:7px 8px;text-align:right;font-weight:600;">${peso(newP)}</td>
               <td style="padding:7px 8px;text-align:right;font-weight:700;color:${deltaColor};">${deltaStr}</td>
@@ -1608,12 +1652,15 @@ function _renderBarcodeModalContent(p) {
   const rows = _barcodeRows(p);
   showModal(`
     <div style="padding:1.25rem 1.5rem 1.5rem;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;gap:8px;">
         <div>
           <h3 style="margin:0;font-size:17px;">Barcode</h3>
           <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">${p.product_name}</p>
         </div>
-        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button class="btn btn-outline-green" style="font-size:12px;padding:5px 11px;white-space:nowrap;" onclick='_generateAllBarcodes("${p.product_id}")' title="Fill in a barcode for every variant/combo that doesn't have one yet">Generate All</button>
+          <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;padding-right:4px;">
         ${rows.map((r, idx) => {
@@ -1682,6 +1729,51 @@ async function _generateBarcodeFromModal(productId, scope, payload) {
   }
 }
 window._generateBarcodeFromModal = _generateBarcodeFromModal;
+
+// "Generate All" — fills in a barcode for every row that doesn't have one
+// yet (base/choice/combo), leaving rows that already have a code untouched
+// so one click can't invalidate labels already printed. Rows collapsed into
+// the "too many combinations" placeholder are skipped, same as the per-row
+// button being unavailable there.
+async function _generateAllBarcodes(productId) {
+  const p = allProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+  const missing = _barcodeRows(p).filter(r => !r.tooMany && !r.code);
+  if (!missing.length) {
+    showToast('Every variant already has a barcode.', 'success');
+    return;
+  }
+  let okCount = 0, failCount = 0;
+  for (const r of missing) {
+    try {
+      const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: r.scope, ...r.payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      if (r.scope === 'product') {
+        p.barcode = data.barcode;
+      } else if (r.scope === 'choice') {
+        const g = (p.option_groups || [])[r.payload.group_index];
+        const c = g && (g.choices || []).find(ch => ch && ch.value === r.payload.choice_value);
+        if (c) c.barcode = data.barcode;
+      } else if (r.scope === 'combo') {
+        p.variant_overrides = p.variant_overrides || [];
+        let entry = _findComboEntry(p.variant_overrides, r.payload.options);
+        if (!entry) { entry = { options: r.payload.options, price: '', image: '', barcode: data.barcode }; p.variant_overrides.push(entry); }
+        else entry.barcode = data.barcode;
+      }
+      okCount++;
+    } catch (e) {
+      failCount++;
+    }
+  }
+  _renderBarcodeModalContent(p);
+  showToast(failCount ? `Generated ${okCount}, ${failCount} failed.` : `Generated ${okCount} barcode${okCount === 1 ? '' : 's'}.`, failCount ? 'error' : 'success');
+}
+window._generateAllBarcodes = _generateAllBarcodes;
 
 // Printable barcode label — same popup-window pattern as
 // printStockMovementHistory()/printPOList(). Sized for a small adhesive
@@ -3723,10 +3815,15 @@ async function submitAddStock(e) {
     : [branchVal];
 
   try {
-    let allOk = true;
+    // One request per item×branch combo — previously sent one at a time in
+    // a nested await loop, so a multi-row Add Stock (or "both branches")
+    // could take several seconds of pure network round-trips stacked back
+    // to back. These are all independent writes, so fire them together and
+    // wait on the batch instead (final-defense speed follow-up, Nov 11 2026).
+    const requests = [];
     for (const item of items) {
       for (const bId of branchIds) {
-        const res = await fetch('/api/admin/inventory', {
+        requests.push(fetch('/api/admin/inventory', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -3738,10 +3835,11 @@ async function submitAddStock(e) {
             type:            'restock',
             variant_options: item.variant_options,
           }),
-        });
-        if (!res.ok) { allOk = false; }
+        }));
       }
     }
+    const results = await Promise.all(requests);
+    const allOk = results.every(res => res.ok);
     if (allOk) {
       const msg = branchVal === 'both'
         ? `${items.length} product(s) added to both branches!`
@@ -3888,10 +3986,12 @@ async function submitTransfer(e) {
 
   setButtonLoading(btn, true);
   try {
-    let allOk = true;
-    let lastErr = '';
-    for (const combo of combos) {
-      const res = await fetch('/api/admin/inventory', {
+    // Each combo is an independent variant stock row, so they're safe to
+    // transfer in parallel instead of one-at-a-time (final-defense speed
+    // follow-up, Nov 11 2026 — a multi-variant transfer no longer waits on
+    // combos.length sequential round-trips).
+    const results = await Promise.all(combos.map(combo =>
+      fetch('/api/admin/inventory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_id:      productId,
@@ -3902,11 +4002,13 @@ async function submitTransfer(e) {
           note:            note,
           type:            'transfer',
         }),
-      });
-      if (!res.ok) {
-        allOk = false;
-        try { lastErr = (await res.json()).error || ''; } catch (_e) {}
-      }
+      })
+    ));
+    const allOk = results.every(res => res.ok);
+    let lastErr = '';
+    if (!allOk) {
+      const failed = results.find(res => !res.ok);
+      try { lastErr = (await failed.json()).error || ''; } catch (_e) {}
     }
     if (allOk) {
       showToast(combos.length > 1 ? `${combos.length} variant transfers completed!` : 'Stock transferred successfully!');
@@ -3998,10 +4100,12 @@ async function submitAdjust(e) {
 
   setButtonLoading(btn, true);
   try {
-    let allOk = true;
-    let lastErr = '';
-    for (const combo of combos) {
-      const res = await fetch('/api/admin/inventory', {
+    // Independent per-combo deductions — run them together instead of
+    // sequentially (final-defense speed follow-up, Nov 11 2026); stock was
+    // already validated per-combo above, so this is purely about not
+    // paying combos.length round-trips one after another.
+    const results = await Promise.all(combos.map(combo =>
+      fetch('/api/admin/inventory', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           product_id:      productId,
@@ -4011,11 +4115,13 @@ async function submitAdjust(e) {
           type:            'adjustment',
           variant_options: combo,
         }),
-      });
-      if (!res.ok) {
-        allOk = false;
-        try { lastErr = (await res.json()).error || ''; } catch (_e) {}
-      }
+      })
+    ));
+    const allOk = results.every(res => res.ok);
+    let lastErr = '';
+    if (!allOk) {
+      const failed = results.find(res => !res.ok);
+      try { lastErr = (await failed.json()).error || ''; } catch (_e) {}
     }
     if (allOk) {
       showToast(`Stock adjusted — ${qty} unit(s) deducted${combos.length > 1 ? ` across ${combos.length} variants` : ''} (${reason}).`);
@@ -4170,7 +4276,7 @@ function renderDeliveriesForToday(orders) {
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${o.delivery_attempts || 0}/3</td>
           <td style="display:flex;gap:6px;">
-            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openRemitModal('${o.order_id}')">Remit</button>
+            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openRemitModal('${o.order_id}')">${o.payment?.payment_method === 'gcash' ? 'Mark Delivered' : 'Remit'}</button>
             <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="markOrderNotDelivered('${o.order_id}')">Not Delivered</button>
           </td>
         </tr>`;
@@ -4230,6 +4336,28 @@ async function bulkNotDeliveredSelectedOrders() {
   } catch (e) { showToast('Error during bulk not-delivered.', 'error'); }
 }
 window.bulkNotDeliveredSelectedOrders = bulkNotDeliveredSelectedOrders;
+
+// Manual "Close Remittance" (final-defense follow-up, Nov 10 2026) — same
+// effect as the automatic 5pm flag (_auto_flag_not_remitted_orders in
+// app.py), just triggered on demand instead of waiting for the clock.
+// Store-wide for admin; doesn't lock anything out — orders can still be
+// remitted afterward, they just count toward tomorrow's totals per
+// _remittance_business_date.
+async function closeRemittanceNow() {
+  const confirmed = await showConfirmDialog('Close Remittance', 'Flag every still-pending delivery (store-wide) as Not Remitted right now, instead of waiting for the 5pm auto-flag?');
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/admin/orders/close-remittance', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(body.message || 'Remittance closed.');
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to close remittance.', 'error');
+    }
+  } catch (e) { showToast('Error closing remittance.', 'error'); }
+}
+window.closeRemittanceNow = closeRemittanceNow;
 
 // "Today's Remittance" strip (adviser follow-up, same day as the delivery
 // notification categories). Expected = full amount due across every order
@@ -4341,6 +4469,14 @@ function openRemitModal(orderId) {
   const shipping   = Number(order.shipping_fee || 0);
   const grandTotal = Math.round((subtotal + shipping) * 100) / 100;
 
+  // GCash already collected the money through PayMongo at checkout, so
+  // there's nothing to count/type/match — skip the Remit modal entirely
+  // and just confirm the physical delivery in one click.
+  if (paymentMethod === 'gcash') {
+    confirmGcashDelivered(orderId, grandTotal);
+    return;
+  }
+
   const addrParts  = (order.address || '').split('|');
   const addrString = addrParts.length > 1
     ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
@@ -4432,6 +4568,31 @@ async function submitRemitAmount(orderId, grandTotal) {
   } catch (e) {
     errorEl.textContent   = 'Error completing the order.';
     errorEl.style.display = 'block';
+  }
+}
+
+// One-click delivered confirmation for GCash orders — reuses the exact same
+// /delivered endpoint as the typed-amount Remit flow (amount_remitted still
+// gets sent so _validate_remittance's match check passes), just without a
+// modal or typing, since the payment already happened online.
+async function confirmGcashDelivered(orderId, grandTotal) {
+  const ok = await showConfirmDialog('Mark as Delivered', `Already paid ₱${grandTotal.toFixed(2)} via GCash — mark this order as delivered now?`);
+  if (!ok) return;
+  try {
+    const res  = await fetch(`/api/admin/orders/${orderId}/delivered`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount_remitted: grandTotal }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast('Order marked delivered — already paid via GCash.');
+      loadOrders();
+      return;
+    }
+    showToast(body.error || 'Failed to complete the order.', 'error');
+  } catch (e) {
+    showToast('Error completing the order.', 'error');
   }
 }
 
@@ -5073,6 +5234,97 @@ let revenueChartInst = null;
 let paymentChartInst = null;
 let branchChartInst  = null;
 
+// Branch sales-performance trend chart (revenueChart canvas, repurposed to
+// show both branches side by side instead of one combined line) — cached
+// inputs let the Day/Week/Month toggle re-draw without re-running the
+// sales filters.
+let lastSalesTrendCompleted = [];
+let lastSalesTrendTeId = null;
+let lastSalesTrendFcId = null;
+
+function _salesTrendBuckets(period) {
+  const buckets = [];
+  const now = new Date(); now.setHours(0, 0, 0, 0);
+  if (period === 'week') {
+    // 8 weeks, Sunday-start, oldest first
+    const thisWeekStart = new Date(now); thisWeekStart.setDate(now.getDate() - now.getDay());
+    for (let i = 7; i >= 0; i--) {
+      const start = new Date(thisWeekStart); start.setDate(thisWeekStart.getDate() - i * 7);
+      const end   = new Date(start); end.setDate(start.getDate() + 7);
+      buckets.push({ start, end, label: start.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) });
+    }
+  } else if (period === 'month') {
+    // 6 months, oldest first
+    for (let i = 5; i >= 0; i--) {
+      const start = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const end   = new Date(now.getFullYear(), now.getMonth() - i + 1, 1);
+      buckets.push({ start, end, label: start.toLocaleDateString('en-PH', { month: 'short', year: 'numeric' }) });
+    }
+  } else {
+    // day — last 7 days, oldest first
+    for (let i = 6; i >= 0; i--) {
+      const start = new Date(now); start.setDate(now.getDate() - i);
+      const end   = new Date(start); end.setDate(start.getDate() + 1);
+      buckets.push({ start, end, label: start.toLocaleDateString('en-PH', { month: 'short', day: 'numeric' }) });
+    }
+  }
+  return buckets;
+}
+
+function renderBranchTrendChart(completed, teId, fcId, hasBranchData, allWalkin) {
+  const period  = currentSalesChartPeriod || 'day';
+  const buckets = _salesTrendBuckets(period);
+
+  function sumFor(predicate) {
+    return buckets.map(b => completed
+      .filter(o => {
+        const d = new Date(o.date || o.created_at || '');
+        return !isNaN(d) && d >= b.start && d < b.end && predicate(o);
+      })
+      .reduce((s, o) => s + Number(o.total || 0), 0));
+  }
+
+  let teSeries, fcSeries;
+  if (hasBranchData) {
+    teSeries = sumFor(o => o.branch_id === teId);
+    fcSeries = sumFor(o => o.branch_id === fcId);
+  } else {
+    // No branch_id on orders yet — fall back to treating walk-ins as
+    // Triple E (same convention used for the summary cards above).
+    teSeries = sumFor(o => o.order_type === 'walk_in');
+    fcSeries = buckets.map(() => 0);
+  }
+
+  const titleEl = document.getElementById('salesTrendChartTitle');
+  if (titleEl) {
+    const periodLabel = period === 'week' ? 'Week' : period === 'month' ? 'Month' : 'Day';
+    titleEl.textContent = `Branch Sales Performance by ${periodLabel}`;
+  }
+
+  const revCtx = document.getElementById('revenueChart')?.getContext('2d');
+  if (!revCtx) return;
+  if (revenueChartInst) revenueChartInst.destroy();
+  revenueChartInst = new Chart(revCtx, {
+    type: 'line',
+    data: {
+      labels: buckets.map(b => b.label),
+      datasets: [
+        { label: 'Triple E', data: teSeries,
+          borderColor: 'rgba(22,163,74,1)', backgroundColor: 'rgba(22,163,74,0.12)',
+          borderWidth: 2, tension: 0.35, fill: true, pointRadius: 3 },
+        { label: 'Fiel Collince', data: fcSeries,
+          borderColor: 'rgba(59,130,246,1)', backgroundColor: 'rgba(59,130,246,0.12)',
+          borderWidth: 2, tension: 0.35, fill: true, pointRadius: 3 }
+      ]
+    },
+    options: { responsive: true, plugins: { legend: { display: true, position: 'bottom', labels: { boxWidth: 12, font: { size: 11 } } } },
+      scales: {
+        x: { ticks: { color: chartThemeColors().tick }, grid: { color: chartThemeColors().grid } },
+        y: { beginAtZero: true, ticks: { callback: v => '₱' + v.toLocaleString(), color: chartThemeColors().tick }, grid: { color: chartThemeColors().grid } }
+      } }
+  });
+}
+
 // Chart.js's default tick/grid colors (dark gray text, light gray grid
 // lines) assume a light page background. Against this dashboard's
 // near-black dark theme they were nearly invisible — pull the live
@@ -5204,6 +5456,21 @@ function applySalesDateRange() {
 }
 
 let currentSalesBranchFilter = 'all';
+let currentSalesChartPeriod  = 'day'; // 'day' | 'week' | 'month' — the branch-performance trend chart's granularity
+
+function setSalesChartPeriod(period) {
+  currentSalesChartPeriod = period;
+  document.querySelectorAll('.sales-chart-period-btn').forEach(btn => {
+    btn.classList.toggle('active', btn.dataset.period === period);
+  });
+  // Re-draw from the last-filtered order set rather than re-running
+  // filterSalesOrders(allSalesOrders), which would silently drop whatever
+  // date-range/branch filter the toolbar above currently has applied.
+  const hasBranchData = lastSalesTrendCompleted.some(o => o.branch_id);
+  const allWalkin = lastSalesTrendCompleted.filter(o => o.order_type === 'walk_in');
+  renderBranchTrendChart(lastSalesTrendCompleted, lastSalesTrendTeId, lastSalesTrendFcId, hasBranchData, allWalkin);
+}
+window.setSalesChartPeriod = setSalesChartPeriod;
 
 function applySalesBranchFilter(val) {
   currentSalesBranchFilter = val;
@@ -5307,34 +5574,13 @@ function renderSalesData(completed, allOrders) {
     });
   }
 
-  // Revenue by day (last 7 days from filtered data)
-  const last7 = [];
-  for (let i = 6; i >= 0; i--) {
-    const d = new Date(); d.setDate(d.getDate() - i);
-    last7.push(d.toISOString().split('T')[0]);
-  }
-  const dailyRevenue = last7.map(day =>
-    completed.filter(o => (o.date||o.created_at||'').startsWith(day))
-             .reduce((s,o)=>s+Number(o.total||0),0)
-  );
-  const revCtx = document.getElementById('revenueChart')?.getContext('2d');
-  if (revCtx) {
-    if (revenueChartInst) revenueChartInst.destroy();
-    revenueChartInst = new Chart(revCtx, {
-      type: 'line',
-      data: {
-        labels: last7.map(d=>new Date(d).toLocaleDateString('en-PH',{month:'short',day:'numeric'})),
-        datasets: [{ label:'Revenue', data:dailyRevenue,
-          borderColor:'rgba(22,163,74,1)', backgroundColor:'rgba(22,163,74,0.1)',
-          borderWidth:2, tension:0.4, fill:true, pointRadius:4 }]
-      },
-      options: { responsive:true, plugins:{legend:{display:false}},
-        scales:{
-          x:{ ticks:{color:chartThemeColors().tick}, grid:{color:chartThemeColors().grid} },
-          y:{ beginAtZero:true, ticks:{callback:v=>'₱'+v.toLocaleString(), color:chartThemeColors().tick}, grid:{color:chartThemeColors().grid} }
-        } }
-    });
-  }
+  // Branch sales-performance trend (day/week/month, both branches) —
+  // cache the inputs so the period toggle can re-draw without re-filtering
+  // orders (which would otherwise clobber the date/branch filters above).
+  lastSalesTrendCompleted = completed;
+  lastSalesTrendTeId = teId;
+  lastSalesTrendFcId = fcId;
+  renderBranchTrendChart(completed, teId, fcId, hasBranchData, allWalkin);
 
   // Payment method donut chart
   const methods = {};
@@ -6292,7 +6538,14 @@ function closeAssignModal() {
   _assignUpdateBtn();
 }
 
+let assignVisibleIds = []; // product_ids currently shown (after search/branch filter) — what "Select all" applies to
+
 function renderAssignProducts(products) {
+  assignVisibleIds = products.map(p => p.product_id);
+  const selectAllCb = document.getElementById('assignSelectAllCb');
+  if (selectAllCb) {
+    selectAllCb.checked = products.length > 0 && products.every(p => p.checked);
+  }
   const wrap = document.getElementById('assignProductList');
   wrap.innerHTML = products.length
     ? products.map(p => {
@@ -6332,8 +6585,25 @@ function filterAssignProducts(q) {
 function toggleAssignProduct(productId, checked) {
   const item = assignProductState.find(p => p.product_id === productId);
   if (item) item.checked = checked;
+  const selectAllCb = document.getElementById('assignSelectAllCb');
+  if (selectAllCb) {
+    const visible = assignProductState.filter(p => assignVisibleIds.includes(p.product_id));
+    selectAllCb.checked = visible.length > 0 && visible.every(p => p.checked);
+  }
   _assignUpdateBtn();
 }
+
+// "Select all (visible)" — applies only to products currently shown under
+// the active search/branch filter, not the full product list, so filtering
+// down to one branch and selecting all doesn't silently assign everyone.
+function toggleAssignSelectAll(checked) {
+  assignProductState.forEach(p => {
+    if (assignVisibleIds.includes(p.product_id)) p.checked = checked;
+  });
+  renderAssignProducts(assignProductState.filter(p => assignVisibleIds.includes(p.product_id)));
+  _assignUpdateBtn();
+}
+window.toggleAssignSelectAll = toggleAssignSelectAll;
 
 // Apply button stays disabled until at least one product's checked state
 // actually differs from what it was when the modal opened.
@@ -7023,8 +7293,21 @@ function applyPOSearchFilter(pos) {
     return hay.includes(q);
   });
 }
+// Final-defense follow-up, Nov 11 2026: "fix the order by date, make the
+// received/complete and cancelled at the bottom, while the draft, ordered,
+// partially [received] at the top filtered by date newest to oldest." —
+// still-active POs (something left to do on them) float above finished
+// ones, newest first within each of those two groups.
+const _PO_ACTIVE_STATUSES = ['draft', 'ordered', 'partially_received'];
+function _poIsFinished(po) { return !_PO_ACTIVE_STATUSES.includes(po.status); }
+
 function getFilteredPOs() {
-  return applyPOSearchFilter(applyPODateFilter(applyPOStatusFilter(allPOs)));
+  const filtered = applyPOSearchFilter(applyPODateFilter(applyPOStatusFilter(allPOs)));
+  return [...filtered].sort((a, b) => {
+    const groupDiff = (_poIsFinished(a) ? 1 : 0) - (_poIsFinished(b) ? 1 : 0);
+    if (groupDiff !== 0) return groupDiff;
+    return new Date(b.created_at || 0) - new Date(a.created_at || 0);
+  });
 }
 function filterPOBySearch(value) {
   poSearchVal = value || '';
@@ -7568,8 +7851,65 @@ function loadPORowVariants(sel) {
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
     </div>
-  `).join('');
+  `).join('') + `
+    <button type="button" class="btn btn-outline-green" style="font-size:11px;padding:4px 8px;white-space:nowrap;"
+      onclick='_poSplitRowByVariant(this)' title="Replace this single Qty with one row per variant, each with its own quantity — instead of one combined quantity for the whole product">
+      Split qty per variant
+    </button>`;
 }
+
+// Create PO follow-up (final-defense, Nov 11 2026): "the quantity set to a
+// product is shown as a whole, it should be by variant quantity." Leaving
+// every group on "Any" silently created ONE PO line for the whole product
+// (variant_options stayed null) — there was no way to enter a different
+// quantity per variant in one pass. This expands the current row into one
+// row per variant combination, each with its own blank Qty input and the
+// combo locked in (shown as text, carried via data-variant-options so
+// submitCreatePO doesn't need live selects for these rows).
+function _poSplitRowByVariant(btn) {
+  const row = btn.closest('div[style*="grid"]');
+  const wrap = document.getElementById('poItemsWrap');
+  if (!row || !wrap) return;
+
+  const productSel = row.querySelector('.po-product');
+  const opt = productSel.options[productSel.selectedIndex];
+  const productId   = productSel.value;
+  const productName = opt?.textContent || '';
+  const groups      = JSON.parse(opt?.dataset?.groups || '[]');
+  if (!productId || !groups.length) return;
+
+  // Respect any group the admin already pinned to a specific choice before
+  // clicking Split — only the groups still left on "Any" get expanded.
+  const pinned = {};
+  row.querySelectorAll('.po-variant-opt').forEach(vs => { if (vs.value) pinned[vs.dataset.label] = vs.value; });
+  const combos = expandVariantSelection(groups, pinned).filter(Boolean);
+
+  if (combos.length > 24) {
+    showToast(`That's ${combos.length} combinations — too many to split into rows. Pin down a group first to narrow it.`, 'error');
+    return;
+  }
+
+  const frag = document.createDocumentFragment();
+  combos.forEach(combo => {
+    const variantLabel = Object.entries(combo).map(([k, v]) => `${k}: ${v}`).join(', ');
+    const newRow = document.createElement('div');
+    newRow.style.cssText = 'display:grid;grid-template-columns:1fr 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
+    newRow.dataset.variantOptions = JSON.stringify(combo);
+    newRow.innerHTML = `
+      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+        <input type="hidden" class="po-product" value="${productId}">
+        <span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${productName}</span>
+        <span style="font-size:11px;color:var(--g-400);">${variantLabel}</span>
+      </div>
+      <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()"/>
+      <button type="button" onclick="this.parentElement.remove();updatePOTotal();" title="Remove this item" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
+    `;
+    frag.appendChild(newRow);
+  });
+  row.replaceWith(frag);
+  updatePOTotal();
+}
+window._poSplitRowByVariant = _poSplitRowByVariant;
 
 function addPOItemRow() {
   const wrap = document.getElementById('poItemsWrap');
@@ -7880,12 +8220,18 @@ async function submitCreatePO() {
     const productId = row.querySelector('.po-product')?.value;
     const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
     if (productId && qty > 0) {
-      // Get variant options for this row
-      const variantSelects = row.querySelectorAll('.po-variant-opt');
-      const variantOpts = {};
-      variantSelects.forEach(vs => {
-        if (vs.value) variantOpts[vs.dataset.label] = vs.value;
-      });
+      // Get variant options for this row — a row produced by "Split qty per
+      // variant" carries its exact combo in data-variant-options (no live
+      // selects to read); any other row reads its .po-variant-opt selects
+      // as before.
+      let variantOpts = {};
+      if (row.dataset.variantOptions) {
+        try { variantOpts = JSON.parse(row.dataset.variantOptions) || {}; } catch (_e) {}
+      } else {
+        row.querySelectorAll('.po-variant-opt').forEach(vs => {
+          if (vs.value) variantOpts[vs.dataset.label] = vs.value;
+        });
+      }
       // If this row came from a staff stock request (via fillPORowForProduct),
       // or was stamped directly by the bulk "Generate PO for Selected"
       // critical-stock action (row.dataset.requestingBranchId), carry that

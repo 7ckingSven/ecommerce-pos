@@ -169,7 +169,7 @@
             <span class="stat-sub">Revenue</span>
           </div>
         </div>
-        <div class="stat-card" onclick="dashGoToBranchInventory('Triple E')" title="View Triple E's inventory" role="button" tabindex="0">
+        <div class="stat-card" onclick="dashGoToBranchSales('TE')" title="View Triple E's sales report" role="button" tabindex="0">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </div>
@@ -179,7 +179,7 @@
             <span class="stat-sub">Branch Revenue</span>
           </div>
         </div>
-        <div class="stat-card" onclick="dashGoToBranchInventory('Fiel Collince')" title="View Fiel Collince's inventory" role="button" tabindex="0">
+        <div class="stat-card" onclick="dashGoToBranchSales('FC')" title="View Fiel Collince's sales report" role="button" tabindex="0">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
           </div>
@@ -899,7 +899,14 @@
       <!-- Charts Row -->
       <div class="dashboard-grid" style="margin-bottom:1.5rem;">
         <div class="card">
-          <div class="card-header"><h3 class="card-title">Revenue by Day (Last 7 Days)</h3></div>
+          <div class="card-header" style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px;">
+            <h3 class="card-title" id="salesTrendChartTitle">Branch Sales Performance by Day</h3>
+            <div style="display:flex;gap:4px;">
+              <button class="btn btn-outline-green sales-chart-period-btn active" data-period="day" onclick="setSalesChartPeriod('day')" style="font-size:11px;padding:4px 10px;">Day</button>
+              <button class="btn btn-outline-green sales-chart-period-btn" data-period="week" onclick="setSalesChartPeriod('week')" style="font-size:11px;padding:4px 10px;">Week</button>
+              <button class="btn btn-outline-green sales-chart-period-btn" data-period="month" onclick="setSalesChartPeriod('month')" style="font-size:11px;padding:4px 10px;">Month</button>
+            </div>
+          </div>
           <div style="padding:1rem;"><canvas id="revenueChart" height="275"></canvas></div>
         </div>
         <div class="card">
@@ -1333,7 +1340,7 @@
 
         <!-- Net Weight + Unit — shown only in Edit mode (not required at creation) -->
         <div class="form-group" id="pNetWeightBlock" style="display:none;">
-          <label class="form-label">Net Weight / Volume <span style="font-weight:400;color:var(--text-muted);">(optional — for shipping calculation)</span></label>
+          <label class="form-label">Net Weight / Volume</label>
           <div style="display:flex;gap:8px;">
             <input type="number" id="pNetWeight" class="form-input" min="0" step="0.01" placeholder="e.g. 0.5, 250, 1.2" style="flex:1;" oninput="_prodCheckField('pNetWeight')"/>
             <select id="pNetWeightUnit" class="form-input form-select" style="width:90px;" onchange="_prodUpdateSaveBtn()">
@@ -1439,6 +1446,10 @@
           <option value="">All Branches</option>
         </select>
       </div>
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 2px;margin-bottom:6px;font-size:13px;font-weight:600;color:var(--text-muted);cursor:pointer;">
+        <input type="checkbox" id="assignSelectAllCb" onchange="toggleAssignSelectAll(this.checked)" style="accent-color:var(--g-400);width:16px;height:16px;"/>
+        Select all (visible)
+      </label>
       <div id="assignProductList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
         <p class="table-empty">Loading products...</p>
       </div>

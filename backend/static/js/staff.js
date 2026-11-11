@@ -1487,7 +1487,10 @@ function renderOrderItems() {
                onclick="this.select()"/>
         <button class="pos-qty-btn" onclick="updateQty(${idx}, 1)">+</button>
       </div>
-      <div class="pos-order-item-price">${peso(item.price * item.quantity)}</div>
+      <div class="pos-order-item-price">
+        ${(item.original_price && item.original_price > item.price) ? `<span class="pos-item-original-price" title="${item.discount_name ? item.discount_name + ' — ' : ''}original price before discount">${peso(item.original_price * item.quantity)}</span>` : ''}
+        <span>${peso(item.price * item.quantity)}</span>
+      </div>
       <button class="pos-remove-btn" onclick="removeFromOrder(${idx})">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -1615,12 +1618,15 @@ function _renderStaffBarcodeModalContent(p) {
   const rows = _barcodeRows(p);
   showGenericModal(`
     <div style="padding:1.25rem 1.5rem 1.5rem;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;gap:8px;">
         <div>
           <h3 style="margin:0;font-size:16px;">Barcode</h3>
           <p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">${p.product_name}</p>
         </div>
-        <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
+        <div style="display:flex;align-items:center;gap:6px;">
+          <button class="btn btn-outline-green" style="font-size:11px;padding:5px 10px;white-space:nowrap;" onclick='_staffGenerateAllBarcodes("${p.product_id}")' title="Fill in a barcode for every variant/combo that doesn't have one yet">Generate All</button>
+          <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">&times;</button>
+        </div>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px;max-height:400px;overflow-y:auto;padding-right:4px;">
         ${rows.map((r, idx) => {
@@ -1688,6 +1694,51 @@ async function _staffGenerateBarcodeFromModal(productId, scope, payload) {
   }
 }
 window._staffGenerateBarcodeFromModal = _staffGenerateBarcodeFromModal;
+
+// "Generate All" — fills in a barcode for every row that doesn't have one
+// yet (base/choice/combo), without touching rows that already have a code
+// so an accidental click can't invalidate labels already printed. Rows
+// collapsed into the "too many combinations" placeholder are skipped, same
+// as the per-row button being unavailable there.
+async function _staffGenerateAllBarcodes(productId) {
+  const p = invProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+  const missing = _barcodeRows(p).filter(r => !r.tooMany && !r.code);
+  if (!missing.length) {
+    showToast('Every variant already has a barcode.', 'success');
+    return;
+  }
+  let okCount = 0, failCount = 0;
+  for (const r of missing) {
+    try {
+      const res  = await fetch(`/api/admin/products/${productId}/generate-barcode`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ scope: r.scope, ...r.payload }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed');
+      if (r.scope === 'product') {
+        p.barcode = data.barcode;
+      } else if (r.scope === 'choice') {
+        const g = (p.option_groups || [])[r.payload.group_index];
+        const c = g && (g.choices || []).find(ch => ch && ch.value === r.payload.choice_value);
+        if (c) c.barcode = data.barcode;
+      } else if (r.scope === 'combo') {
+        p.variant_overrides = p.variant_overrides || [];
+        let entry = _findComboEntry(p.variant_overrides, r.payload.options);
+        if (!entry) { entry = { options: r.payload.options, price: '', image: '', barcode: data.barcode }; p.variant_overrides.push(entry); }
+        else entry.barcode = data.barcode;
+      }
+      okCount++;
+    } catch (e) {
+      failCount++;
+    }
+  }
+  _renderStaffBarcodeModalContent(p);
+  showToast(failCount ? `Generated ${okCount}, ${failCount} failed.` : `Generated ${okCount} barcode${okCount === 1 ? '' : 's'}.`, failCount ? 'error' : 'success');
+}
+window._staffGenerateAllBarcodes = _staffGenerateAllBarcodes;
 
 // Printable barcode label — same popup-window pattern admin.js uses.
 function printStaffProductBarcode(productId, code, label) {
@@ -4311,7 +4362,7 @@ function renderStaffDeliveriesForToday(orders) {
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
           <td>${o.delivery_attempts || 0}/3</td>
           <td style="display:flex;gap:6px;">
-            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="staffOpenRemitModal('${o.order_id}')">Remit</button>
+            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="staffOpenRemitModal('${o.order_id}')">${o.payment?.payment_method === 'gcash' ? 'Mark Delivered' : 'Remit'}</button>
             <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="staffMarkOrderNotDelivered('${o.order_id}')">Not Delivered</button>
           </td>
         </tr>`;
@@ -4369,6 +4420,27 @@ async function staffBulkNotDeliveredSelectedOrders() {
   } catch (e) { showToast('Error during bulk not-delivered.', 'error'); }
 }
 window.staffBulkNotDeliveredSelectedOrders = staffBulkNotDeliveredSelectedOrders;
+
+// Manual "Close Remittance" (final-defense follow-up, Nov 10 2026) —
+// branch-scoped mirror of the admin button. Same effect as the automatic
+// 5pm flag, just triggered on demand; doesn't lock the Remit action out,
+// late remits just count toward tomorrow's totals per
+// _remittance_business_date in app.py.
+async function staffCloseRemittanceNow() {
+  const confirmed = await showConfirmDialog('Close Remittance', 'Flag every still-pending delivery at your branch as Not Remitted right now, instead of waiting for the 5pm auto-flag?');
+  if (!confirmed) return;
+  try {
+    const res  = await fetch('/api/staff/orders/close-remittance', { method: 'POST' });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast(body.message || 'Remittance closed.');
+      loadOrders();
+    } else {
+      showToast(body.error || 'Failed to close remittance.', 'error');
+    }
+  } catch (e) { showToast('Error closing remittance.', 'error'); }
+}
+window.staffCloseRemittanceNow = staffCloseRemittanceNow;
 
 // "Today's Remittance" strip — branch-scoped mirror of admin's
 // loadRemittanceSummary. See _remittance_summary in app.py.
@@ -4465,6 +4537,14 @@ function staffOpenRemitModal(orderId) {
   const shipping   = Number(order.shipping_fee || 0);
   const grandTotal = Math.round((subtotal + shipping) * 100) / 100;
 
+  // GCash already collected the money through PayMongo at checkout, so
+  // there's nothing to count/type/match — skip the Remit modal entirely
+  // and just confirm the physical delivery in one click.
+  if (paymentMethod === 'gcash') {
+    staffConfirmGcashDelivered(orderId, grandTotal);
+    return;
+  }
+
   const addrParts  = (order.address || '').split('|');
   const addrString = addrParts.length > 1
     ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
@@ -4556,6 +4636,31 @@ async function staffSubmitRemitAmount(orderId, grandTotal) {
   } catch (e) {
     errorEl.textContent   = 'Error completing the order.';
     errorEl.style.display = 'block';
+  }
+}
+
+// One-click delivered confirmation for GCash orders — same /delivered
+// endpoint the typed-amount Remit flow uses (amount_remitted still gets
+// sent so the backend's match check passes), just without a modal or
+// typing, since the payment already happened online.
+async function staffConfirmGcashDelivered(orderId, grandTotal) {
+  const ok = await showConfirmDialog('Mark as Delivered', `Already paid ₱${grandTotal.toFixed(2)} via GCash — mark this order as delivered now?`);
+  if (!ok) return;
+  try {
+    const res  = await fetch(`/api/staff/orders/${orderId}/delivered`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ amount_remitted: grandTotal }),
+    });
+    const body = await res.json().catch(() => ({}));
+    if (res.ok) {
+      showToast('Order marked delivered — already paid via GCash.');
+      loadOrders();
+      return;
+    }
+    showToast(body.error || 'Failed to complete the order.', 'error');
+  } catch (e) {
+    showToast('Error completing the order.', 'error');
   }
 }
 
