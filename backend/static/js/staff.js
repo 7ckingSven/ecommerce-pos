@@ -2677,10 +2677,26 @@ async function processOrder() {
   }
   const processBtn = document.getElementById('processOrderBtn');
 
+  // Root cause of orders recording multiple times (final-defense follow-up,
+  // Nov 12 2026, part 2): this function used to only disable processBtn
+  // AFTER the "Process this order?" confirm dialog resolved. A cashier who
+  // tapped "Process Order" more than once before the first dialog appeared
+  // — or tapped it again while the dialog was up — fired this function
+  // concurrently several times. Each run built its own confirm dialog, read
+  // the SAME still-uncleared orderItems, and minted its own fresh
+  // client_offline_id, so the server-side idempotency check (which only
+  // catches a RESEND of one id) never saw these as repeats — they really
+  // were, from the server's point of view, several different orders for
+  // the same cart. Locking the button here, before the dialog even opens,
+  // closes that window.
+  if (processBtn?.disabled) return;
+  if (processBtn) processBtn.disabled = true;
+
   // Branch is auto-detected from staff profile
   const branchId = staffBranchId || document.getElementById('posBranch').value;
   if (!branchId) {
     showToast('Branch not assigned. Please contact admin.', 'error');
+    if (processBtn) processBtn.disabled = false;
     return;
   }
 
@@ -2694,12 +2710,16 @@ async function processOrder() {
     const received = parseFloat(document.getElementById('posCashReceived').value) || 0;
     if (received < _tot) {
       showToast('Cash received is less than total amount.', 'error');
+      if (processBtn) processBtn.disabled = false;
       return;
     }
   }
 
   const confirmed = await showConfirmDialog('Confirm Order', 'Process this order?');
-  if (!confirmed) return;
+  if (!confirmed) {
+    if (processBtn) processBtn.disabled = false;
+    return;
+  }
 
   setButtonLoading(processBtn, true);
 

@@ -178,6 +178,24 @@
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Critical (1-5 units left): still visible/recognizable, distinct from a
+   flat-zero out-of-stock card, but not clickable — the variant/quantity
+   picker already blocks adding anything this low to the cart, so this is
+   purely a "restock soon" visual cue. */
+.pos-product-card.critical-stock {
+  opacity: 0.75;
+  cursor: not-allowed;
+  border-color: #f59e0b;
+}
+.pos-product-card.out-of-stock:hover,
+.pos-product-card.critical-stock:hover {
+  border-color: #f59e0b;
+  transform: none;
+  box-shadow: none;
+}
+.pos-product-card.out-of-stock:hover {
+  border-color: var(--border);
+}
 .pos-product-img {
   width: 100%;
   aspect-ratio: 1;

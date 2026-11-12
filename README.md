@@ -232,7 +232,7 @@ This project uses **Supabase (PostgreSQL)**.
 | `mfa_device` | Trusted browsers for web login MFA (admin/staff) |
 | `staff` | Staff details and branch assignment |
 | `product` | Product catalog with option groups, net weight, sub-category, Base Price (cost) / Resale Price (`price`), a per-product `barcode`, and `variant_overrides` (per-combination price/image/barcode) |
-| `price_history` | One row per resale-price edit (old price, new price, who, when) |
+| `price_history` | One row per resale-price and/or base-price edit (old/new price, old/new base price, who, when) |
 | `login_sessions` | Admin/Staff login/logout audit trail |
 | `branch_stock` | Per-product, per-branch stock quantities — the source of truth for current stock |
 | `inventory` | Stock movement history (restock, transfer, adjustment, PO receive, sale, return), with a `TIMESTAMPTZ` timestamp per movement |
