@@ -7396,6 +7396,7 @@ async function loadPurchaseOrders() {
     }
 
     updateApprovedReqBadge();
+    updateLowStockBadge();
 
     renderStockRequests(applySRStatusFilter(allStockRequests));
     renderPOs(getFilteredPOs());
@@ -7831,6 +7832,9 @@ function openCreatePOModal() {
   document.getElementById('poNote').value     = '';
   document.getElementById('poItemsWrap').innerHTML = '';
   document.getElementById('poTotal').textContent   = '0 item(s)';
+  const lowStockPanel = document.getElementById('lowStockPanel');
+  if (lowStockPanel) lowStockPanel.style.display = 'none'; // collapsed by default on every fresh open
+  updateLowStockBadge();
   addPOItemRow(); // start with one row
   updatePOTotal(); // reset Create PO button to disabled until a row is filled in
   document.getElementById('createPOModalOverlay')?.classList.add('open');
@@ -8172,6 +8176,228 @@ function useSelectedApprovedRequests() {
   updatePOTotal();
 }
 window.useSelectedApprovedRequests = useSelectedApprovedRequests;
+
+// ─── Low Stock Items → Create PO ──────────────────────────────────────
+// Final-defense follow-up (Nov 12 2026): lets admin browse every
+// product/variant currently at low/critical/out level — across BOTH
+// branches at once, or narrowed to one branch via the filter — tick the
+// ones to restock (with a "Select All" that respects the current branch
+// filter), and pull them straight into a new Create PO draft in one go.
+// Same ≤5 critical / 6–10 low / 0 out tiering used everywhere else in the
+// app (Stock Alerts, Branch Stock Summary, quickCreatePOForBranchProduct).
+// Builds its own button+badge (next to "Use Approved Requests") and its
+// own modal on first use, so no admin_dashboard.html changes are needed.
+
+function _lowStockLevelOf(q) {
+  q = Number(q);
+  if (q === 0) return 'out';
+  if (q > 0 && q <= 5) return 'critical';
+  if (q > 5 && q <= 10) return 'low';
+  return 'ok';
+}
+
+// One entry per product×branch (or product×branch×variant-combo for a
+// variant product) that is currently low/critical/out. A non-variant
+// product with no per-branch breakdown at all (legacy data) falls back
+// to one branchless entry using product.quantity, so it still surfaces.
+function _buildLowStockEntries() {
+  const entries = [];
+  (allProducts || []).forEach(p => {
+    if (p.variant_stock && p.variant_stock.length) {
+      p.variant_stock.forEach(v => {
+        const level = _lowStockLevelOf(v.quantity);
+        if (level === 'ok') return;
+        entries.push({
+          key:         p.product_id + '|' + v.branch_id + '|' + JSON.stringify(v.options || {}),
+          productId:   p.product_id,
+          productName: p.product_name,
+          branchId:    v.branch_id,
+          options:     v.options || null,
+          quantity:    v.quantity,
+          level,
+        });
+      });
+    } else if (p.branch_stock && p.branch_stock.length) {
+      p.branch_stock.forEach(b => {
+        const level = _lowStockLevelOf(b.quantity);
+        if (level === 'ok') return;
+        entries.push({
+          key:         p.product_id + '|' + b.branch_id,
+          productId:   p.product_id,
+          productName: p.product_name,
+          branchId:    b.branch_id,
+          options:     null,
+          quantity:    b.quantity,
+          level,
+        });
+      });
+    } else {
+      const level = _lowStockLevelOf(p.quantity);
+      if (level === 'ok') return;
+      entries.push({
+        key:         p.product_id + '|all',
+        productId:   p.product_id,
+        productName: p.product_name,
+        branchId:    null,
+        options:     null,
+        quantity:    p.quantity,
+        level,
+      });
+    }
+  });
+  const rank = { out: 3, critical: 2, low: 1 };
+  entries.sort((a, b) => (rank[b.level] - rank[a.level]) || a.productName.localeCompare(b.productName));
+  return entries;
+}
+
+let _lowStockEntriesCache = [];
+let _lowStockBranchFilter = '';
+
+function _lowStockBadge(level) {
+  if (level === 'out')      return '<span class="badge badge--gray">Out of Stock</span>';
+  if (level === 'critical') return '<span class="badge badge--red">Critical Level</span>';
+  return '<span class="badge badge--yellow">Low Stock</span>';
+}
+
+// Badge lives on the "Low Stock Items" toggle button INSIDE the Create PO
+// modal itself (admin_dashboard.html) — not on the Purchase Orders page —
+// so it only needs allProducts to be loaded, which may not have happened
+// yet the first time the PO page is opened (Products tab hasn't been
+// visited). Fetches products itself rather than skipping/under-counting.
+async function updateLowStockBadge() {
+  if (!allProducts.length) { invalidateSection('products'); await loadProducts(); }
+  const count = _buildLowStockEntries().length;
+  const badge = document.getElementById('lowStockBadge');
+  if (badge) {
+    badge.textContent   = count;
+    badge.style.display = count > 0 ? 'inline' : 'none';
+  }
+}
+
+function _renderLowStockList() {
+  const list = document.getElementById('lowStockList');
+  if (!list) return;
+  const filtered = _lowStockBranchFilter
+    ? _lowStockEntriesCache.filter(e => String(e.branchId) === String(_lowStockBranchFilter))
+    : _lowStockEntriesCache;
+
+  list.innerHTML = filtered.length
+    ? filtered.map(e => `
+      <label style="display:flex;align-items:flex-start;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+        <input type="checkbox" class="lowstock-check" value="${e.key}" style="margin-top:2px;" onchange="updateLowStockPickerBtn()"/>
+        <span style="flex:1;">
+          <strong>${e.productName}</strong>
+          ${e.options && Object.keys(e.options).length
+            ? '<div style="font-size:12px;color:var(--text-muted);">' + Object.entries(e.options).map(function(o){return o[0]+': '+o[1];}).join(', ') + '</div>'
+            : ''}
+          <div style="font-size:13px;color:var(--text-muted);">Branch: ${e.branchId ? _poBranchName(e.branchId) : 'All branches'} · Stock: ${e.quantity} ${_lowStockBadge(e.level)}</div>
+        </span>
+      </label>`).join('')
+    : '<div class="table-empty" style="padding:1rem;">No low/critical/out-of-stock items' + (_lowStockBranchFilter ? ' at this branch.' : '.') + '</div>';
+
+  updateLowStockPickerBtn();
+}
+
+// Re-filters the already-open list by branch without re-fetching anything —
+// "Select All" below only ever acts on what's currently visible, so
+// switching branches first narrows the pool.
+function filterLowStockPicker(branchId) {
+  _lowStockBranchFilter = branchId || '';
+  _renderLowStockList();
+}
+window.filterLowStockPicker = filterLowStockPicker;
+
+// Toggles the inline "Low Stock Items" panel open/shut inside the Create PO
+// modal (rather than a separate popup modal on top of it) — the admin stays
+// in the same Create PO flow the whole time: expand the panel, tick items,
+// collapse it, keep building/edit the rest of the PO.
+function toggleLowStockPanel() {
+  const panel = document.getElementById('lowStockPanel');
+  if (!panel) return;
+  if (panel.style.display === 'none' || !panel.style.display) {
+    openLowStockPanel();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+window.toggleLowStockPanel = toggleLowStockPanel;
+
+async function openLowStockPanel() {
+  if (!allProducts.length) { invalidateSection('products'); await loadProducts(); }
+  if (!allBranches.length) await loadBranches();
+
+  const branchSel = document.getElementById('lowStockBranchFilter');
+  if (branchSel) {
+    branchSel.innerHTML = '<option value="">Both branches</option>' +
+      allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+  }
+  _lowStockBranchFilter = '';
+  _lowStockEntriesCache = _buildLowStockEntries();
+  _renderLowStockList();
+
+  const selectAll = document.getElementById('lowStockSelectAll');
+  if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+
+  document.getElementById('lowStockPanel').style.display = 'block';
+}
+window.openLowStockPanel = openLowStockPanel;
+
+// Checks/unchecks every CURRENTLY VISIBLE row (i.e. respects the branch
+// filter) — selecting "Both branches" then Select All picks everything.
+function toggleSelectAllLowStock(checked) {
+  document.querySelectorAll('.lowstock-check').forEach(cb => { cb.checked = checked; });
+  updateLowStockPickerBtn();
+}
+window.toggleSelectAllLowStock = toggleSelectAllLowStock;
+
+function updateLowStockPickerBtn() {
+  const all     = document.querySelectorAll('.lowstock-check');
+  const checked = document.querySelectorAll('.lowstock-check:checked').length;
+  const btn = document.getElementById('useLowStockBtn');
+  if (btn) btn.disabled = checked === 0;
+
+  const selectAll = document.getElementById('lowStockSelectAll');
+  if (selectAll) {
+    selectAll.checked       = all.length > 0 && checked === all.length;
+    selectAll.indeterminate = checked > 0 && checked < all.length;
+  }
+}
+window.updateLowStockPickerBtn = updateLowStockPickerBtn;
+
+// Appends the checked entries straight into the Items list of the Create
+// PO modal that's already open — one row per entry, branch-locked when the
+// entry came from one specific branch (same branchLock mechanism
+// quickCreatePOForBranchProduct uses) so the PO row's stock summary shows
+// only that branch's number, not the whole product's. Any still-empty row
+// already in the list (e.g. the blank one Create PO always starts with) is
+// dropped first, so picking from Low Stock doesn't leave a stray unfilled
+// row mixed in — anything the admin already filled by hand is left alone.
+function useSelectedLowStock() {
+  const keys = Array.from(document.querySelectorAll('.lowstock-check:checked')).map(c => c.value);
+  const selected = _lowStockEntriesCache.filter(e => keys.includes(e.key));
+  if (!selected.length) return;
+
+  document.querySelectorAll('#poItemsWrap > div').forEach(row => {
+    const sel = row.querySelector('.po-product');
+    if (sel && !sel.value) row.remove();
+  });
+
+  selected.forEach(e => {
+    const p = allProducts.find(pr => pr.product_id === e.productId);
+    if (!p) return;
+    const variantRow = e.options ? { options: e.options } : null;
+    fillPORowForProduct(p, variantRow, null, null, e.branchId || null);
+  });
+  updatePOTotal();
+
+  // Collapse the panel and clear its own selections — reopening it starts fresh.
+  const panel = document.getElementById('lowStockPanel');
+  if (panel) panel.style.display = 'none';
+  document.querySelectorAll('.lowstock-check').forEach(cb => { cb.checked = false; });
+  const selectAll = document.getElementById('lowStockSelectAll');
+  if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+}
+window.useSelectedLowStock = useSelectedLowStock;
 
 // Adviser follow-up (Oct 26 2026): show current stock / threshold level
 // right on the Create PO row — prevents double-ordering something that's

@@ -437,9 +437,17 @@
          a staff account can only initiate a transfer OUT of its own
          branch) and submitting files a pending request instead of moving
          stock immediately; the destination branch approves/rejects it
-         from their own Incoming Transfers table above. -->
+         from their own Incoming Transfers table above.
+
+         Multi-product: "To Branch" is one shared destination for the
+         whole submission, but any number of product rows (each with its
+         own product/variant/qty) can be added via "+ Add Product" —
+         mirrors the Stock Request modal's multi-item pattern. The
+         backend has no batch concept for transfers (each product is
+         approved/rejected independently by the destination branch), so
+         submitting N rows simply fires N separate transfer requests. -->
     <div class="modal-overlay" id="staffTransferModalOverlay"></div>
-    <div class="modal" id="staffTransferModal" style="max-width:620px;">
+    <div class="modal" id="staffTransferModal" style="max-width:640px;">
       <div class="modal-header">
         <h3 class="modal-title">Transfer Stock to Another Branch</h3>
         <button class="modal-close" onclick="closeModalWithConfirm('staffTransferModal', closeStaffTransferModal)">
@@ -451,32 +459,25 @@
           This sends a request to the destination branch — stock only moves once their staff approves it.
         </p>
         <form id="staffTransferForm" onsubmit="submitStaffTransfer(event)">
-          <div class="form-group">
-            <label class="form-label">Product <span class="req">*</span></label>
-            <div id="staffTransferProductWrap"></div>
-          </div>
-          <div id="staffTransferVariantWrap" style="display:none;">
-            <div class="form-group">
-              <label class="form-label">Variant <span style="font-size:12px;color:var(--text-muted);">(optional)</span></label>
-              <div id="staffTransferVariantSelects" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
-            </div>
-          </div>
           <div class="form-row-2">
-            <div class="form-group">
-              <label class="form-label">Quantity to Transfer <span class="req">*</span></label>
-              <input type="number" id="staffTransferQty" class="form-input" min="1" required oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
-            </div>
             <div class="form-group">
               <label class="form-label">From Branch</label>
               <input type="text" id="staffTransferFromLabel" class="form-input" readonly/>
             </div>
+            <div class="form-group">
+              <label class="form-label">To Branch <span class="req">*</span></label>
+              <select id="staffTransferTo" class="form-input form-select" required>
+                <option value="">Select branch</option>
+              </select>
+            </div>
           </div>
-          <div class="form-group">
-            <label class="form-label">To Branch <span class="req">*</span></label>
-            <select id="staffTransferTo" class="form-input form-select" required>
-              <option value="">Select branch</option>
-            </select>
-          </div>
+
+          <div id="staffTransferItems" style="display:flex;flex-direction:column;gap:10px;margin:10px 0;"></div>
+
+          <button type="button" class="btn btn-sm" onclick="addStaffTransferItemRow()" style="background:var(--surface);border:1px solid var(--border);margin-bottom:4px;">
+            + Add Product
+          </button>
+
           <div class="modal-footer">
             <button type="button" class="btn btn-cancel" onclick="closeModalWithConfirm('staffTransferModal', closeStaffTransferModal)">Cancel</button>
             <button type="submit" id="staffTransferSubmitBtn" class="btn" style="background:#3b82f6;color:#fff;border-color:#3b82f6;opacity:0.45;cursor:not-allowed;" disabled>Send Transfer Request</button>

@@ -1755,6 +1755,39 @@
         </div>
       </div>
 
+      <!-- Low Stock Items picker (final-defense follow-up, Nov 12 2026) —
+           lets admin browse every product/variant currently low/critical/
+           out of stock, across both branches or filtered to one, right
+           inside this same modal, and pull ticked ones straight into the
+           Items list below instead of searching for them one by one. -->
+      <div style="margin-bottom:0.75rem;">
+        <button type="button" class="btn btn-outline-green" style="position:relative;" onclick="toggleLowStockPanel()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Low Stock Items
+          <span id="lowStockBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:6px;font-weight:700;"></span>
+        </button>
+
+        <div id="lowStockPanel" style="display:none;border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:8px;background:var(--surface);">
+          <p style="font-size:12px;color:var(--text-muted);margin-bottom:8px;">Every product/variant currently Low, Critical, or Out of Stock. Filter by branch, tick the ones to add, then "Add Selected to Items" below — they'll be appended to the Items list.</p>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;">
+              <span style="color:var(--text-muted);">Branch:</span>
+              <select id="lowStockBranchFilter" class="form-input form-select" style="font-size:12px;padding:5px 8px;width:auto;" onchange="filterLowStockPicker(this.value)">
+                <option value="">Both branches</option>
+              </select>
+            </label>
+            <label style="display:flex;align-items:center;gap:6px;font-size:12px;cursor:pointer;margin-left:auto;">
+              <input type="checkbox" id="lowStockSelectAll" onchange="toggleSelectAllLowStock(this.checked)"/>
+              <span style="font-weight:600;">Select All</span>
+            </label>
+          </div>
+          <div id="lowStockList" style="max-height:220px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+          <div style="text-align:right;margin-top:10px;">
+            <button type="button" id="useLowStockBtn" class="btn btn-sm btn-solid-green" onclick="useSelectedLowStock()" disabled>Add Selected to Items</button>
+          </div>
+        </div>
+      </div>
+
       <!-- PO Items -->
       <div style="margin-bottom:0.75rem;">
         <div style="margin-bottom:8px;">

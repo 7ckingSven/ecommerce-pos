@@ -959,7 +959,19 @@ async function syncPendingOrders() {
     const pending = (await getPendingOrders()).sort((a, b) => a.queued_at - b.queued_at);
     let syncedCount = 0, failedCount = 0;
     for (const order of pending) {
-      const { client_offline_id, queued_at, ...payload } = order;
+      // client_offline_id used to be stripped out of the payload here (kept
+      // only as the local IndexedDB key) — meaning the server had no way to
+      // tell a resync of this exact sale apart from a genuinely new one.
+      // That's the real bug behind offline sales recording multiple times:
+      // if deletePendingOrder() below ever failed to land after a
+      // successful POST (closed tab, crash, two tabs syncing the same
+      // queue at once), the next sync would resend this same order with no
+      // key attached, and the server would just create another one. Now
+      // client_offline_id rides along in the payload (queued_at is still
+      // local-only, dropped here) so the server-side check added for this
+      // final-defense follow-up (Nov 12 2026) can recognize and no-op a
+      // repeat instead.
+      const { queued_at, ...payload } = order;
       try {
         const res = await fetch('/api/staff/orders', {
           method: 'POST',
@@ -967,7 +979,7 @@ async function syncPendingOrders() {
           body: JSON.stringify(payload),
         });
         if (res.ok) {
-          await deletePendingOrder(client_offline_id);
+          await deletePendingOrder(order.client_offline_id);
           syncedCount++;
         } else {
           failedCount++;
@@ -2681,24 +2693,37 @@ async function processOrder() {
   const discAmt  = subtotal * (discPct / 100);
   const total    = subtotal - discAmt;
 
+  // Generated ONCE per checkout attempt, here, before anything is sent
+  // anywhere — not inside the offline-queue branches below. Final-defense
+  // follow-up (Nov 12 2026): offline walk-in sales were getting recorded
+  // multiple times, because a sale that failed to queue/sync cleanly could
+  // end up retried with a brand-new id each time, and the backend had no
+  // way to tell "this is the same sale again" from "this is a new sale
+  // that happens to look identical". Reusing one id across every retry of
+  // this same checkout — the immediate attempt, the offline-queue path,
+  // the dropped-connection fallback, and any later resync — lets the
+  // server recognize and ignore a repeat instead of recording it again.
+  const checkoutIdempotencyId = genOfflineId();
+
   const orderPayload = {
-    order_type:      'walk_in',
+    order_type:         'walk_in',
     quantity,
     total,
-    ref_no:          null,  // Cash orders carry no reference — GCash orders go through confirmGcashOrder() instead
-    payment_method:  selectedPayment,
-    branch_id:       branchId,
-    cart_items:      orderItems.map(i => ({
+    ref_no:             null,  // Cash orders carry no reference — GCash orders go through confirmGcashOrder() instead
+    payment_method:     selectedPayment,
+    branch_id:          branchId,
+    cart_items:         orderItems.map(i => ({
       product_id:       i.product_id,
       quantity:         i.quantity,
       price:            i.price,
       selected_options: i.selected_options || {},
     })),
-    customer_name:   document.getElementById('posCustomer').value.trim(),
-    discount_id:     discId,
-    discount_name:   discName,
-    discount_pct:    discPct || null,
-    discount_amount: discAmt || null,
+    customer_name:      document.getElementById('posCustomer').value.trim(),
+    discount_id:        discId,
+    discount_name:      discName,
+    discount_pct:       discPct || null,
+    discount_amount:    discAmt || null,
+    client_offline_id:  checkoutIdempotencyId,
   };
 
   // Snapshot receipt data BEFORE clearing the order (shared by both the
@@ -2715,9 +2740,12 @@ async function processOrder() {
     try {
       await addPendingOrder({
         ...orderPayload,
-        is_offline_sync:    true,
-        client_offline_id: genOfflineId(),
-        queued_at:          Date.now(),
+        is_offline_sync: true,
+        // Reuses checkoutIdempotencyId (already set on orderPayload above)
+        // as the IndexedDB keyPath too, rather than minting a second,
+        // different id here — this is what the backend uses to recognize
+        // a resync of this exact sale as a repeat, not a new one.
+        queued_at: Date.now(),
       });
       applyOfflineStockDeduction(orderPayload.cart_items, branchId);
       await updateOfflinePendingBadge();
@@ -2758,13 +2786,17 @@ async function processOrder() {
   } catch (e) {
     // The 15s connectivity poll hasn't caught up yet — the connection just
     // dropped mid-click, so fall back to the offline queue instead of
-    // losing the sale.
+    // losing the sale. Crucially, the fetch above may have actually
+    // reached and been processed by the server already — it's the
+    // RESPONSE that failed to come back, not necessarily the request —
+    // so this reuses the same checkoutIdempotencyId rather than minting a
+    // new one. If the server did already record it, the resync below just
+    // gets that same order handed back instead of creating a duplicate.
     try {
       await addPendingOrder({
         ...orderPayload,
-        is_offline_sync:    true,
-        client_offline_id: genOfflineId(),
-        queued_at:          Date.now(),
+        is_offline_sync: true,
+        queued_at: Date.now(),
       });
       applyOfflineStockDeduction(orderPayload.cart_items, branchId);
       posIsOnline = false;
@@ -3313,16 +3345,6 @@ async function openStaffTransferModal() {
   if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
   if (!allBranches.length) await loadBranches();
 
-  const prodWrap = document.getElementById('staffTransferProductWrap');
-  if (prodWrap) {
-    prodWrap.innerHTML = reqProductAcHTML('staffTransferProductInput', 'staffTransferProduct');
-    buildReqProductAutocomplete(prodWrap, {
-      inputId:  'staffTransferProductInput',
-      hiddenId: 'staffTransferProduct',
-      onSelect: (p) => { loadStaffTransferVariants(p ? p.product_id : ''); _setStaffTransferBtn(); },
-    });
-  }
-
   const fromLabel = document.getElementById('staffTransferFromLabel');
   if (fromLabel) fromLabel.value = staffBranchName || '(your branch)';
 
@@ -3333,9 +3355,15 @@ async function openStaffTransferModal() {
         .map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
   }
 
+  // Clear and add the first product row
+  document.getElementById('staffTransferItems').innerHTML = '';
+  staffTransferRowCount = 0;
+  addStaffTransferItemRow();
+
   _setStaffTransferBtn(false);
-  document.getElementById('staffTransferQty')?.addEventListener('input',  () => _setStaffTransferBtn());
-  document.getElementById('staffTransferTo')?.addEventListener('change', () => _setStaffTransferBtn());
+  document.getElementById('staffTransferItems')?.addEventListener('input',  _staffTransferUpdateBtn);
+  document.getElementById('staffTransferItems')?.addEventListener('change', _staffTransferUpdateBtn);
+  document.getElementById('staffTransferTo')?.addEventListener('change', _staffTransferUpdateBtn);
   document.getElementById('staffTransferModalOverlay')?.classList.add('open');
   document.getElementById('staffTransferModal')?.classList.add('open');
   captureModalSnapshot('staffTransferModal');
@@ -3346,26 +3374,68 @@ function closeStaffTransferModal() {
   document.getElementById('staffTransferModalOverlay')?.classList.remove('open');
   document.getElementById('staffTransferModal')?.classList.remove('open');
   document.getElementById('staffTransferForm')?.reset();
-  const vw = document.getElementById('staffTransferVariantWrap'); if (vw) vw.style.display = 'none';
-  const prodWrap = document.getElementById('staffTransferProductWrap');
-  if (prodWrap?._acClear) prodWrap._acClear();
+  document.getElementById('staffTransferItems').innerHTML = '';
+  staffTransferRowCount = 0;
   _setStaffTransferBtn(false);
 }
 window.closeStaffTransferModal = closeStaffTransferModal;
 
-function loadStaffTransferVariants(productId) {
-  const wrap = document.getElementById('staffTransferVariantWrap');
-  const cont = document.getElementById('staffTransferVariantSelects');
-  if (!wrap || !cont) return;
-  if (!productId) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
-  const product = invProducts.find(p => p.product_id === productId);
-  const groups  = product?.option_groups || [];
+/* ── Staff Transfer item rows (mirrors the Stock Request modal's
+   multi-item pattern — one product/variant/qty per row, "To Branch" is
+   shared across every row in the submission) ──────────────────────── */
+let staffTransferRowCount = 0;
+
+function addStaffTransferItemRow() {
+  staffTransferRowCount++;
+  const rowId  = 'xferRow_' + staffTransferRowCount;
+  const wrap   = document.getElementById('staffTransferItems');
+  const row    = document.createElement('div');
+  row.id       = rowId;
+  row.style.cssText = 'background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;position:relative;';
+
+  const inputId  = `xferInput_${staffTransferRowCount}`;
+  const hiddenId = `xferHidden_${staffTransferRowCount}`;
+
+  row.innerHTML = `
+    ${staffTransferRowCount > 1 ? `<button type="button" onclick="this.parentElement.remove();_staffTransferUpdateBtn();" style="position:absolute;top:8px;right:8px;background:#ef4444;color:#fff;border:none;border-radius:6px;width:22px;height:22px;cursor:pointer;font-size:14px;line-height:1;">×</button>` : ''}
+    <div class="form-group" style="margin-bottom:8px;">
+      <label class="form-label" style="font-size:12px;">Product <span class="req">*</span></label>
+      ${reqProductAcHTML(inputId, hiddenId)}
+    </div>
+    <div class="xfer-variant-wrap" style="display:none;margin-bottom:8px;">
+      <label class="form-label" style="font-size:12px;">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
+      <div class="xfer-variant-selects" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
+    </div>
+    <div class="form-group" style="margin:0;max-width:220px;">
+      <label class="form-label" style="font-size:12px;">Quantity to Transfer <span class="req">*</span></label>
+      <input type="number" class="form-input xfer-qty" min="1" required placeholder="e.g. 20" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
+    </div>
+  `;
+  wrap.appendChild(row);
+
+  buildReqProductAutocomplete(row, {
+    inputId, hiddenId,
+    onSelect: (p) => {
+      loadStaffTransferRowVariants(p, rowId);
+      _staffTransferUpdateBtn();
+    },
+  });
+}
+window.addStaffTransferItemRow = addStaffTransferItemRow;
+
+function loadStaffTransferRowVariants(product, rowId) {
+  const row  = document.getElementById(rowId);
+  if (!row) return;
+  const wrap = row.querySelector('.xfer-variant-wrap');
+  const cont = row.querySelector('.xfer-variant-selects');
+  if (!product) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
+  const groups = product.option_groups || [];
   if (!groups.length) { wrap.style.display = 'none'; cont.innerHTML = ''; return; }
   wrap.style.display = 'block';
   cont.innerHTML = groups.map(g => `
-    <div style="flex:1;min-width:120px;">
-      <label style="font-size:12px;color:var(--text-muted);margin-bottom:4px;display:block;">${g.label}</label>
-      <select id="staffTransferVariantOpt_${g.label.replace(/\s/g,'_')}" class="form-input form-select" style="font-size:13px;">
+    <div style="flex:1;min-width:100px;">
+      <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
+      <select class="form-input form-select xfer-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
         <option value="">All (no variant)</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -3373,56 +3443,90 @@ function loadStaffTransferVariants(productId) {
   `).join('');
 }
 
-function getStaffTransferVariantOptions() {
-  const cont = document.getElementById('staffTransferVariantSelects');
-  if (!cont) return null;
-  const opts = {};
-  cont.querySelectorAll('select').forEach(sel => {
-    const label = sel.id.replace('staffTransferVariantOpt_', '').replace(/_/g, ' ');
-    if (sel.value) opts[label] = sel.value;
-  });
-  return Object.keys(opts).length > 0 ? opts : null;
-}
-
-function _setStaffTransferBtn() {
+function _setStaffTransferBtn(forceEnabled) {
   const btn = document.getElementById('staffTransferSubmitBtn');
   if (!btn) return;
-  const productId = document.getElementById('staffTransferProduct')?.value;
-  const toId      = document.getElementById('staffTransferTo')?.value;
-  const qty       = parseInt(document.getElementById('staffTransferQty')?.value);
-  const ok = !!productId && !!toId && qty > 0;
+  const ok = forceEnabled === false ? false : _staffTransferAllValid();
   btn.disabled = !ok;
   btn.style.opacity = ok ? '1' : '0.45';
   btn.style.cursor  = ok ? 'pointer' : 'not-allowed';
 }
 
+function _staffTransferAllValid() {
+  const toId = document.getElementById('staffTransferTo')?.value;
+  if (!toId) return false;
+  const rows = document.querySelectorAll('#staffTransferItems > div');
+  if (!rows.length) return false;
+  return Array.from(rows).every(row => {
+    const hidden = row.querySelector('input[type="hidden"]');
+    const qty    = row.querySelector('.xfer-qty');
+    return hidden?.value && qty?.value && parseInt(qty.value) >= 1;
+  });
+}
+
+function _staffTransferUpdateBtn() { _setStaffTransferBtn(); }
+
 async function submitStaffTransfer(e) {
   e.preventDefault();
-  const productId = document.getElementById('staffTransferProduct').value;
-  const toId       = document.getElementById('staffTransferTo').value;
-  const qty        = parseInt(document.getElementById('staffTransferQty').value);
-  const variantOpts = getStaffTransferVariantOptions();
+  const toId = document.getElementById('staffTransferTo').value;
+  const rows = document.querySelectorAll('#staffTransferItems > div');
+
+  if (!rows.length) {
+    showToast('Please add at least one product.', 'error');
+    return;
+  }
+
+  const items = [];
+  let hasError = false;
+  rows.forEach(function(row) {
+    const hiddenInput = row.querySelector('input[type="hidden"]');
+    const qtyInput    = row.querySelector('.xfer-qty');
+    const productId   = hiddenInput?.value;
+    const qty         = parseInt(qtyInput?.value || '0');
+
+    if (!productId || qty <= 0) { hasError = true; return; }
+
+    const variantOpts = {};
+    row.querySelectorAll('.xfer-variant-opt').forEach(function(vs) {
+      if (vs.value) variantOpts[vs.dataset.label] = vs.value;
+    });
+
+    items.push({
+      product_id:      productId,
+      quantity:         qty,
+      variant_options: Object.keys(variantOpts).length ? variantOpts : null,
+    });
+  });
+
+  if (hasError || !items.length || !toId) {
+    showToast('Please fill in all product rows and select a destination branch.', 'error');
+    return;
+  }
 
   const confirmed = await showConfirmDialog('Send Transfer Request',
-    `Request to send ${qty} unit(s) to the selected branch? They'll need to approve it before stock moves.`);
+    `Request to send ${items.length} product${items.length !== 1 ? 's' : ''} to the selected branch? They'll need to approve each item before stock moves.`);
   if (!confirmed) return;
 
   const btn = e.submitter || document.getElementById('staffTransferSubmitBtn');
   setButtonLoading(btn, true);
   try {
-    const res = await fetch('/api/staff/stock-transfers', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        product_id: productId, to_branch_id: toId, quantity: qty, variant_options: variantOpts,
-      }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast('Transfer request sent!');
+    let allOk = true;
+    for (const item of items) {
+      const res = await fetch('/api/staff/stock-transfers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          product_id: item.product_id, to_branch_id: toId,
+          quantity: item.quantity, variant_options: item.variant_options,
+        }),
+      });
+      if (!res.ok) allOk = false;
+    }
+    if (allOk) {
+      showToast(`${items.length} transfer request${items.length !== 1 ? 's' : ''} sent!`);
       closeStaffTransferModal();
       loadStockTransfers();
     } else {
-      showToast(data.error || 'Failed to send transfer request.', 'error');
+      showToast('Some transfer requests failed to submit. Please check.', 'error');
     }
   } catch (err) {
     showToast('Error sending transfer request.', 'error');

@@ -1051,6 +1051,39 @@ def _auto_advance_pending_orders():
         print(f'Auto-advance (pending -> processing) warning: {e}')
 
 
+def _auto_end_expired_discounts():
+    """Lazy/opportunistic check (same no-scheduler pattern as
+    _auto_advance_pending_orders/_auto_flag_not_remitted_orders) — final-
+    defense follow-up, Nov 12 2026. The admin Discount module already
+    computed and showed an "⛔ Ended" badge once a discount's ends_at
+    passed, but that was cosmetic only: product.discount_id stayed set, so
+    every endpoint that joins product -> discount (admin's own Products
+    table, /api/products for Staff POS, and mobile via the same endpoint)
+    kept applying and displaying the discounted price forever.
+
+    Runs inline whenever discounts or products are fetched (admin/staff
+    discount lists, /api/products, /api/admin/products): finds every
+    discount whose ends_at has passed and clears discount_id on every
+    product still pointing at one of them. From that point on, the
+    product -> discount join returns nothing for those products anywhere
+    in the app, with no per-endpoint filtering needed.
+
+    Deliberately NOT reversible by just pushing ends_at later — once ended,
+    a product needs to be explicitly reassigned (Assign Discount) rather
+    than silently reactivating, same as any other discount assignment.
+    """
+    try:
+        now = datetime.now(timezone.utc).isoformat()
+        expired = supabase.table('discount').select('discount_id') \
+            .not_.is_('ends_at', 'null').lt('ends_at', now).execute()
+        expired_ids = [d['discount_id'] for d in (expired.data or [])]
+        if not expired_ids:
+            return
+        supabase.table('product').update({'discount_id': None}).in_('discount_id', expired_ids).execute()
+    except Exception as e:
+        print(f'Auto-end expired discounts warning: {e}')
+
+
 @app.route('/')
 def landing():
     return render_template('landing.html')
@@ -1942,6 +1975,7 @@ def api_verify_otp():
 @app.route('/api/products', methods=['GET'])
 def api_products():
     try:
+        _auto_end_expired_discounts()
         category  = request.args.get('category', '')
         branch_id = request.args.get('branch_id', '')  # optional — scopes "Sold" to this branch
         query    = supabase.table('product').select(
@@ -2025,6 +2059,7 @@ def api_product_detail(product_id):
             _uuid.UUID(product_id)
         except ValueError:
             return jsonify({'error': 'Invalid product ID.'}), 404
+        _auto_end_expired_discounts()
         res = supabase.table('product').select(
             '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight, net_weight_unit'
         ).eq('product_id', product_id).execute()
@@ -2040,6 +2075,7 @@ def api_search():
     query    = request.args.get('q', '').strip()
     category = request.args.get('category', '').strip()
     try:
+        _auto_end_expired_discounts()
         res = supabase.table('product').select('*, discount(discount_name, percentage)').eq('status', 'active')
         if query:
             res = res.ilike('product_name', f'%{query}%')
@@ -3627,6 +3663,7 @@ def admin_delete_branch(branch_id):
 @admin_required
 def admin_get_discounts():
     try:
+        _auto_end_expired_discounts()
         res = supabase.table('discount').select('*').order('created_at', desc=True).execute()
         return jsonify(res.data), 200
     except Exception as e:
@@ -3635,10 +3672,21 @@ def admin_get_discounts():
 @app.route('/api/staff/discounts', methods=['GET'])
 @staff_required
 def staff_get_discounts():
-    """Read-only discount list for POS order-level discount dropdown."""
+    """Read-only discount list for POS order-level discount dropdown.
+    Filtered to only currently-active discounts (not yet started ones
+    excluded too) — final-defense follow-up, Nov 12 2026 — so staff can't
+    pick an ended (or not-yet-started) discount for a manual order-level
+    discount, matching the same "shouldn't show in POS" fix applied to
+    per-product discounts above."""
     try:
+        _auto_end_expired_discounts()
+        now = datetime.now(timezone.utc).isoformat()
         res = supabase.table('discount').select('discount_id,discount_name,percentage,starts_at,ends_at').order('discount_name').execute()
-        return jsonify(res.data), 200
+        active = [
+            d for d in (res.data or [])
+            if (not d.get('ends_at') or d['ends_at'] >= now) and (not d.get('starts_at') or d['starts_at'] <= now)
+        ]
+        return jsonify(active), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -3748,6 +3796,7 @@ def admin_unassign_discount():
 @admin_required
 def admin_get_products():
     try:
+        _auto_end_expired_discounts()
         res = supabase.table('product').select(
             '*, discount(discount_id, discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), option_groups'
         ).order('created_at', desc=True).execute()
@@ -5473,9 +5522,33 @@ def staff_place_order():
         total             = data.get('total', 0)
         branch_id         = data.get('branch_id')  # which branch processed this sale
         is_offline_sync = bool(data.get('is_offline_sync', False))  # True when this sale was made during a connection outage and is only now reaching the server
+        # Idempotency key — the same UUID the client generated at the moment
+        # the cashier pressed "Process Order", carried through every retry
+        # of THIS sale: the immediate attempt, any offline-queue replay, and
+        # any resync after a dropped connection (final-defense follow-up,
+        # Nov 12 2026 — offline walk-in sales were getting recorded multiple
+        # times). The duplicate wasn't one bug but several races that all
+        # land on "the same checkout reaches this route more than once":
+        # a POST that actually succeeded server-side but whose response
+        # never reached the browser (so the client fell back to the offline
+        # queue believing it had failed), the offline sync retrying an
+        # order whose IndexedDB delete silently failed after a successful
+        # POST, and two browser tabs on the same device racing to sync the
+        # same queued sale. Deduping on this key here handles all of them
+        # the same way, without needing to pin down which one actually
+        # fired in any given case.
+        client_offline_id = (data.get('client_offline_id') or '').strip() or None
 
         if not cart_items or not payment_method:
             return jsonify({'error': 'Cart items and payment method are required.'}), 400
+
+        if client_offline_id:
+            existing = supabase.table('order').select('order_id, total').eq('client_offline_id', client_offline_id).execute()
+            if existing.data:
+                # Already recorded from an earlier attempt of this exact
+                # sale — hand back the same order instead of creating (and
+                # stock-deducting) a second one.
+                return jsonify(existing.data[0]), 200
 
         if payment_method == 'gcash' and not is_offline_sync:
             # The GCash QR flow is online-only — verify the actual payment
@@ -5495,13 +5568,14 @@ def staff_place_order():
 
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
-            'staff_id':        session.get('staff_id'),
-            'branch_id':       branch_id,
-            'order_type':      order_type,
-            'quantity':        quantity,
-            'total':           total,
-            'status':          'completed',
-            'is_offline_sync': is_offline_sync,
+            'staff_id':          session.get('staff_id'),
+            'branch_id':         branch_id,
+            'order_type':        order_type,
+            'quantity':          quantity,
+            'total':             total,
+            'status':            'completed',
+            'is_offline_sync':   is_offline_sync,
+            'client_offline_id': client_offline_id,
         }).execute()
 
         order_id = order_res.data[0]['order_id']
