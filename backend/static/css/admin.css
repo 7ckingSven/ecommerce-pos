@@ -742,6 +742,11 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   border-color: var(--g-500);
   transform: translateY(-1px);
 }
+.sales-chart-period-btn.active {
+  background: var(--g-600);
+  color: #fff;
+  border-color: var(--g-600);
+}
 .btn-text {
   background: none;
   border: none;
@@ -824,8 +829,13 @@ select.form-input {
   display: none;
   position: fixed;
   inset: 0;
-  background: rgba(0,0,0,0.6);
-  backdrop-filter: blur(4px);
+  /* No backdrop-filter — blur(4px) was forcing the browser to re-composite
+     everything behind the overlay on every open/close (and again on top of
+     that for the confirm dialog that stacks above it), which is what made
+     submitting a modal feel sluggish on slower in-store devices. A flat,
+     slightly darker overlay reads the same visually at a fraction of the
+     render cost (final-defense speed follow-up, Nov 11 2026). */
+  background: rgba(0,0,0,0.65);
   z-index: 200;
 }
 .modal {
@@ -842,7 +852,7 @@ select.form-input {
   overflow-y: auto;
   z-index: 201;
   box-shadow: 0 24px 64px rgba(0,0,0,0.4);
-  animation: modalIn 0.2s ease;
+  animation: modalIn 0.14s ease;
 }
 @keyframes modalIn {
   from { opacity: 0; transform: translate(-50%, -48%); }

@@ -179,6 +179,8 @@ Stores discount records with optional date ranges.
 | `updated_at` | TIMESTAMP | NOT NULL, DEFAULT now() | Last updated |
 
 > **Status logic:** Active if now is between `starts_at` and `ends_at`. If no dates set, always active.
+>
+> **Enforcement (final-defense follow-up, Nov 12 2026):** the "⛔ Ended" status above used to be cosmetic only — `product.discount_id` stayed set past `ends_at`, so Staff POS and the mobile app kept applying and displaying the discounted price indefinitely. A new lazy/opportunistic check, `_auto_end_expired_discounts()` (same no-scheduler pattern as the Orders module's auto-advance checks), now runs inline whenever discounts or products are fetched (`/api/products`, `/api/products/<id>`, `/api/products/search`, `/api/admin/products`, `/api/admin/discounts`, `/api/staff/discounts`) and clears `product.discount_id` on every product still pointing at a discount whose `ends_at` has passed. `/api/staff/discounts` (the POS order-level discount dropdown) additionally filters out any discount outside its `[starts_at, ends_at]` window, so staff can't manually pick an ended or not-yet-started one either. This is a one-way transition — pushing `ends_at` back out later does **not** automatically re-apply the discount to products it already cleared; they'd need to be reassigned via Assign Discount, same as any new assignment.
 
 ---
 
@@ -227,6 +229,7 @@ Stores all customer orders (online via mobile and walk-in via POS).
 | `delivery_attempts` | INT | NOT NULL, DEFAULT 0 | Count of failed delivery attempts; after 3 the order auto-flips to `returned_failed` and stock is restored |
 | `completed_at` | TIMESTAMPTZ | NULLABLE | Stamped the moment a Remit (single or bulk) succeeds and the order moves to `completed` — drives the "Delivered Today" tab and the Remittance summary's Actual/Remitted figures |
 | `last_attempt_at` | TIMESTAMPTZ | NULLABLE | Stamped on every Not-Delivered click (final or not) — the only timestamp recorded for a non-final failed attempt, since a retry reschedules `dispatch_date` rather than marking completion. Drives the "Failed Attempts Today" tab |
+| `client_offline_id` | TEXT | NULLABLE, UNIQUE | Idempotency key for POS walk-in checkouts (final-defense follow-up, Nov 12 2026) — a UUID the staff browser generates once per "Process Order" click and resends unchanged on every retry of that same sale (the immediate attempt, the offline queue, any resync after a dropped connection). `staff_place_order()` checks this before inserting: if an order with the same key already exists, it hands that order back instead of creating a duplicate. Fixes offline sales getting recorded multiple times — the root cause was never one single bug, but several different races (a successful POST whose response never reached the browser, a resync retried after its local delete silently failed, two tabs syncing the same queued sale) that all land on "the same checkout reaches the server more than once"; this key makes every one of them a no-op on the 2nd+ attempt instead of a new order |
 | `date` | DATE | NOT NULL, DEFAULT CURRENT_DATE | Order date |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT now() | Precise timestamp for sorting |
 
@@ -348,7 +351,7 @@ Individual items within each purchase order.
 | `variant_options` | JSONB | NULLABLE | Which variant this line item is for, if the product has variants |
 | `received_quantity` | INT | NOT NULL, DEFAULT 0 | Cumulative units actually received so far (may be < quantity if the supplier shorted the order — PO stays `partially_received` until this reaches `quantity`) |
 | `requesting_branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | Which branch this line item is being restocked for — auto-fills the Receive & Distribute split so that branch gets its share by default; set from a stock request's branch when a PO item originates from "Use Approved Requests," otherwise left `NULL` and filled manually |
-| `supplier` | TEXT | NULLABLE | Supplier name for **this line item specifically** — entered at Receive & Distribute time (datalist-backed, sourced from `GET /api/admin/suppliers`). Different items on the same PO can have different suppliers; this is what replaced the old per-PO `purchase_order.supplier` field above |
+| `supplier` | TEXT | NULLABLE | Supplier name for **this line item specifically**. Brought back into the **Create PO** modal (Nov 12 2026 final-defense follow-up) as a per-row field, auto-filled from `GET /api/admin/products/<id>/supplier` (the supplier recorded on that product's very first Add Stock entry) but editable — still overridable at Receive & Distribute time too (datalist-backed, sourced from `GET /api/admin/suppliers`). Different items on the same PO can have different suppliers; this is what replaced the old per-PO `purchase_order.supplier` field above |
 
 ---
 
@@ -383,14 +386,16 @@ Stores trusted browsers for web (admin/staff) login — once a browser passes em
 ---
 
 ### 20. `price_history`
-Logs every change to a product's resale `price` — one row per edit, written automatically whenever `admin_update_product()` saves a different `price` than what was there before. Added 2026-10-22.
+Logs every change to a product's resale `price` and/or `base_price` — one row per edit, written automatically whenever `admin_update_product()` saves a different `price` and/or `base_price` than what was there before. Added 2026-10-22; `old_base_price`/`new_base_price` added 2026-11-10 (base-price edits weren't being logged at all before that — only the resale-price branch was checked).
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
 | `product_id` | UUID | NOT NULL | The product whose price changed — not a declared FK; `product_id`/`product_name` are joined back by hand in the read endpoint instead of a PostgREST embed |
-| `old_price` | DECIMAL(10,2) | NOT NULL | Resale price before the edit |
-| `new_price` | DECIMAL(10,2) | NOT NULL | Resale price after the edit |
+| `old_price` | DECIMAL(10,2) | NULLABLE | Resale price before the edit — NULL on a row where only `base_price` changed |
+| `new_price` | DECIMAL(10,2) | NULLABLE | Resale price after the edit — NULL on a row where only `base_price` changed |
+| `old_base_price` | DECIMAL(10,2) | NULLABLE | Base price before the edit — NULL on a row where only `price` changed |
+| `new_base_price` | DECIMAL(10,2) | NULLABLE | Base price after the edit — NULL on a row where only `price` changed |
 | `changed_by` | UUID | NULLABLE | `staff.staff_id` who made the edit — not a declared FK, same reason as `product_id` |
 | `changed_by_role` | VARCHAR | NULLABLE | `admin` or `staff`, from the session at the time of the edit |
 | `created_at` | TIMESTAMP | NOT NULL, DEFAULT now() | When the price change was logged |
@@ -579,12 +584,23 @@ ALTER TABLE product ADD COLUMN IF NOT EXISTS variant_overrides JSONB DEFAULT '[]
 CREATE TABLE price_history (
   id               UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   product_id       UUID NOT NULL,
-  old_price        DECIMAL(10,2) NOT NULL,
-  new_price        DECIMAL(10,2) NOT NULL,
+  old_price        DECIMAL(10,2),
+  new_price        DECIMAL(10,2),
+  old_base_price   DECIMAL(10,2),
+  new_base_price   DECIMAL(10,2),
   changed_by       UUID,
   changed_by_role  VARCHAR,
   created_at       TIMESTAMP NOT NULL DEFAULT now()
 );
+
+-- price_history base-price tracking (2026-11-10) — run this against the
+-- LIVE table (old_price/new_price were NOT NULL originally; a base-price-only
+-- edit has no resale-price values to log, so that constraint has to go).
+-- Run in the Supabase SQL editor before deploying the price-history fix.
+ALTER TABLE price_history ALTER COLUMN old_price DROP NOT NULL;
+ALTER TABLE price_history ALTER COLUMN new_price DROP NOT NULL;
+ALTER TABLE price_history ADD COLUMN IF NOT EXISTS old_base_price DECIMAL(10,2);
+ALTER TABLE price_history ADD COLUMN IF NOT EXISTS new_base_price DECIMAL(10,2);
 
 -- po_item — requesting branch, for the Receive & Distribute auto-fill
 -- (After-Consultation batch). Confirmed run on the live project.
@@ -647,6 +663,16 @@ ALTER TABLE public."order"
     'cancelled'::character varying,
     'returned_failed'::character varying
   ]::text[]));
+
+-- order — Feature #16 follow-up: idempotency key for offline POS sales
+-- (final-defense follow-up, Nov 12 2026). NULLable + UNIQUE: online/legacy
+-- orders placed before this migration have no key (multiple NULLs are
+-- fine under UNIQUE), and every new walk-in checkout going forward always
+-- sends one, so a duplicate key can only mean a genuine resync of the
+-- same sale, which the app already handles by returning the existing row
+-- instead of inserting — this constraint is a defense-in-depth backstop,
+-- not the primary dedup check.
+ALTER TABLE "order" ADD COLUMN IF NOT EXISTS client_offline_id TEXT UNIQUE;
 ```
 
 > **Note on completeness:** the tables/columns documented above that aren't reflected in the migration log — `sales_transaction`, `variant_stock`, `product.staff_id`/`available_at`/`variants`, `order.cart_id`/`ref_no`/`address_note`/`cancel_reason`/`cancelled_by`/`is_offline_sync`/`processing_started_at`/`dispatch_date`/`delivery_attempts`, `payment`'s `cash_on_delivery` method, `customer.address_note`, `user.active_session_token`, `staff.position` — were already present in production before this changelog started being kept during the panel-revision work this term. Their original creation SQL isn't tracked here; they're documented above purely from the live schema audit.
