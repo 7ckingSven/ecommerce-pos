@@ -289,31 +289,31 @@
 
 
       <div class="stat-grid" style="margin-bottom:1rem;">
-        <div class="stat-card">
+        <div class="stat-card" onclick="staffGoToInvStock('')" title="View all products" role="button" tabindex="0">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2L3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4z"/></svg>
           </div>
           <div class="stat-info"><span class="stat-label">Total Products</span><span class="stat-value" id="invTotalProducts">—</span></div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="staffGoToInvStock('low_stock')" title="View low-stock items" role="button" tabindex="0">
           <div class="stat-icon stat-icon--yellow">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="21 8 21 21 3 21 3 8"/><rect x="1" y="3" width="22" height="5"/></svg>
           </div>
           <div class="stat-info"><span class="stat-label">Low Stock</span><span class="stat-value" id="invLowStock">—</span><span class="stat-sub">6–10 units remaining</span></div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="staffGoToInvStock('critical_stock')" title="View critical-level items" role="button" tabindex="0">
           <div class="stat-icon stat-icon--red">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
           </div>
           <div class="stat-info"><span class="stat-label">Critical Level</span><span class="stat-value" id="invCriticalStock" style="color:#ef4444;">—</span><span class="stat-sub">≤5 units — urgent restock</span></div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="staffGoToInvStock('out_of_stock')" title="View out-of-stock items" role="button" tabindex="0">
           <div class="stat-icon stat-icon--red">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
           </div>
           <div class="stat-info"><span class="stat-label">Out of Stock</span><span class="stat-value" id="invOutOfStock">—</span><span class="stat-sub">0 units</span></div>
         </div>
-        <div class="stat-card">
+        <div class="stat-card" onclick="staffGoToInvHistory('restock')" title="View recent restocks in Stock Movement History" role="button" tabindex="0">
           <div class="stat-icon stat-icon--blue">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
           </div>
@@ -321,7 +321,7 @@
         </div>
       </div>
 
-      <div class="card">
+      <div class="card" id="invStockLevelsCard">
         <div class="card-header" style="flex-wrap:wrap;gap:8px;">
           <h3 class="card-title">Product Stock Levels</h3>
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
@@ -361,7 +361,7 @@
         <div id="staffInvPagination" style="padding:0 1rem;"></div>
       </div>
 
-      <div class="card" style="margin-top:1rem;">
+      <div class="card" style="margin-top:1rem;" id="invHistoryCard">
         <div class="card-header" style="flex-wrap:wrap;gap:8px;">
           <h3 class="card-title">Stock Movement History</h3>
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">

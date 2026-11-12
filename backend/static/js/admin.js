@@ -8845,61 +8845,73 @@ function showPOReceipt(po, items, total) {
   // `total === null` signals the draft-creation call, which has no cost
   // data at all yet.
   const hasCost = total !== null && total !== undefined;
-  const itemsHtml = items.map(i => `
+  // Variant now sits inline right after the product name, same size as the
+  // name itself (final-defense follow-up, Nov 12 2026 — it used to be a
+  // separate, much smaller line underneath, easy to miss/misread on a
+  // thermal printout). branch_note stays as a smaller sub-line.
+  // Grouped by supplier (Nov 12 2026, part 2) — same "Supplier: X" header
+  // row + its items underneath pattern the on-screen PO Detail view
+  // already uses (_poGroupItemsBySupplier), instead of repeating the
+  // supplier name on every single line.
+  const itemsHtml = _poGroupItemsBySupplier(items).map(g => `
     <tr>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);">
-        ${i.product?.product_name || i.product_name || '—'}
-        ${i.variant_options ? `<div style="font-size:10px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}</div>` : ''}
-        ${i.branch_note ? `<div style="font-size:10px;color:var(--text-muted);">→ ${i.branch_note}</div>` : ''}
-        ${i.supplier ? `<div style="font-size:10px;color:var(--text-muted);">Supplier: ${i.supplier}</div>` : ''}
+      <td colspan="${hasCost ? 4 : 2}" style="background:var(--surface-2,var(--surface));font-weight:700;padding:4px 6px;border-bottom:1px solid var(--border);">
+        Supplier: ${g.supplier || '<span style="color:var(--text-muted);font-weight:500;">Not yet assigned</span>'}
       </td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
+    </tr>
+    ${g.rows.map(({ item: i }) => `
+    <tr>
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);">
+        ${i.product?.product_name || i.product_name || '—'}${i.variant_options ? ` — ${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}` : ''}
+        ${i.branch_note ? `<div style="font-size:9px;color:var(--text-muted);">→ ${i.branch_note}</div>` : ''}
+      </td>
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
       ${hasCost ? `
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
-      <td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>` : ''}
-    </tr>`).join('');
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>` : ''}
+    </tr>`).join('')}`).join('');
 
   showModal(`
-    <div style="padding:1.5rem;" id="poReceiptContent">
+    <div style="padding:1rem;" id="poReceiptContent">
       <!-- Header -->
-      <div style="text-align:center;margin-bottom:1.5rem;padding-bottom:1rem;border-bottom:2px dashed var(--border);">
-        <div style="font-size:20px;font-weight:700;color:var(--text-primary);">Triple E & Fiel Collince</div>
-        <div style="font-size:12px;color:var(--text-muted);">General Merchandise</div>
-        <div style="font-size:12px;color:var(--text-muted);">Koronadal City, South Cotabato</div>
-        <div style="margin-top:8px;font-size:14px;font-weight:700;color:var(--g-400);">PURCHASE ORDER RECEIPT</div>
+      <div style="text-align:center;margin-bottom:1rem;padding-bottom:8px;border-bottom:2px dashed var(--border);">
+        <div style="font-size:15px;font-weight:700;color:var(--text-primary);">Triple E & Fiel Collince</div>
+        <div style="font-size:10px;color:var(--text-muted);">General Merchandise</div>
+        <div style="font-size:10px;color:var(--text-muted);">Koronadal City, South Cotabato</div>
+        <div style="margin-top:6px;font-size:12px;font-weight:700;color:var(--g-400);">PURCHASE ORDER RECEIPT</div>
       </div>
 
       <!-- PO Info -->
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:1rem;font-size:13px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;margin-bottom:8px;font-size:11px;">
         <div><span style="color:var(--text-muted);">PO Number</span><br/><strong>${po.po_number || '—'}</strong></div>
         <div><span style="color:var(--text-muted);">Status</span><br/>${badge(po.status)}</div>
         <div><span style="color:var(--text-muted);">Date</span><br/><strong>${dateStr} ${timeStr}</strong></div>
         ${po.note ? `<div style="grid-column:1/-1;"><span style="color:var(--text-muted);">Note</span><br/>${po.note}</div>` : ''}
-        ${!hasCost ? `<div style="grid-column:1/-1;font-size:12px;color:var(--text-muted);">Cost &amp; supplier are recorded per item when this PO is received.</div>` : ''}
+        ${!hasCost ? `<div style="grid-column:1/-1;font-size:10px;color:var(--text-muted);">Cost &amp; supplier are recorded per item when this PO is received.</div>` : ''}
       </div>
 
       <!-- Items Table -->
-      <table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:1rem;">
+      <table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px;">
         <thead>
           <tr style="background:var(--surface-2);">
-            <th style="padding:8px;text-align:left;font-size:12px;">Product</th>
-            <th style="padding:8px;text-align:center;font-size:12px;">Qty</th>
-            ${hasCost ? `<th style="padding:8px;text-align:right;font-size:12px;">Unit Cost</th>
-            <th style="padding:8px;text-align:right;font-size:12px;">Subtotal</th>` : ''}
+            <th style="padding:5px;text-align:left;font-size:10px;">Product</th>
+            <th style="padding:5px;text-align:center;font-size:10px;">Qty</th>
+            ${hasCost ? `<th style="padding:5px;text-align:right;font-size:10px;">Unit Cost</th>
+            <th style="padding:5px;text-align:right;font-size:10px;">Subtotal</th>` : ''}
           </tr>
         </thead>
         <tbody>${itemsHtml}</tbody>
         ${hasCost ? `
         <tfoot>
           <tr style="background:var(--surface-2);">
-            <td colspan="3" style="padding:8px;text-align:right;font-weight:700;">TOTAL</td>
-            <td style="padding:8px;text-align:right;font-weight:700;color:var(--g-400);font-size:15px;">${peso(total)}</td>
+            <td colspan="3" style="padding:5px;text-align:right;font-weight:700;">TOTAL</td>
+            <td style="padding:5px;text-align:right;font-weight:700;color:var(--g-400);font-size:13px;">${peso(total)}</td>
           </tr>
         </tfoot>` : ''}
       </table>
 
       <!-- Footer -->
-      <div style="text-align:center;font-size:11px;color:var(--text-muted);padding-top:1rem;border-top:2px dashed var(--border);">
+      <div style="text-align:center;font-size:9px;color:var(--text-muted);padding-top:8px;border-top:2px dashed var(--border);">
         Generated by Triple E & Fiel Collince E-Commerce & POS System<br/>
         ${dateStr} at ${timeStr}
       </div>
@@ -8935,9 +8947,9 @@ function printPOReceipt() {
           @page { size: 80mm auto; margin: 0; }
           * { box-sizing: border-box; }
           html, body { width: 80mm; }
-          body { font-family: 'Courier New', monospace; font-size: 11px; padding: 3mm; margin: 0 auto; color: #000; }
+          body { font-family: 'Courier New', monospace; font-size: 10px; padding: 2mm; margin: 0 auto; color: #000; }
           table { width: 100%; border-collapse: collapse; }
-          th, td { padding: 3px 2px; border-bottom: 1px dashed #000; font-size: 11px; word-break: break-word; }
+          th, td { padding: 2px; border-bottom: 1px dashed #000; font-size: 10px; word-break: break-word; }
           div[style*="grid-template-columns"] { display: block !important; }
           div[style*="grid-template-columns"] > div { margin-bottom: 2px; }
           @media print { button { display: none; } }

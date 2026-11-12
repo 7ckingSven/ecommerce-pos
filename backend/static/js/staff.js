@@ -3855,6 +3855,36 @@ function filterStaffInventoryType(type) {
 }
 window.filterStaffInventoryType = filterStaffInventoryType;
 
+// Inventory module's stat cards (Total Products / Low Stock / Critical
+// Level / Out of Stock / Recent Restocks) are clickable — jump to and flash
+// the relevant table so "click the number, land on the matching rows" is
+// obvious, same "jump + flash" pattern admin's dashboard cards already use.
+function staffGoToInvStock(level) {
+  const sel = document.getElementById('staffStockLevelFilter');
+  if (sel) sel.value = level || '';
+  filterStaffInventoryType(level || '');
+  const card = document.getElementById('invStockLevelsCard');
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.style.transition = 'box-shadow 0.3s ease';
+  card.style.boxShadow  = '0 0 0 3px var(--g-500)';
+  setTimeout(() => { card.style.boxShadow = ''; }, 1600);
+}
+window.staffGoToInvStock = staffGoToInvStock;
+
+function staffGoToInvHistory(type) {
+  const sel = document.getElementById('staffHistoryTypeFilter');
+  if (sel) sel.value = type || '';
+  filterStaffHistoryType(type || '');
+  const card = document.getElementById('invHistoryCard');
+  if (!card) return;
+  card.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  card.style.transition = 'box-shadow 0.3s ease';
+  card.style.boxShadow  = '0 0 0 3px var(--g-500)';
+  setTimeout(() => { card.style.boxShadow = ''; }, 1600);
+}
+window.staffGoToInvHistory = staffGoToInvHistory;
+
 function updateOrdersBadge(orders) {
   const badge   = document.getElementById('ordersBadge');
   if (!badge) return;
