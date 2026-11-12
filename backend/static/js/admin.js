@@ -3039,11 +3039,16 @@ function generatePOForSelectedCritical() {
     const row = itemsWrap ? itemsWrap.lastElementChild : null;
     if (!row) return;
     row.dataset.requestingBranchId = e.branchId;
+    // Same branch-scoping key updatePORowStock reads (see
+    // quickCreatePOForBranchProduct) so these bulk-generated rows also show
+    // only the requesting branch's stock, not the whole product's.
+    row.dataset.branchLock = e.branchId;
     const sel = row.querySelector('.po-product');
     if (sel) {
       sel.value = p.product_id;
-      if (typeof updatePORowStock === 'function') updatePORowStock(sel);
       if (typeof loadPORowVariants === 'function') loadPORowVariants(sel);
+      if (typeof updatePORowStock === 'function') updatePORowStock(sel);
+      if (typeof _poFillSupplier === 'function') _poFillSupplier(sel);
     }
   });
   if (typeof updatePOTotal === 'function') updatePOTotal();
@@ -3473,14 +3478,14 @@ async function openAddStockModal() {
 
   // Clear and add first product row
   document.getElementById('addStockItems').innerHTML = '';
-  document.getElementById('addStockNote').value = '';
   const supplierEl = document.getElementById('addStockSupplier');
   if (supplierEl) supplierEl.value = '';
   addStockItemRow();
 
   _setInvBtn('addStockSubmitBtn', false);
-  // Live check — branch change + item row inputs (event delegation)
+  // Live check — branch change + supplier + item row inputs (event delegation)
   document.getElementById('addStockBranch')?.addEventListener('change', _addStockUpdateBtn);
+  document.getElementById('addStockSupplier')?.addEventListener('input',  _addStockUpdateBtn);
   document.getElementById('addStockItems')?.addEventListener('input',  _addStockUpdateBtn);
   document.getElementById('addStockItems')?.addEventListener('change', _addStockUpdateBtn);
   document.getElementById('addStockModalOverlay')?.classList.add('open');
@@ -3675,8 +3680,9 @@ function _setInvBtn(id, enabled) {
 }
 
 function _addStockUpdateBtn() {
-  const branch  = (document.getElementById('addStockBranch')?.value || '').trim();
-  if (!branch) { _setInvBtn('addStockSubmitBtn', false); return; }
+  const branch   = (document.getElementById('addStockBranch')?.value || '').trim();
+  const supplier = (document.getElementById('addStockSupplier')?.value || '').trim();
+  if (!branch || !supplier) { _setInvBtn('addStockSubmitBtn', false); return; }
   const rows = document.querySelectorAll('#addStockItems > div');
   if (!rows.length) { _setInvBtn('addStockSubmitBtn', false); return; }
   const allValid = Array.from(rows).every(row => {
@@ -3752,11 +3758,16 @@ async function submitAddStock(e) {
   const addStockBtn = e.submitter || document.querySelector('#addStockForm button[type="submit"]');
 
   const branchVal = document.getElementById('addStockBranch').value;
-  const note      = document.getElementById('addStockNote').value || 'Stock added';
+  const note      = 'Stock added';
   const supplier  = (document.getElementById('addStockSupplier')?.value || '').trim();
 
   if (!branchVal) {
     showToast('Please select a branch.', 'error');
+    return;
+  }
+  if (!supplier) {
+    showToast('Please enter a supplier.', 'error');
+    document.getElementById('addStockSupplier')?.focus();
     return;
   }
 
@@ -7846,7 +7857,7 @@ function loadPORowVariants(sel) {
   wrap.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
-      <select class="form-input form-select po-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
+      <select class="form-input form-select po-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;" onchange="_poVariantOptChanged(this)">
         <option value="">Any</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -7920,7 +7931,7 @@ function addPOItemRow() {
   row.style.cssText = 'display:grid;grid-template-columns:1fr 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
   row.innerHTML = `
     <div style="display:flex;flex-direction:column;gap:4px;">
-      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);">
+      <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);_poFillSupplier(this);">
         <option value="">Select product</option>
         ${allProducts.map(p => {
           const bs = p.branch_stock || [];
@@ -7932,6 +7943,8 @@ function addPOItemRow() {
       </select>
       <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
       <span class="po-stock-info" style="font-size:12px;padding-left:4px;"></span>
+      <input type="text" class="form-input po-supplier" placeholder="Supplier" style="font-size:12px;padding:5px 7px;"
+        title="Auto-filled from this product's very first Add Stock entry — edit if this PO is going to a different supplier."/>
     </div>
     <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()"/>
     <button type="button" onclick="this.parentElement.remove();updatePOTotal();" title="Remove this item" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
@@ -7964,9 +7977,9 @@ function quickCreatePOForBranchProduct(productId, branchId) {
   document.getElementById('poItemsWrap').innerHTML = '';
 
   if (criticalVariants.length) {
-    criticalVariants.forEach(v => fillPORowForProduct(p, v));
+    criticalVariants.forEach(v => fillPORowForProduct(p, v, null, null, branchId));
   } else {
-    fillPORowForProduct(p, null);
+    fillPORowForProduct(p, null, null, null, branchId);
   }
 
   updatePOTotal();
@@ -7980,19 +7993,24 @@ window.quickCreatePOForBranchProduct = quickCreatePOForBranchProduct;
 // "Use Approved Requests" picker below: requestId is stamped onto the row
 // (so submitCreatePO() can tell the backend which stock_request this came
 // from) and qty pre-fills the quantity the staff member actually asked for.
-function fillPORowForProduct(product, variantRow, requestId, qty) {
+function fillPORowForProduct(product, variantRow, requestId, qty, branchLock) {
   addPOItemRow();
   const wrap = document.getElementById('poItemsWrap');
   const row  = wrap.lastElementChild;
   if (!row) return;
 
   if (requestId) row.dataset.requestId = requestId;
+  // Locks the stock summary shown for this row to one branch — set when the
+  // row was pre-filled from that branch's Stock Summary table (see
+  // quickCreatePOForBranchProduct) so "Triple E: 248 | Fiel Collince: 256"
+  // doesn't show for a PO that only concerns one of those branches.
+  if (branchLock) row.dataset.branchLock = branchLock;
 
   const sel = row.querySelector('.po-product');
   if (sel) {
     sel.value = product.product_id;
-    updatePORowStock(sel);
     loadPORowVariants(sel);
+    _poFillSupplier(sel);
   }
 
   if (variantRow && variantRow.options) {
@@ -8001,6 +8019,10 @@ function fillPORowForProduct(product, variantRow, requestId, qty) {
       if (label && variantRow.options[label] != null) vs.value = variantRow.options[label];
     });
   }
+
+  // Stock summary depends on which variant options ended up selected above,
+  // so it's computed last rather than right after setting the product.
+  if (sel) updatePORowStock(sel);
 
   if (qty) {
     const qtyEl = row.querySelector('.po-qty');
@@ -8164,28 +8186,105 @@ function _poStockLevelTag(totalStock) {
   return { label: 'OK', color: '#16a34a' };
 }
 
+function _poBranchName(branchId) {
+  const b = (allBranches || []).find(br => String(br.branch_id) === String(branchId));
+  return b?.branch_name || 'Branch';
+}
+
+// Branch + variant aware stock summary for a Create PO row (final-defense
+// follow-up, Nov 12 2026). Previously this always showed opt.dataset.bs —
+// the WHOLE product's stock across every branch and variant — even when a
+// row was locked to one branch (via the branch Stock Summary table's
+// "Generate PO" shortcut, see quickCreatePOForBranchProduct) or had a
+// specific variant pinned via the .po-variant-opt selects. Now it narrows
+// to exactly what's selected: variant_stock rows matching every pinned
+// option, further filtered to row.dataset.branchLock when the row came
+// from a branch-specific Generate PO click. Falls back to the whole-product
+// branch_stock breakdown only when nothing variant-specific is pinned.
 function updatePORowStock(sel) {
   const opt   = sel.options[sel.selectedIndex];
   const stock = opt?.dataset?.stock || '0';
-  const bsRaw = opt?.dataset?.bs;
-  let info    = `Current stock: ${stock} units`;
-  if (bsRaw) {
-    try {
-      const bs = JSON.parse(bsRaw);
-      if (bs.length > 1) {
-        info = bs.map(b => `${b.branch?.branch_name || 'Branch'}: ${b.quantity}`).join(' | ');
-      }
-    } catch {}
-  }
-  const tag = _poStockLevelTag(stock);
-  const row = sel.closest('[style]');
+  const row = sel.closest('div[style*="grid"]') || sel.parentElement.parentElement;
   const infoEl = row?.querySelector('.po-stock-info');
-  if (infoEl) {
-    infoEl.innerHTML = opt.value
-      ? `<span style="color:${tag.color};font-weight:700;">${tag.label}</span> <span style="color:var(--text-muted);">— ${info}</span>`
-      : '';
+  if (!infoEl) return;
+  if (!opt || !opt.value) { infoEl.innerHTML = ''; return; }
+
+  const productId   = opt.value;
+  const product     = allProducts.find(p => p.product_id === productId);
+  const branchLock  = row?.dataset?.branchLock || '';
+
+  const selectedOpts = {};
+  row?.querySelectorAll('.po-variant-opt').forEach(vs => { if (vs.value) selectedOpts[vs.dataset.label] = vs.value; });
+  const hasVariantPin = Object.keys(selectedOpts).length > 0;
+
+  let info;
+  let tagQty = stock;
+
+  if (hasVariantPin && product?.variant_stock?.length) {
+    let rows = product.variant_stock.filter(v =>
+      Object.entries(selectedOpts).every(([k, val]) => (v.options || {})[k] === val)
+    );
+    if (branchLock) rows = rows.filter(v => String(v.branch_id) === String(branchLock));
+    if (rows.length) {
+      info = rows.map(v => `${_poBranchName(v.branch_id)}: ${v.quantity}`).join(' | ');
+      tagQty = rows.reduce((s, v) => s + Number(v.quantity || 0), 0);
+    } else {
+      info = `${branchLock ? _poBranchName(branchLock) : 'This branch'}: 0`;
+      tagQty = 0;
+    }
+  } else {
+    const bsRaw = opt?.dataset?.bs;
+    let bs = [];
+    try { bs = bsRaw ? JSON.parse(bsRaw) : []; } catch {}
+    if (branchLock) bs = bs.filter(b => String(b.branch_id) === String(branchLock));
+    if (bs.length) {
+      info = bs.map(b => `${b.branch?.branch_name || _poBranchName(b.branch_id)}: ${b.quantity}`).join(' | ');
+      tagQty = bs.reduce((s, b) => s + Number(b.quantity || 0), 0);
+    } else {
+      info = `Current stock: ${stock} units`;
+    }
   }
+
+  const tag = _poStockLevelTag(tagQty);
+  infoEl.innerHTML = `<span style="color:${tag.color};font-weight:700;">${tag.label}</span> <span style="color:var(--text-muted);">— ${info}</span>`;
 }
+
+// Re-reads stock for a row whenever one of its .po-variant-opt selects
+// changes, so the stock line narrows to the exact variant chosen instead
+// of staying stuck on the whole-product number.
+function _poVariantOptChanged(variantSel) {
+  const row = variantSel.closest('div[style*="grid"]');
+  const productSel = row?.querySelector('.po-product');
+  if (productSel) updatePORowStock(productSel);
+}
+window._poVariantOptChanged = _poVariantOptChanged;
+
+// Supplier input brought back into Create PO (final-defense follow-up, Nov
+// 12 2026 — it was removed Oct 26 when supplier moved to Receive time).
+// Auto-fills from whichever supplier was recorded on this product's very
+// first-ever Add Stock entry (GET /api/admin/products/<id>/supplier), but
+// stays editable — a fresh row with nothing recorded yet, or a PO going to
+// a different supplier this time, both just type over it.
+const _poSupplierCache = {};
+async function _poFillSupplier(sel) {
+  const row = sel.closest('div[style*="grid"]');
+  const supplierEl = row?.querySelector('.po-supplier');
+  if (!supplierEl) return;
+  const productId = sel.value;
+  if (!productId) { supplierEl.value = ''; return; }
+
+  supplierEl.value = '';
+  supplierEl.placeholder = 'Loading…';
+  try {
+    if (!(productId in _poSupplierCache)) {
+      const res = await fetch(`/api/admin/products/${productId}/supplier`);
+      _poSupplierCache[productId] = res.ok ? (await res.json()).supplier || '' : '';
+    }
+    supplierEl.value = _poSupplierCache[productId];
+  } catch { /* leave blank — admin can still type one in */ }
+  supplierEl.placeholder = 'Supplier';
+}
+window._poFillSupplier = _poFillSupplier;
 
 function updatePOTotal() {
   const rows  = document.getElementById('poItemsWrap').children;
@@ -8216,14 +8315,25 @@ async function submitCreatePO() {
   // only these get marked converted_to_po; a row the admin deleted before
   // submitting never ends up here, so its request stays available.
   const stockRequestIds = [];
+  // Final-defense follow-up (Nov 12 2026): a variant product left entirely
+  // on "Any" quietly created ONE po_item with the whole combined quantity
+  // and no variant_options at all — this is exactly the undifferentiated
+  // "291 units" the adviser flagged in the Ordered PO modal, since there's
+  // nothing recorded afterward to break that number back down by variant.
+  // Block it here instead: a product with option_groups must either have
+  // every group pinned to a specific choice, or be run through "Split qty
+  // per variant" first.
+  const unsplitProducts = [];
   for (const row of rows) {
-    const productId = row.querySelector('.po-product')?.value;
-    const qty       = parseInt(row.querySelector('.po-qty')?.value || 0);
+    const productSel = row.querySelector('select.po-product');
+    const productId  = productSel?.value || row.querySelector('input[type="hidden"].po-product')?.value;
+    const qty        = parseInt(row.querySelector('.po-qty')?.value || 0);
     if (productId && qty > 0) {
       // Get variant options for this row — a row produced by "Split qty per
       // variant" carries its exact combo in data-variant-options (no live
-      // selects to read); any other row reads its .po-variant-opt selects
-      // as before.
+      // selects to read, and no .po-product <select> at all — it's a hidden
+      // input by that point); any other row reads its .po-variant-opt
+      // selects as before.
       let variantOpts = {};
       if (row.dataset.variantOptions) {
         try { variantOpts = JSON.parse(row.dataset.variantOptions) || {}; } catch (_e) {}
@@ -8232,6 +8342,15 @@ async function submitCreatePO() {
           if (vs.value) variantOpts[vs.dataset.label] = vs.value;
         });
       }
+
+      if (productSel && !row.dataset.variantOptions) {
+        const groupsForRow = JSON.parse(productSel.options[productSel.selectedIndex]?.dataset?.groups || '[]');
+        if (groupsForRow.length && Object.keys(variantOpts).length < groupsForRow.length) {
+          unsplitProducts.push(productSel.options[productSel.selectedIndex]?.textContent || 'This product');
+          continue; // don't add it to items — the toast below blocks submission anyway
+        }
+      }
+
       // If this row came from a staff stock request (via fillPORowForProduct),
       // or was stamped directly by the bulk "Generate PO for Selected"
       // critical-stock action (row.dataset.requestingBranchId), carry that
@@ -8242,9 +8361,17 @@ async function submitCreatePO() {
         : null;
       const requestingBranchId = row.dataset.requestingBranchId
         || (sourceReq ? (sourceReq.branch_id || sourceReq.branch?.branch_id || null) : null);
-      items.push({ product_id: productId, quantity: qty, variant_options: Object.keys(variantOpts).length ? variantOpts : null, requesting_branch_id: requestingBranchId });
+      // Supplier brought back into Create PO (Nov 12 2026) — auto-filled by
+      // _poFillSupplier but still editable per row, since different
+      // products on one PO can come from different suppliers.
+      const supplier = (row.querySelector('.po-supplier')?.value || '').trim();
+      items.push({ product_id: productId, quantity: qty, variant_options: Object.keys(variantOpts).length ? variantOpts : null, requesting_branch_id: requestingBranchId, supplier: supplier || null });
       if (row.dataset.requestId) stockRequestIds.push(row.dataset.requestId);
     }
+  }
+  if (unsplitProducts.length) {
+    showToast(`${unsplitProducts.join(', ')} ${unsplitProducts.length > 1 ? 'have' : 'has'} variants — pin down each option or use "Split qty per variant" before creating this PO, so quantities stay trackable per variant instead of one combined number.`, 'error');
+    return;
   }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
 
@@ -8266,9 +8393,14 @@ async function submitCreatePO() {
       closeCreatePOModal();
       invalidateSection('purchase_orders'); loadPurchaseOrders();
       // Show digital receipt — no cost/total yet, that's filled in at Receive.
+      // variant_options/supplier are carried through too (final-defense
+      // follow-up, Nov 12 2026) — showPOReceipt already knew how to render
+      // them, this call just wasn't passing them along.
       const receiptItems = items.map(i => ({
-        product_name: allProducts.find(p => p.product_id === i.product_id)?.product_name || '—',
-        quantity:     i.quantity,
+        product_name:    allProducts.find(p => p.product_id === i.product_id)?.product_name || '—',
+        quantity:        i.quantity,
+        variant_options: i.variant_options || null,
+        supplier:        i.supplier || null,
       }));
       showPOReceipt({ po_number: data.po_number, note, status: 'draft' }, receiptItems, null);
     } else {
@@ -8362,18 +8494,30 @@ function showPOReceipt(po, items, total) {
   `, '760px');
 }
 
+// Sized for an 80mm thermal receipt printer (final-defense follow-up, Nov
+// 12 2026) — this used to print at a bond-paper/A4 page size (no @page rule
+// at all, so the browser's default Letter/A4 size won, with the on-screen
+// modal's wide padding/table layout carried straight into the printout).
+// @page constrains the actual paper size; the body/table rules below are
+// trimmed down to fit 80mm (≈72mm printable) instead of the modal's
+// desktop-width layout.
 function printPOReceipt() {
   const content = document.getElementById('poReceiptContent')?.innerHTML;
   if (!content) return;
-  const win = window.open('', '_blank');
+  const win = window.open('', '_blank', 'width=360,height=600');
   win.document.write(`
     <html>
       <head>
         <title>PO Receipt</title>
         <style>
-          body { font-family: sans-serif; padding: 20px; max-width: 600px; margin: 0 auto; }
+          @page { size: 80mm auto; margin: 0; }
+          * { box-sizing: border-box; }
+          html, body { width: 80mm; }
+          body { font-family: 'Courier New', monospace; font-size: 11px; padding: 3mm; margin: 0 auto; color: #000; }
           table { width: 100%; border-collapse: collapse; }
-          th, td { padding: 8px; border-bottom: 1px solid #ddd; }
+          th, td { padding: 3px 2px; border-bottom: 1px dashed #000; font-size: 11px; word-break: break-word; }
+          div[style*="grid-template-columns"] { display: block !important; }
+          div[style*="grid-template-columns"] > div { margin-bottom: 2px; }
           @media print { button { display: none; } }
         </style>
       </head>
@@ -8429,6 +8573,25 @@ async function loadPOLinkedInventory(po) {
   }
 }
 
+// Groups a PO's items by supplier for display (final-defense follow-up,
+// Nov 12 2026 — "different product variants with the same supplier should
+// be organized list" instead of repeating/separating supplier per line).
+// Keeps each item's original array index (needed by validatePODistribution/
+// submitPOReceive, which look items up by that index) while reordering only
+// how they're grouped visually. Items with no supplier recorded yet are
+// grouped together under one "Not yet assigned" bucket, listed last.
+function _poGroupItemsBySupplier(items) {
+  const order = [];
+  const map   = new Map();
+  items.forEach((item, idx) => {
+    const key = (item.supplier || '').trim();
+    if (!map.has(key)) { map.set(key, []); order.push(key); }
+    map.get(key).push({ item, idx });
+  });
+  order.sort((a, b) => (a === '') - (b === ''));
+  return order.map(key => ({ supplier: key, rows: map.get(key) }));
+}
+
 function openPODetail(poId) {
   const po = allPOs.find(p => p.po_id === poId);
   if (!po) return;
@@ -8444,29 +8607,35 @@ function openPODetail(poId) {
       ${po.note ? `<div><strong>Note:</strong> ${po.note}</div>` : ''}
     </div>
     <table class="data-table" style="margin-bottom:1rem;">
-      <thead><tr><th>Product</th><th>Qty</th><th>Received</th><th>Supplier</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
+      <thead><tr><th>Product</th><th>Qty (per variant)</th><th>Received</th><th>Unit Cost</th><th>Subtotal</th></tr></thead>
       <tbody>
-        ${items.map(i => {
-          const orderedQty  = Number(i.quantity);
-          const receivedQty = Number(i.received_quantity || 0);
-          const complete    = receivedQty >= orderedQty;
-          const recvColor   = complete ? 'var(--g-400)' : receivedQty > 0 ? '#eab308' : 'var(--text-muted)';
-          const hasCost     = receivedQty > 0;
-          return `
+        ${_poGroupItemsBySupplier(items).map(g => `
           <tr>
-            <td>
-              ${i.product?.product_name || '—'}
-              ${i.variant_options ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>` : ''}
+            <td colspan="5" style="background:var(--surface-2,var(--surface));font-weight:700;padding:6px 8px;">
+              Supplier: ${g.supplier || '<span style="color:var(--text-muted);font-weight:500;">Not yet assigned</span>'}
             </td>
-            <td>${orderedQty}</td>
-            <td style="color:${recvColor};font-weight:600;">${receivedQty} / ${orderedQty}</td>
-            <td>${i.supplier || (hasCost ? '—' : '<span style="color:var(--text-muted);">Not received yet</span>')}</td>
-            <td>${hasCost ? peso(i.unit_cost) : '—'}</td>
-            <td>${hasCost ? peso(Number(i.unit_cost) * receivedQty) : '—'}</td>
-          </tr>`;
-        }).join('')}
+          </tr>
+          ${g.rows.map(({ item: i }) => {
+            const orderedQty  = Number(i.quantity);
+            const receivedQty = Number(i.received_quantity || 0);
+            const complete    = receivedQty >= orderedQty;
+            const recvColor   = complete ? 'var(--g-400)' : receivedQty > 0 ? '#eab308' : 'var(--text-muted)';
+            const hasCost     = receivedQty > 0;
+            return `
+            <tr>
+              <td>
+                ${i.product?.product_name || '—'}
+                ${i.variant_options ? `<div style="font-size:11px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v])=>k+': '+v).join(', ')}</div>` : ''}
+              </td>
+              <td>${orderedQty}</td>
+              <td style="color:${recvColor};font-weight:600;">${receivedQty} / ${orderedQty}</td>
+              <td>${hasCost ? peso(i.unit_cost) : '—'}</td>
+              <td>${hasCost ? peso(Number(i.unit_cost) * receivedQty) : '—'}</td>
+            </tr>`;
+          }).join('')}
+        `).join('')}
         <tr style="font-weight:700;">
-          <td colspan="5" style="text-align:right;">Total (received so far)</td>
+          <td colspan="4" style="text-align:right;">Total (received so far)</td>
           <td>${total > 0 ? peso(total) : '—'}</td>
         </tr>
       </tbody>
@@ -8495,7 +8664,7 @@ function openPODetail(poId) {
     // still OUTSTANDING (ordered minus whatever earlier batches already
     // received), not the original ordered qty — so a short delivery can be
     // completed later without re-receiving units that already arrived.
-    const itemRows = items.map((item, idx) => {
+    const _poRenderReceiveRow = (item, idx) => {
       const orderedQty      = Number(item.quantity);
       const alreadyReceived = Number(item.received_quantity || 0);
       const outstanding     = Math.max(orderedQty - alreadyReceived, 0);
@@ -8586,7 +8755,17 @@ function openPODetail(poId) {
           <div id="distError_${idx}" style="font-size:12px;color:#ef4444;margin-top:4px;display:none;"></div>
           <div id="distCount_${idx}" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
         </div>`;
-    }).join('');
+    };
+
+    // Grouped by supplier (final-defense follow-up, Nov 12 2026) — same
+    // "Supplier: X" header + its items format as the read-only table above,
+    // instead of repeating/separating supplier per product variant line.
+    const itemRows = _poGroupItemsBySupplier(items).map(g => `
+      <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin:10px 0 6px;padding-top:8px;border-top:1px dashed var(--border);">
+        Supplier: ${g.supplier || '<span style="color:var(--text-muted);font-weight:500;">Not yet assigned</span>'}
+      </div>
+      ${g.rows.map(({ item, idx }) => _poRenderReceiveRow(item, idx)).join('')}
+    `).join('');
 
     // The items/distribution list goes into the CONTENT area, not the
     // footer — the footer is a flex row shared with the Close/Save Receipt

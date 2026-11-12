@@ -904,11 +904,33 @@ def _auto_advance_processing_orders():
 PH_UTC_OFFSET_HOURS = 8
 # "Define closing hours for delivery (5pm)" — adviser follow-up, Oct 26 2026.
 CLOSING_HOUR_PH = 17
+# Remittance window reopens at 6am the next business day (final-defense
+# follow-up, Nov 10 2026). Nothing currently gates on this at 6am itself —
+# it only matters for _remittance_business_date below, which treats
+# anything timestamped before 6am as still belonging to the still-open
+# business date (the closed window carried over from last night's 5pm).
+OPENING_HOUR_PH = 6
 
 def _ph_now():
     return datetime.utcnow() + timedelta(hours=PH_UTC_OFFSET_HOURS)
 
-def _auto_flag_not_remitted_orders():
+def _remittance_business_date(dt_ph):
+    """Maps a PH-local datetime to the remittance "business date" it counts
+    toward (final-defense follow-up, Nov 10 2026: "if the remitted money is
+    past 5pm, it will go to tomorrow's remittance"). The remittance window
+    is open [6am, 5pm) every day; anything remitted at/after 5pm rolls into
+    the NEXT calendar day's business date, since that's the day whose
+    window is about to open. Anything before 6am is still within that same
+    carried-over closed window, so it stays on the current calendar date
+    (the business date whose 6am opening it's heading toward) — no shift
+    needed for that branch, the date is already right.
+    Takes/returns a plain date (not datetime) for easy string comparison."""
+    d = dt_ph.date()
+    if dt_ph.hour >= CLOSING_HOUR_PH:
+        d = d + timedelta(days=1)
+    return d
+
+def _auto_flag_not_remitted_orders(force=False, branch_id=None):
     """Lazy/opportunistic closing-hour check (adviser follow-up, Oct 26
     2026: "Define closing hours for delivery (5 pm). Automatically set
     status to 'not remitted' via batch trigger for remittance after
@@ -923,19 +945,32 @@ def _auto_flag_not_remitted_orders():
     point — it becomes its own status (separate from returned_failed or
     completed) that needs a follow-up Remit or Not Delivered action,
     rather than silently staying indistinguishable from an order that's
-    simply still out on time."""
+    simply still out on time.
+
+    force=True skips the "is it actually past 5pm yet" check — used by the
+    manual "Close Remittance" button (final-defense follow-up, Nov 10
+    2026) so admin/staff can close the day's remittance early instead of
+    waiting for the automatic 5pm flag. branch_id scopes it to one branch
+    (the staff button); None (admin button, or the automatic lazy check)
+    covers every branch. Returns how many orders got flagged, so the
+    manual-close route can report it back."""
     try:
         ph_now = _ph_now()
-        if ph_now.hour < CLOSING_HOUR_PH:
-            return
+        if not force and ph_now.hour < CLOSING_HOUR_PH:
+            return 0
         today_ph = ph_now.strftime('%Y-%m-%d')
-        res = supabase.table('order').select('order_id, dispatch_date').eq('status', 'out_for_delivery').execute()
+        q = supabase.table('order').select('order_id, dispatch_date, branch_id').eq('status', 'out_for_delivery')
+        if branch_id:
+            q = q.eq('branch_id', branch_id)
+        res = q.execute()
         due_ids = [o['order_id'] for o in (res.data or [])
                    if o.get('dispatch_date') and str(o['dispatch_date'])[:10] <= today_ph]
         if due_ids:
             supabase.table('order').update({'status': 'not_remitted'}).in_('order_id', due_ids).execute()
+        return len(due_ids)
     except Exception as e:
         print(f'Auto-flag (out_for_delivery -> not_remitted) warning: {e}')
+        return 0
 
 
 # How long a pending ONLINE order gets before it's auto-moved into
@@ -2965,13 +3000,19 @@ def admin_get_purchase_orders():
 @app.route('/api/admin/purchase-orders', methods=['POST'])
 @admin_required
 def admin_create_purchase_order():
-    """Adviser follow-up (Oct 26 2026): Supplier and Unit Cost are no
-    longer collected here — out of scope this early, since the real cost
-    isn't confirmed until the delivery arrives and different products on
-    one PO may come from different suppliers. Both are now entered per
-    line item at Receive & Distribute time (see admin_update_purchase_order
-    below), so a freshly-created PO has no supplier and unit_cost 0 on
-    every item until it's actually received."""
+    """Adviser follow-up (Oct 26 2026): Unit Cost is no longer collected
+    here — out of scope this early, since the real cost isn't confirmed
+    until the delivery arrives. It's still entered per line item at
+    Receive & Distribute time (see admin_update_purchase_order below), so
+    every item has unit_cost 0 until it's actually received.
+
+    Supplier was brought back (Nov 12 2026 final-defense follow-up): each
+    item can carry a `supplier`, auto-filled client-side from that
+    product's very first Add Stock record (see admin_get_product_supplier)
+    but editable per row, since different products on one PO can come
+    from different suppliers. It's stored on the po_item now rather than
+    waiting for Receive, and Receive can still override it if the actual
+    delivery came from someone else."""
     try:
         data              = request.get_json()
         note              = data.get('note', '')
@@ -3004,13 +3045,16 @@ def admin_create_purchase_order():
 
         po_id = po_res.data[0]['po_id']
 
-        # Insert PO items — unit_cost/supplier are filled in later, at Receive.
+        # Insert PO items — unit_cost is still filled in later, at Receive.
+        # supplier is stored now if the admin provided/kept one at creation;
+        # Receive & Distribute can still overwrite it if needed.
         for item in items:
             supabase.table('po_item').insert({
                 'po_id':                  po_id,
                 'product_id':             item['product_id'],
                 'quantity':               item['quantity'],
                 'unit_cost':              0,
+                'supplier':               (item.get('supplier') or None),
                 'variant_options':        item.get('variant_options') or None,
                 'received_quantity':      0,
                 # Set only when this item came from a staff stock request —
@@ -5022,6 +5066,21 @@ def admin_mark_not_delivered(order_id):
         import traceback; traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/admin/orders/close-remittance', methods=['POST'])
+@admin_required
+def admin_close_remittance():
+    """Manual "Close Remittance" (final-defense follow-up, Nov 10 2026) —
+    lets admin close today's remittance window early instead of waiting for
+    the automatic 5pm flag, e.g. if everyone's accounted for before closing
+    hour. Store-wide (every branch) — see _auto_flag_not_remitted_orders
+    for exactly what "closing" does (flips today's still out_for_delivery
+    orders to 'not_remitted')."""
+    try:
+        count = _auto_flag_not_remitted_orders(force=True)
+        return jsonify({'message': f'Remittance closed. {count} order(s) flagged as not remitted.', 'flagged_count': count}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/admin/orders/remit-bulk', methods=['POST'])
 @admin_required
 def admin_remit_bulk():
@@ -5862,6 +5921,20 @@ def _staff_branch_id():
     staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
     return staff_res.data[0]['branch_id'] if staff_res.data else None
 
+@app.route('/api/staff/orders/close-remittance', methods=['POST'])
+@staff_required
+def staff_close_remittance():
+    """Branch-scoped mirror of admin_close_remittance above — closes only
+    the logged-in staff member's own branch."""
+    try:
+        branch_id = _staff_branch_id()
+        if not branch_id:
+            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
+        count = _auto_flag_not_remitted_orders(force=True, branch_id=branch_id)
+        return jsonify({'message': f'Remittance closed. {count} order(s) flagged as not remitted.', 'flagged_count': count}), 200
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/staff/orders/remit-bulk', methods=['POST'])
 @staff_required
 def staff_remit_bulk():
@@ -6469,13 +6542,22 @@ def _remittance_summary(branch_id=None):
       delivered_rows ("Delivered Today", already remitted). A
       'returned_failed' order is deliberately excluded from this set —
       that money was never coming in.
-    - Expected total = sum of ALL of expected_rows. Actual/Remitted total
-      = sum of delivered_rows ONLY — this used to be computed from a
-      separate completed_at-based query, which silently undercounted any
-      order completed before that column existed (a one-time migration
-      gap). Deriving it from delivered_rows instead keeps it permanently
-      in sync with the "Delivered Today" tab the team actually looks at,
-      with no dependency on completed_at's timing at all.
+    - Expected total = sum of ALL of expected_rows. "Remaining" (how much
+      of TODAY's dispatched deliveries hasn't come in yet) is Expected
+      minus dispatch_day_completed_rows — the completed subset of
+      expected_rows, i.e. still dispatch_date-scoped.
+    - Actual/Remitted total (actual_total / delivered_orders — what the
+      "Delivered Today" tab and headline strip show) is DIFFERENT: it's
+      scoped by remittance business date (_remittance_business_date on
+      completed_at), not by dispatch_date (final-defense follow-up, Nov 10
+      2026: "if the remitted money is past 5pm, it will go to tomorrow's
+      remittance"). So an order dispatched today but remitted at 6pm
+      (after closing) does NOT count in today's Actual — it rolls into
+      tomorrow's — while an order dispatched yesterday and remitted this
+      morning before 5pm DOES count in today's Actual. This intentionally
+      decouples "cash that came in today" from "today's delivery batch";
+      Remaining above stays dispatch-day-scoped on purpose so it still
+      answers "how much of today's run is still outstanding."
     - returned_rows: status == 'returned_failed' AND dispatch_date ==
       today — correct without needing last_attempt_at, because a final
       failed attempt can only happen from today's "Out for Deliveries"
@@ -6509,9 +6591,31 @@ def _remittance_summary(branch_id=None):
         expected_rows  = exp_q.execute().data or []
         expected_total = round(sum(_order_grand_total(o) for o in expected_rows), 2)
 
-        delivered_rows   = [o for o in expected_rows if o.get('status') == 'completed']
+        dispatch_day_completed_rows = [o for o in expected_rows if o.get('status') == 'completed']
         pending_rows     = [o for o in expected_rows if o.get('status') == 'out_for_delivery']
         not_remitted_rows = [o for o in expected_rows if o.get('status') == 'not_remitted']
+
+        # Actual/Remitted ("Delivered Today") — business-date-scoped by
+        # completed_at, not dispatch_date (see docstring above). Pulled as
+        # its own query since the relevant completed orders aren't
+        # necessarily today's dispatch_date at all.
+        today_business_date = _remittance_business_date(_ph_now())
+        comp_q = supabase.table('order').select(_REMIT_ORDER_SELECT).eq('status', 'completed')
+        if branch_id:
+            comp_q = comp_q.eq('branch_id', branch_id)
+        all_completed_rows = comp_q.execute().data or []
+        delivered_rows = []
+        for o in all_completed_rows:
+            ts = o.get('completed_at')
+            if not ts:
+                continue
+            try:
+                dt_utc = datetime.fromisoformat(str(ts).replace('Z', '+00:00')).replace(tzinfo=None)
+            except ValueError:
+                continue
+            dt_ph = dt_utc + timedelta(hours=PH_UTC_OFFSET_HOURS)
+            if _remittance_business_date(dt_ph) == today_business_date:
+                delivered_rows.append(o)
         delivered_total = round(sum(_order_grand_total(o) for o in delivered_rows), 2)
 
         rf_q = supabase.table('order').select(_REMIT_ORDER_SELECT) \
@@ -6531,7 +6635,7 @@ def _remittance_summary(branch_id=None):
             'expected_count':  len(expected_rows),
             'actual_total':    delivered_total,
             'actual_count':    len(delivered_rows),
-            'remaining_total': round(expected_total - delivered_total, 2),
+            'remaining_total': round(expected_total - round(sum(_order_grand_total(o) for o in dispatch_day_completed_rows), 2), 2),
             # Headline counts (team follow-up): Total Deliveries Today is
             # just expected_count under another name — everything
             # dispatched today, remitted or not.
