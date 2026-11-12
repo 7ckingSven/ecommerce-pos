@@ -1103,10 +1103,11 @@ async function loadPosProducts() {
   }
   // ─────────────
   try {
-    // branch_id scopes the result to this branch's shelf AND tells the
-    // backend to drop anything at or below its critical stock level (≤5) —
-    // keeps a reserve buffer instead of selling all the way to zero.
-    const res   = await fetch(`/api/products${staffBranchId ? `?branch_id=${staffBranchId}` : ''}`);
+    // branch_id scopes the result to this branch's shelf. include_low_stock
+    // asks the backend to KEEP critical/out-of-stock items (≤5) in the
+    // response instead of dropping them — POS shows them as disabled cards
+    // (via branch_available_qty) rather than hiding them entirely.
+    const res   = await fetch(`/api/products${staffBranchId ? `?branch_id=${staffBranchId}&include_low_stock=true` : ''}`);
     const rawAll = await res.json();
     const all    = Array.isArray(rawAll) ? rawAll : [];
     // Filter to only show products for this branch
@@ -1360,6 +1361,12 @@ function searchProducts(q) {
   renderPosProducts(filtered);
 }
 
+// Same reserve-buffer threshold as the backend (app.py's
+// CRITICAL_STOCK_LEVEL) — cards at or below this are shown but disabled,
+// since the variant/quantity picker already blocks adding anything this
+// low to the cart (checkPosVariantStock / _posConfirmVariantAdd).
+const POS_CRITICAL_STOCK_LEVEL = 5;
+
 function renderPosProducts(products) {
   const wrap = document.getElementById('posProducts');
   if (!products.length) {
@@ -1367,9 +1374,17 @@ function renderPosProducts(products) {
     return;
   }
   wrap.innerHTML = products.map(p => {
-    // Get branch-specific stock
-    const branchStock = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
-    const stockQty    = branchStock ? branchStock.quantity : p.quantity || 0;
+    // branch_available_qty comes straight from the backend (already the
+    // max-across-variants / branch_stock figure); fall back to the old
+    // client-side calc for any response that doesn't include it.
+    let stockQty = p.branch_available_qty;
+    if (stockQty === undefined || stockQty === null) {
+      const branchStock = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+      stockQty = branchStock ? branchStock.quantity : p.quantity || 0;
+    }
+    const isOut      = stockQty <= 0;
+    const isCritical = !isOut && stockQty <= POS_CRITICAL_STOCK_LEVEL;
+    const isDisabled = isOut || isCritical;
     // Compute display price with discount if applicable
     const disc          = p.discount;
     const discountedPx  = disc ? p.price * (1 - disc.percentage / 100) : null;
@@ -1381,9 +1396,14 @@ function renderPosProducts(products) {
 
     const effectivePrice = discountedPx !== null ? discountedPx : p.price;
 
+    let stockLabel;
+    if (isOut)      stockLabel = '⚠️ Out of stock';
+    else if (isCritical) stockLabel = `⚠️ Critical (${stockQty} left)`;
+    else            stockLabel = `Stock: ${stockQty}`;
+
     return `
-      <div class="pos-product-card${stockQty <= 0 ? ' out-of-stock' : ''}"
-           onclick="${stockQty > 0 ? `selectPosProduct('${p.product_id}')` : ''}">
+      <div class="pos-product-card${isOut ? ' out-of-stock' : ''}${isCritical ? ' critical-stock' : ''}"
+           onclick="${!isDisabled ? `selectPosProduct('${p.product_id}')` : ''}">
         ${p.image_url
           ? `<img src="${p.image_url}" class="pos-product-img" alt="${p.product_name}"/>`
           : `<div class="pos-product-img-placeholder">
@@ -1392,7 +1412,7 @@ function renderPosProducts(products) {
         }
         <div class="pos-product-name">${p.product_name}</div>
         ${priceDisplay}
-        <div class="pos-product-stock">${stockQty <= 0 ? '⚠️ Out of stock' : `Stock: ${stockQty}`}</div>
+        <div class="pos-product-stock">${stockLabel}</div>
       </div>`;
   }).join('');
 }
@@ -3547,6 +3567,11 @@ function _transferStatusBadge(t) {
   }
 }
 
+// Cache of the last-loaded transfers, keyed by transfer_id — lets the
+// approve/reject confirm dialogs show exactly what's being approved
+// (product, variant, quantity, source branch) without a second round trip.
+let _staffTransfersCache = {};
+
 async function loadStockTransfers() {
   const inBody  = document.getElementById('incomingTransfersBody');
   const outBody = document.getElementById('outgoingTransfersBody');
@@ -3555,6 +3580,8 @@ async function loadStockTransfers() {
     const res  = await fetch('/api/staff/stock-transfers');
     const data = await res.json();
     const transfers = Array.isArray(data) ? data : [];
+    _staffTransfersCache = {};
+    transfers.forEach(t => { _staffTransfersCache[t.transfer_id] = t; });
 
     const incoming = transfers.filter(t => t.to_branch_id === staffBranchId);
     const outgoing = transfers.filter(t => t.from_branch_id === staffBranchId);
@@ -3595,8 +3622,22 @@ async function loadStockTransfers() {
 }
 window.loadStockTransfers = loadStockTransfers;
 
+function _transferDetailLine(t) {
+  if (!t) return '';
+  const name    = t.product?.product_name || 'this product';
+  const variant = t.variant_options && Object.keys(t.variant_options).length
+    ? ` (${Object.entries(t.variant_options).map(([k, v]) => `${k}: ${v}`).join(', ')})`
+    : '';
+  return `<strong>${t.quantity} × ${name}${variant}</strong>`;
+}
+
 async function approveStockTransfer(transferId) {
-  const confirmed = await showConfirmDialog('Approve Transfer', 'Confirm you received this stock? It will be added to your branch and deducted from the source branch now.');
+  const t      = _staffTransfersCache[transferId];
+  const detail = _transferDetailLine(t);
+  const from   = t?.from_branch?.branch_name || 'the source branch';
+  const confirmed = await showConfirmDialog('Approve Transfer',
+    `Confirm you received ${detail || 'this stock'} from <strong>${from}</strong>? ` +
+    `It will be added to your branch and deducted from ${from} now. This can't be undone.`);
   if (!confirmed) return;
   try {
     const res  = await fetch(`/api/staff/stock-transfers/${transferId}/approve`, { method: 'POST' });
@@ -3613,7 +3654,11 @@ async function approveStockTransfer(transferId) {
 window.approveStockTransfer = approveStockTransfer;
 
 async function rejectStockTransfer(transferId) {
-  const confirmed = await showConfirmDialog('Reject Transfer', 'Reject this incoming transfer? No stock will move.');
+  const t      = _staffTransfersCache[transferId];
+  const detail = _transferDetailLine(t);
+  const from   = t?.from_branch?.branch_name || 'the source branch';
+  const confirmed = await showConfirmDialog('Reject Transfer',
+    `Reject the request for ${detail || 'this item'} from <strong>${from}</strong>? No stock will move.`);
   if (!confirmed) return;
   try {
     const res  = await fetch(`/api/staff/stock-transfers/${transferId}/reject`, {

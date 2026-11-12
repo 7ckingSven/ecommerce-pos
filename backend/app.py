@@ -1978,6 +1978,11 @@ def api_products():
         _auto_end_expired_discounts()
         category  = request.args.get('category', '')
         branch_id = request.args.get('branch_id', '')  # optional — scopes "Sold" to this branch
+        # Staff POS passes this to ask for critical/out-of-stock items too
+        # (so it can show them as disabled cards instead of hiding them) —
+        # the mobile app's Home screen omits it and keeps the old hide-
+        # entirely behavior.
+        include_low_stock = request.args.get('include_low_stock', '').lower() in ('1', 'true', 'yes')
         query    = supabase.table('product').select(
             '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), option_groups, net_weight'
         ).eq('status', 'active')
@@ -2040,7 +2045,11 @@ def api_products():
                     best_available = max(int(v.get('quantity') or 0) for v in variant_stocks)
                 else:
                     best_available = base_qty
-                if best_available <= CRITICAL_STOCK_LEVEL:
+                # Let the frontend know exactly how much is available at this
+                # branch without re-deriving the same aggregation itself —
+                # used by staff POS to grey out / label critical cards.
+                entry['branch_available_qty'] = best_available
+                if best_available <= CRITICAL_STOCK_LEVEL and not include_low_stock:
                     continue  # skip — critical or out of stock at this branch
 
             result.append(entry)
@@ -4224,6 +4233,256 @@ def admin_update_product_status(product_id):
         supabase.table('product').update({'status': status}).eq('product_id', product_id).execute()
         return jsonify({'message': f'Product {status}.'}), 200
     except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/products/<product_id>/merge-variant-choice', methods=['POST'])
+@admin_required
+def admin_merge_variant_choice(product_id):
+    """
+    Renames (or merges) one option-group choice's text — e.g. fixing a typo
+    like "Crean bar" -> "Cream Bar", or folding a stray duplicate into the
+    choice it was meant to be. The product's variant-choice editor only
+    ever offered Add/Remove, never rename — so an admin fixing a typo would
+    Remove the bad choice and Add the correct spelling, which starts a
+    brand-new variant_stock lineage under the new text while the stock
+    already recorded under the old text stays behind, untouched, under its
+    own row — "duplicate" entries for what's really one variant (final-
+    defense bug report, Nov 12 2026 — a Dove product's Scent choices split
+    into "Cream Bar"/"Crean bar", "Pink Bar"/"Pink bar", etc.).
+    This migrates everything keyed by the old choice text to the new one:
+    - option_groups: renames the choice in place (keeps its price/image/
+      barcode), or — if a choice with the new text already exists in that
+      group — drops the old one and keeps the existing one's own overrides.
+    - variant_stock: every row whose `options[group_label]` is the old
+      value gets renamed to the new value; if a row for the same branch
+      already exists under the new combo, their quantities are summed and
+      the old row is deleted instead of creating a second one.
+    - variant_overrides (per-combo price/image/barcode): same rename-or-
+      drop-on-conflict treatment, keyed by the full options dict.
+    """
+    try:
+        data        = request.get_json()
+        group_label = (data.get('group_label') or '').strip()
+        from_value  = (data.get('from_value') or '').strip()
+        to_value    = (data.get('to_value') or '').strip()
+
+        if not group_label or not from_value or not to_value:
+            return jsonify({'error': 'group_label, from_value and to_value are required.'}), 400
+        if from_value == to_value:
+            return jsonify({'error': 'New value is the same as the current one.'}), 400
+
+        prod_res = supabase.table('product').select('option_groups, variant_overrides').eq('product_id', product_id).execute()
+        if not prod_res.data:
+            return jsonify({'error': 'Product not found.'}), 404
+        product        = prod_res.data[0]
+        option_groups  = product.get('option_groups') or []
+        variant_overrides = product.get('variant_overrides') or []
+
+        group = next((g for g in option_groups if g.get('label') == group_label), None)
+        if not group:
+            return jsonify({'error': f'Option group "{group_label}" not found.'}), 404
+
+        choices       = group.get('choices') or []
+        from_choice_i = next((i for i, c in enumerate(choices)
+                               if (c.get('value') if isinstance(c, dict) else c) == from_value), None)
+        to_choice_i   = next((i for i, c in enumerate(choices)
+                               if (c.get('value') if isinstance(c, dict) else c) == to_value), None)
+        if from_choice_i is None:
+            return jsonify({'error': f'"{from_value}" is not a choice in "{group_label}".'}), 404
+
+        merging_into_existing = to_choice_i is not None
+        if merging_into_existing:
+            choices.pop(from_choice_i)
+        else:
+            c = choices[from_choice_i]
+            if isinstance(c, dict):
+                c['value'] = to_value
+            else:
+                choices[from_choice_i] = to_value
+        group['choices'] = choices
+
+        # ── Migrate variant_stock rows keyed by the old choice text ──
+        vs_res   = supabase.table('variant_stock').select('*').eq('product_id', product_id).execute()
+        vs_rows  = vs_res.data or []
+        by_branch_and_options = {}
+        for vs in vs_rows:
+            opts = vs.get('options') or {}
+            key  = (vs.get('branch_id'), json.dumps(opts, sort_keys=True))
+            by_branch_and_options[key] = vs
+
+        merged_qty_total = 0
+        rows_merged       = 0
+        for vs in vs_rows:
+            opts = vs.get('options') or {}
+            if opts.get(group_label) != from_value:
+                continue
+            new_opts = dict(opts)
+            new_opts[group_label] = to_value
+            dest_key = (vs.get('branch_id'), json.dumps(new_opts, sort_keys=True))
+            dest     = by_branch_and_options.get(dest_key)
+
+            if dest and dest['id'] != vs['id']:
+                # A row for the renamed combo already exists at this branch —
+                # combine quantities into it and drop the old row.
+                new_qty = int(dest.get('quantity') or 0) + int(vs.get('quantity') or 0)
+                supabase.table('variant_stock').update({'quantity': new_qty, 'updated_at': 'now()'}).eq('id', dest['id']).execute()
+                supabase.table('variant_stock').delete().eq('id', vs['id']).execute()
+                dest['quantity'] = new_qty
+                merged_qty_total += int(vs.get('quantity') or 0)
+                rows_merged += 1
+            else:
+                # No existing row for the renamed combo — just rename this one.
+                supabase.table('variant_stock').update({'options': new_opts, 'updated_at': 'now()'}).eq('id', vs['id']).execute()
+                vs['options'] = new_opts
+                by_branch_and_options[dest_key] = vs
+                merged_qty_total += int(vs.get('quantity') or 0)
+
+        # ── Migrate variant_overrides (per-combo price/image/barcode) ──
+        kept_overrides = []
+        seen_combo_keys = set()
+        # First pass: combos that already use the NEW value (or don't
+        # involve this group at all) keep priority — they're the ones the
+        # admin will keep seeing.
+        for o in variant_overrides:
+            opts = o.get('options') or {}
+            if opts.get(group_label) != from_value:
+                kept_overrides.append(o)
+                seen_combo_keys.add(json.dumps(opts, sort_keys=True))
+        for o in variant_overrides:
+            opts = o.get('options') or {}
+            if opts.get(group_label) != from_value:
+                continue
+            new_opts = dict(opts)
+            new_opts[group_label] = to_value
+            new_key = json.dumps(new_opts, sort_keys=True)
+            if new_key in seen_combo_keys:
+                continue  # an override for the renamed combo already exists — drop this one
+            o['options'] = new_opts
+            kept_overrides.append(o)
+            seen_combo_keys.add(new_key)
+
+        supabase.table('product').update({
+            'option_groups':     option_groups,
+            'variant_overrides': kept_overrides,
+        }).eq('product_id', product_id).execute()
+
+        return jsonify({
+            'message': f'"{from_value}" merged into "{to_value}" — {merged_qty_total} unit(s) carried over'
+                       + (f' ({rows_merged} branch row(s) combined with existing stock)' if rows_merged else '') + '.',
+            'option_groups':     option_groups,
+            'variant_overrides': kept_overrides,
+        }), 200
+    except Exception as e:
+        print(f'Merge variant choice error: {e}')
+        traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/products/<product_id>/rename-variant-group', methods=['POST'])
+@admin_required
+def admin_rename_variant_group(product_id):
+    """
+    Renames an option group's LABEL (e.g. "Any" -> "Packaging") — not one
+    choice's value (admin_merge_variant_choice above does that). Same
+    migration need: without it, renaming the label in the product editor
+    only changes option_groups going forward, while every variant_stock/
+    variant_overrides row already recorded keeps the OLD label as a dict
+    key forever, so it keeps showing the old (often confusing — e.g. a
+    group literally named "Any", colliding with the UI's "leave blank"
+    placeholder text) label in the Inventory/Products variant breakdown
+    even after the group itself is renamed (final-defense follow-up,
+    Nov 12 2026 — Pilot G-Tech's packaging group was named "Any").
+    """
+    try:
+        data      = request.get_json()
+        old_label = (data.get('old_label') or '').strip()
+        new_label = (data.get('new_label') or '').strip()
+        if not old_label or not new_label:
+            return jsonify({'error': 'old_label and new_label are required.'}), 400
+        if old_label == new_label:
+            return jsonify({'error': 'New label is the same as the current one.'}), 400
+
+        prod_res = supabase.table('product').select('option_groups, variant_overrides').eq('product_id', product_id).execute()
+        if not prod_res.data:
+            return jsonify({'error': 'Product not found.'}), 404
+        product           = prod_res.data[0]
+        option_groups     = product.get('option_groups') or []
+        variant_overrides = product.get('variant_overrides') or []
+
+        group = next((g for g in option_groups if g.get('label') == old_label), None)
+        if not group:
+            return jsonify({'error': f'Group "{old_label}" not found.'}), 404
+        if any(g.get('label') == new_label for g in option_groups if g is not group):
+            return jsonify({'error': f'A group named "{new_label}" already exists — merge groups manually first.'}), 400
+
+        group['label'] = new_label
+
+        # ── Migrate variant_stock: rename the KEY in every row's options ──
+        vs_res  = supabase.table('variant_stock').select('*').eq('product_id', product_id).execute()
+        vs_rows = vs_res.data or []
+        by_branch_and_options = {}
+        for vs in vs_rows:
+            opts = vs.get('options') or {}
+            by_branch_and_options[(vs.get('branch_id'), json.dumps(opts, sort_keys=True))] = vs
+
+        merged_qty_total = 0
+        rows_merged       = 0
+        for vs in vs_rows:
+            opts = vs.get('options') or {}
+            if old_label not in opts:
+                continue
+            new_opts = {(new_label if k == old_label else k): v for k, v in opts.items()}
+            dest_key = (vs.get('branch_id'), json.dumps(new_opts, sort_keys=True))
+            dest     = by_branch_and_options.get(dest_key)
+
+            if dest and dest['id'] != vs['id']:
+                # A row for the renamed combo already exists at this branch —
+                # combine quantities into it and drop the old row.
+                new_qty = int(dest.get('quantity') or 0) + int(vs.get('quantity') or 0)
+                supabase.table('variant_stock').update({'quantity': new_qty, 'updated_at': 'now()'}).eq('id', dest['id']).execute()
+                supabase.table('variant_stock').delete().eq('id', vs['id']).execute()
+                dest['quantity'] = new_qty
+                merged_qty_total += int(vs.get('quantity') or 0)
+                rows_merged += 1
+            else:
+                supabase.table('variant_stock').update({'options': new_opts, 'updated_at': 'now()'}).eq('id', vs['id']).execute()
+                vs['options'] = new_opts
+                by_branch_and_options[dest_key] = vs
+                merged_qty_total += int(vs.get('quantity') or 0)
+
+        # ── Migrate variant_overrides (per-combo price/image/barcode) ──
+        kept_overrides  = []
+        seen_combo_keys = set()
+        for o in variant_overrides:
+            opts = o.get('options') or {}
+            if old_label not in opts:
+                kept_overrides.append(o)
+                seen_combo_keys.add(json.dumps(opts, sort_keys=True))
+        for o in variant_overrides:
+            opts = o.get('options') or {}
+            if old_label not in opts:
+                continue
+            new_opts = {(new_label if k == old_label else k): v for k, v in opts.items()}
+            new_key  = json.dumps(new_opts, sort_keys=True)
+            if new_key in seen_combo_keys:
+                continue  # an override for the renamed combo already exists — drop this one
+            o['options'] = new_opts
+            kept_overrides.append(o)
+            seen_combo_keys.add(new_key)
+
+        supabase.table('product').update({
+            'option_groups':     option_groups,
+            'variant_overrides': kept_overrides,
+        }).eq('product_id', product_id).execute()
+
+        return jsonify({
+            'message': f'"{old_label}" renamed to "{new_label}" — {merged_qty_total} unit(s) carried over'
+                       + (f' ({rows_merged} combo(s) merged with already-matching stock)' if rows_merged else '') + '.',
+            'option_groups':     option_groups,
+            'variant_overrides': kept_overrides,
+        }), 200
+    except Exception as e:
+        print(f'Rename variant group error: {e}')
+        traceback.print_exc()
         return jsonify({'error': str(e)}), 500
 
 # ─── Inventory ────────────────────────────────────────

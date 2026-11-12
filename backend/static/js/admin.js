@@ -63,6 +63,20 @@ function expandVariantSelection(groups, selectedOpts) {
   return combos.map(c => Object.keys(c).length ? c : null);
 }
 
+// Leaving ONE group on its default/blank selection is a useful bulk
+// shortcut ("restock every color with 10 units"). Leaving TWO OR MORE
+// groups blank at the same time silently cross-multiplies every choice in
+// every blank group together — a product with 8 colors and a second
+// "packaging" group of 4 choices turns one Add Stock submission into 32
+// combos, each getting the FULL entered quantity (final-defense bug
+// report, Nov 12 2026 — a Pilot G-Tech restock meant for specific
+// colors/packaging ended up fanning out into dozens of unintended
+// variant_stock rows). Guards Add Stock / Transfer / Adjust so this has
+// to be caught before it's submitted, not cleaned up after.
+function _unpinnedGroupCount(groups, selectedOpts) {
+  return (groups || []).filter(g => (g.choices || []).length && !selectedOpts[g.label]).length;
+}
+
 // Looks up available quantity for a specific variant combination (falls
 // back to the branch/product total when there's no combination, or no
 // variant_stock row recorded for it yet).
@@ -2313,6 +2327,9 @@ function renderOptionGroups() {
           placeholder="Group label (e.g. Size, Color)"
           value="${g.label}"
           oninput="updateGroupLabel(${gi}, this.value)"
+          onfocus="_groupLabelBeforeEdit[${gi}] = optionGroups[${gi}].label"
+          onblur="commitGroupLabelRename(${gi}, this.value)"
+          title="Any stock already recorded under this group's current name moves with it when you rename it"
           style="flex:1;"
         />
         <button type="button" onclick="removeOptionGroup(${gi})"
@@ -2323,7 +2340,11 @@ function renderOptionGroups() {
       <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px;">
         ${g.choices.map((c, ci) => `
           <div style="display:flex;align-items:center;gap:6px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.25);border-radius:8px;padding:6px 9px;flex-wrap:wrap;">
-            <span style="font-size:13px;font-weight:600;color:#16a34a;min-width:60px;">${c.value}</span>
+            <input type="text" class="form-input" value="${c.value}"
+              onblur="renameChoice(${gi}, ${ci}, this.value)"
+              onkeydown="if(event.key==='Enter'){event.preventDefault();this.blur();}"
+              title="Click to rename this choice — any stock already recorded under it moves with the rename"
+              style="min-width:70px;max-width:140px;font-size:13px;font-weight:600;color:#16a34a;padding:5px 7px;background:var(--card-bg);border:1px solid rgba(22,163,74,0.35);border-radius:6px;"/>
             <input type="number" step="0.01" min="0" class="form-input" placeholder="Price override"
               value="${c.price ?? ''}" oninput="updateChoicePrice(${gi}, ${ci}, this.value)"
               title="Leave blank to use the base price"
@@ -2378,6 +2399,67 @@ function updateGroupLabel(gi, val) {
   _prodUpdateSaveBtn();
 }
 
+// Renaming a GROUP's label (e.g. "Any" -> "Packaging") — not one of its
+// choices (renameChoice handles that) — has the same stock-migration need:
+// every variant_stock/variant_overrides row already recorded uses the old
+// label as a dict KEY, so it has to move too or it keeps showing the old
+// name forever. Fires on blur (not every keystroke from updateGroupLabel
+// above, which still updates the on-screen value immediately) so the
+// migration only runs once, after the admin is done typing.
+let _groupLabelBeforeEdit = {};
+async function commitGroupLabelRename(gi, rawVal) {
+  const group = optionGroups[gi];
+  if (!group) return;
+  const newVal = (rawVal || '').trim();
+  const oldVal = _groupLabelBeforeEdit[gi] !== undefined ? _groupLabelBeforeEdit[gi] : group.label;
+  if (!newVal || newVal === oldVal) return;
+
+  const productId = document.getElementById('productId')?.value;
+  if (!productId) return; // new, unsaved product — nothing recorded yet to migrate
+
+  const confirmed = await showConfirmDialog('Rename Variant Group',
+    `Rename the "${oldVal}" group to "${newVal}"? Stock already recorded under "${oldVal}" moves with it — nothing is lost.`);
+  if (!confirmed) {
+    group.label = oldVal;
+    const el = document.getElementById('pOptionGroups');
+    if (el) el.value = JSON.stringify(optionGroups);
+    renderOptionGroups();
+    return;
+  }
+
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/rename-variant-group`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ old_label: oldVal, new_label: newVal }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to rename group.', 'error'); renderOptionGroups(); return; }
+
+    if (data.option_groups) {
+      optionGroups = data.option_groups.map(g => ({
+        label: g.label,
+        choices: (g.choices || []).map(c => typeof c === 'object' && c !== null
+          ? { value: c.value, price: c.price ?? '', image: c.image || '', barcode: c.barcode || '' }
+          : { value: c, price: '', image: '', barcode: '' })
+      }));
+    }
+    if (data.variant_overrides) variantOverrides = data.variant_overrides;
+    const ogEl = document.getElementById('pOptionGroups');
+    if (ogEl) ogEl.value = JSON.stringify(optionGroups);
+    const voEl = document.getElementById('pVariantOverrides');
+    if (voEl) voEl.value = JSON.stringify(variantOverrides);
+
+    showToast(data.message || 'Variant group renamed.');
+    invalidateSection('products'); invalidateSection('inventory');
+    loadProducts();
+    renderOptionGroups();
+  } catch (e) {
+    showToast('Error renaming group.', 'error');
+    renderOptionGroups();
+  }
+}
+window.commitGroupLabelRename = commitGroupLabelRename;
+
 function addChoice(gi) {
   const input = document.getElementById(`choiceInput_${gi}`);
   if (!input) return;
@@ -2394,6 +2476,73 @@ function removeChoice(gi, ci) {
   optionGroups[gi].choices.splice(ci, 1);
   renderOptionGroups();
 }
+
+// Renaming a choice (instead of Remove + re-Add) keeps whatever stock was
+// already recorded under it instead of orphaning it under the old text —
+// see admin_merge_variant_choice in app.py for why Remove+Add fragmented
+// stock into "duplicate" entries (final-defense bug report, Nov 12 2026).
+// For an unsaved new product (no productId yet) this is just a local
+// array edit, since there's no stock to migrate. For an existing product
+// it calls the backend to migrate variant_stock/variant_overrides too.
+async function renameChoice(gi, ci, rawVal) {
+  const group  = optionGroups[gi];
+  const choice = group?.choices?.[ci];
+  if (!group || !choice) return;
+  const oldVal = choice.value;
+  const newVal = (rawVal || '').trim();
+  if (!newVal || newVal === oldVal) { renderOptionGroups(); return; } // no-op / revert
+
+  const dupIdx = group.choices.findIndex((c, idx) => idx !== ci && c.value === newVal);
+  const productId = document.getElementById('productId')?.value;
+
+  if (!productId) {
+    if (dupIdx !== -1) group.choices.splice(ci, 1); // merging into an existing local choice
+    else choice.value = newVal;
+    const ogEl = document.getElementById('pOptionGroups');
+    if (ogEl) ogEl.value = JSON.stringify(optionGroups);
+    renderOptionGroups();
+    _prodUpdateSaveBtn();
+    return;
+  }
+
+  const confirmMsg = dupIdx !== -1
+    ? `"${newVal}" already exists in ${group.label} — merge "${oldVal}"'s stock into it? Quantities at each branch will be combined.`
+    : `Rename "${oldVal}" to "${newVal}"? Any stock already recorded under "${oldVal}" moves with it — nothing is lost.`;
+  const confirmed = await showConfirmDialog('Rename Variant Choice', confirmMsg);
+  if (!confirmed) { renderOptionGroups(); return; }
+
+  try {
+    const res  = await fetch(`/api/admin/products/${productId}/merge-variant-choice`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ group_label: group.label, from_value: oldVal, to_value: newVal }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to rename.', 'error'); renderOptionGroups(); return; }
+
+    if (data.option_groups) {
+      optionGroups = data.option_groups.map(g => ({
+        label: g.label,
+        choices: (g.choices || []).map(c => typeof c === 'object' && c !== null
+          ? { value: c.value, price: c.price ?? '', image: c.image || '', barcode: c.barcode || '' }
+          : { value: c, price: '', image: '', barcode: '' })
+      }));
+    }
+    if (data.variant_overrides) variantOverrides = data.variant_overrides;
+    const ogEl = document.getElementById('pOptionGroups');
+    if (ogEl) ogEl.value = JSON.stringify(optionGroups);
+    const voEl = document.getElementById('pVariantOverrides');
+    if (voEl) voEl.value = JSON.stringify(variantOverrides);
+
+    showToast(data.message || 'Variant renamed.');
+    invalidateSection('products'); invalidateSection('inventory');
+    loadProducts();
+    renderOptionGroups();
+  } catch (e) {
+    showToast('Error renaming variant.', 'error');
+    renderOptionGroups();
+  }
+}
+window.renameChoice = renameChoice;
 
 function updateChoicePrice(gi, ci, val) {
   optionGroups[gi].choices[ci].price = val;
@@ -3780,6 +3929,7 @@ async function submitAddStock(e) {
 
   const items = [];
   let hasError = false;
+  let tooManyBlankProduct = '';
   rows.forEach(function(row) {
     const hiddenInput = row.querySelector('input[type="hidden"]');
     const qtySel      = row.querySelector('.add-stock-qty');
@@ -3794,9 +3944,19 @@ async function submitAddStock(e) {
       if (vs.value) selectedOpts[vs.dataset.label] = vs.value;
     });
 
-    // Any group left on "Any" expands across every choice in that group —
-    // same qty applied to each resulting combination, not split between them.
+    // A group left on "Any" expands across every choice in that group —
+    // same qty applied to each resulting combination, not split between
+    // them. That's a useful shortcut for ONE blank group ("restock every
+    // color with 10 units"), but leaving 2+ groups blank at once cross-
+    // multiplies them together into a combinatorial mess — block that
+    // here rather than silently creating dozens of unintended rows.
     const groups = JSON.parse(row.dataset.optionGroups || '[]');
+    if (_unpinnedGroupCount(groups, selectedOpts) >= 2) {
+      hasError = true;
+      const ac = row.querySelector('input[type="text"]');
+      tooManyBlankProduct = ac?.value || 'This product';
+      return;
+    }
     const combos = expandVariantSelection(groups, selectedOpts);
     combos.forEach(variantOpts => {
       items.push({
@@ -3807,6 +3967,10 @@ async function submitAddStock(e) {
     });
   });
 
+  if (tooManyBlankProduct) {
+    showToast(`${tooManyBlankProduct}: pin down all but one variant group (or pick a specific choice for each) before adding stock — leaving 2+ groups blank would cross-multiply into many unintended combinations.`, 'error');
+    return;
+  }
   if (hasError || !items.length) {
     showToast('Please fill in all product rows correctly.', 'error');
     return;
@@ -3983,9 +4147,15 @@ async function submitTransfer(e) {
   const selectedOpts = getTransferVariantOptions();
 
   // A group left on "All (no variant)" expands across every choice in that
-  // group — same qty transferred for each resulting combination.
+  // group — same qty transferred for each resulting combination. Leaving
+  // 2+ groups blank at once cross-multiplies them together — block that
+  // the same way Add Stock does, instead of silently fanning out.
   const product = allProducts?.find(p => p.product_id === productId);
   const groups  = product?.option_groups || [];
+  if (_unpinnedGroupCount(groups, selectedOpts) >= 2) {
+    showToast('Pin down all but one variant group (or pick a specific choice for each) before transferring — leaving 2+ groups blank would cross-multiply into many unintended combinations.', 'error');
+    return;
+  }
   const combos  = expandVariantSelection(groups, selectedOpts);
 
   const btn = e.submitter || document.getElementById('transferSubmitBtn');
@@ -4088,8 +4258,14 @@ async function submitAdjust(e) {
   if (!product) { showToast('Product not found.', 'error'); return; }
 
   // A group left on "All (no variant)" expands across every choice in that
-  // group — same qty deducted from each resulting combination.
+  // group — same qty deducted from each resulting combination. Leaving 2+
+  // groups blank at once cross-multiplies them together — block that the
+  // same way Add Stock does, instead of silently fanning out.
   const groups = product.option_groups || [];
+  if (_unpinnedGroupCount(groups, selectedOpts) >= 2) {
+    showToast('Pin down all but one variant group (or pick a specific choice for each) before adjusting — leaving 2+ groups blank would cross-multiply into many unintended combinations.', 'error');
+    return;
+  }
   const combos = expandVariantSelection(groups, selectedOpts);
 
   // Validate EVERY combination has enough stock before sending anything.
@@ -8247,6 +8423,14 @@ function _buildLowStockEntries() {
   });
   const rank = { out: 3, critical: 2, low: 1 };
   entries.sort((a, b) => (rank[b.level] - rank[a.level]) || a.productName.localeCompare(b.productName));
+  // Stamp each entry's position AFTER sorting — checkboxes carry this index
+  // as their value (see _renderLowStockList/useSelectedLowStock) instead of
+  // e.key, since e.key embeds raw JSON (variant options) with double quotes
+  // that silently break out of the value="..." HTML attribute and truncate
+  // the checkbox's real value — "Add Selected to Items" then never finds a
+  // match for any variant-level entry and does nothing (final-defense bug
+  // report, Nov 12 2026).
+  entries.forEach((e, i) => { e.idx = i; });
   return entries;
 }
 
@@ -8284,7 +8468,7 @@ function _renderLowStockList() {
   list.innerHTML = filtered.length
     ? filtered.map(e => `
       <label style="display:flex;align-items:flex-start;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
-        <input type="checkbox" class="lowstock-check" value="${e.key}" style="margin-top:2px;" onchange="updateLowStockPickerBtn()"/>
+        <input type="checkbox" class="lowstock-check" value="${e.idx}" style="margin-top:2px;" onchange="updateLowStockPickerBtn()"/>
         <span style="flex:1;">
           <strong>${e.productName}</strong>
           ${e.options && Object.keys(e.options).length
@@ -8373,8 +8557,8 @@ window.updateLowStockPickerBtn = updateLowStockPickerBtn;
 // dropped first, so picking from Low Stock doesn't leave a stray unfilled
 // row mixed in — anything the admin already filled by hand is left alone.
 function useSelectedLowStock() {
-  const keys = Array.from(document.querySelectorAll('.lowstock-check:checked')).map(c => c.value);
-  const selected = _lowStockEntriesCache.filter(e => keys.includes(e.key));
+  const idxs = Array.from(document.querySelectorAll('.lowstock-check:checked')).map(c => parseInt(c.value, 10));
+  const selected = _lowStockEntriesCache.filter(e => idxs.includes(e.idx));
   if (!selected.length) return;
 
   document.querySelectorAll('#poItemsWrap > div').forEach(row => {
@@ -8382,11 +8566,13 @@ function useSelectedLowStock() {
     if (sel && !sel.value) row.remove();
   });
 
+  let added = 0;
   selected.forEach(e => {
     const p = allProducts.find(pr => pr.product_id === e.productId);
     if (!p) return;
     const variantRow = e.options ? { options: e.options } : null;
     fillPORowForProduct(p, variantRow, null, null, e.branchId || null);
+    added++;
   });
   updatePOTotal();
 
@@ -8396,6 +8582,15 @@ function useSelectedLowStock() {
   document.querySelectorAll('.lowstock-check').forEach(cb => { cb.checked = false; });
   const selectAll = document.getElementById('lowStockSelectAll');
   if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+
+  // Explicit confirmation + scroll — the panel collapsing right as the new
+  // rows land below it made a successful add look like nothing happened.
+  if (added) {
+    showToast(`Added ${added} item${added !== 1 ? 's' : ''} to the PO.`);
+    document.getElementById('poItemsWrap')?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } else {
+    showToast('Could not add the selected item(s) — try reopening Low Stock Items.', 'error');
+  }
 }
 window.useSelectedLowStock = useSelectedLowStock;
 
