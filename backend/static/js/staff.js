@@ -3446,9 +3446,15 @@ function addStaffTransferItemRow() {
       <label class="form-label" style="font-size:12px;">Variant <span style="font-size:11px;color:var(--text-muted);">(optional)</span></label>
       <div class="xfer-variant-selects" style="display:flex;flex-wrap:wrap;gap:6px;"></div>
     </div>
-    <div class="form-group" style="margin:0;max-width:220px;">
-      <label class="form-label" style="font-size:12px;">Quantity to Transfer <span class="req">*</span></label>
-      <input type="number" class="form-input xfer-qty" min="1" required placeholder="e.g. 20" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
+    <div class="form-row-2" style="margin:0;">
+      <div class="form-group" style="margin:0;">
+        <label class="form-label" style="font-size:12px;">Quantity to Transfer <span class="req">*</span></label>
+        <input type="number" class="form-input xfer-qty" min="1" required placeholder="e.g. 20" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
+      </div>
+      <div class="form-group" style="margin:0;">
+        <label class="form-label" style="font-size:12px;">Current Stock <span style="font-size:11px;color:var(--text-muted);">(this branch)</span></label>
+        <input type="text" class="form-input xfer-current-stock" disabled placeholder="Select product first"/>
+      </div>
     </div>
   `;
   wrap.appendChild(row);
@@ -3456,12 +3462,35 @@ function addStaffTransferItemRow() {
   buildReqProductAutocomplete(row, {
     inputId, hiddenId,
     onSelect: (p) => {
+      row._xferProduct = p || null;
       loadStaffTransferRowVariants(p, rowId);
+      _xferUpdateRowStock(rowId);
       _staffTransferUpdateBtn();
     },
   });
 }
 window.addStaffTransferItemRow = addStaffTransferItemRow;
+
+// Same per-variant Current Stock fix as the Request Stock modal (Nov 12
+// 2026) — Transfer Stock had no Current Stock field at all before, so a
+// staff member transferring a specific variant had no way to see how much
+// of THAT variant was actually on hand at their branch before typing a
+// quantity. Scoped to staffBranchId (the "From" branch — transfers always
+// originate from the staff member's own branch).
+function _xferUpdateRowStock(rowId) {
+  const row     = document.getElementById(rowId);
+  const stockEl = row?.querySelector('.xfer-current-stock');
+  if (!row || !stockEl) return;
+  const product = row._xferProduct;
+  if (!product) { stockEl.value = ''; return; }
+  const opts = {};
+  row.querySelectorAll('.xfer-variant-opt').forEach(sel => {
+    if (sel.value) opts[sel.dataset.label] = sel.value;
+  });
+  const stock = _reqVariantStock(product, staffBranchId, opts);
+  stockEl.value = `${stock} units`;
+}
+window._xferUpdateRowStock = _xferUpdateRowStock;
 
 function loadStaffTransferRowVariants(product, rowId) {
   const row  = document.getElementById(rowId);
@@ -3475,7 +3504,7 @@ function loadStaffTransferRowVariants(product, rowId) {
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
-      <select class="form-input form-select xfer-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
+      <select class="form-input form-select xfer-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;" onchange="_xferUpdateRowStock('${rowId}')">
         <option value="">All (no variant)</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
@@ -5182,6 +5211,8 @@ async function openRequestModal(btn) {
     document.getElementById('reqNote').value = '';
     addReqItemRow();
     _setReqBtn(false);
+    document.getElementById('staffLowStockPanel').style.display = 'none';
+    updateStaffLowStockBadge();
 
     // Live check — item row inputs (event delegation)
     document.getElementById('reqItems')?.addEventListener('input',  _reqUpdateBtn);
@@ -5248,6 +5279,7 @@ function fillReqRowForProduct(product, variantRow) {
   const rowId = 'reqRow_' + reqRowCount;
   const row   = document.getElementById(rowId);
   if (!row) return;
+  row._reqProduct = product || null;
 
   const hidden   = row.querySelector('input[type="hidden"]');
   const input    = row.querySelector('input[type="text"]');
@@ -5269,14 +5301,18 @@ function fillReqRowForProduct(product, variantRow) {
     });
   }
 
+  // variantRow.quantity is already the exact figure for this one combo —
+  // trust it directly rather than re-deriving through _reqVariantStock
+  // (which would sum across every matching variant_stock row instead of
+  // using this specific one, if the options object ever matched more than
+  // one row). A plain non-variant product still goes through the shared
+  // per-variant/total-stock helper.
   const stockEl = row.querySelector('.req-current-stock');
   if (stockEl) {
     if (variantRow) {
       stockEl.value = `${variantRow.quantity} units`;
     } else {
-      const branchStock = product.branch_stock?.find(bs => bs.branch_id === staffBranchId);
-      const stock = branchStock ? branchStock.quantity : product.quantity || 0;
-      stockEl.value = `${stock} units`;
+      _reqUpdateRowStock(rowId);
     }
   }
 }
@@ -5437,22 +5473,229 @@ function addReqItemRow() {
   buildReqProductAutocomplete(row, {
     inputId, hiddenId,
     onSelect: (p) => {
+      row._reqProduct = p || null;
       loadReqRowVariantsByProduct(p, rowId);
-      const stockEl = row.querySelector('.req-current-stock');
-      if (stockEl) {
-        if (p) {
-          const branchStock = p.branch_stock?.find(bs => bs.branch_id === staffBranchId);
-          const stock = branchStock ? branchStock.quantity : p.quantity || 0;
-          stockEl.value = `${stock} units`;
-        } else {
-          stockEl.value = '';
-        }
-      }
+      _reqUpdateRowStock(rowId);
       _reqUpdateBtn();
     },
   });
 }
 window.addReqItemRow = addReqItemRow;
+
+// Current Stock used to be set once, from the product's total branch stock,
+// the moment a product was picked — and never recalculated afterward, so
+// it kept showing the product-wide total even after Color/Size were
+// narrowed down to one specific variant (final-defense follow-up, Nov 12
+// 2026). Now recomputed from variant_stock whenever a variant select
+// changes: any group left on "Any" is ignored for matching (summed across
+// its choices), any group with a specific choice picked narrows the match
+// to that value, scoped to this staff member's own branch. With every
+// group left blank it falls back to the old product-wide branch total.
+function _reqRowSelectedOpts(row) {
+  const opts = {};
+  row.querySelectorAll('.req-variant-opt').forEach(sel => {
+    if (sel.value) opts[sel.dataset.label] = sel.value;
+  });
+  return opts;
+}
+
+function _reqVariantStock(product, branchId, selectedOpts) {
+  const opts = selectedOpts || {};
+  const hasAnySelected = Object.values(opts).some(Boolean);
+  if (!hasAnySelected || !product?.variant_stock?.length) {
+    const branchStock = product?.branch_stock?.find(bs => bs.branch_id === branchId);
+    return branchStock ? branchStock.quantity : (product?.quantity || 0);
+  }
+  return product.variant_stock
+    .filter(v => v.branch_id === branchId)
+    .filter(v => Object.entries(opts).every(([k, val]) => !val || (v.options || {})[k] === val))
+    .reduce((sum, v) => sum + (Number(v.quantity) || 0), 0);
+}
+
+function _reqUpdateRowStock(rowId) {
+  const row     = document.getElementById(rowId);
+  const stockEl = row?.querySelector('.req-current-stock');
+  if (!row || !stockEl) return;
+  const product = row._reqProduct;
+  if (!product) { stockEl.value = ''; return; }
+  const opts  = _reqRowSelectedOpts(row);
+  const stock = _reqVariantStock(product, staffBranchId, opts);
+  stockEl.value = `${stock} units`;
+}
+window._reqUpdateRowStock = _reqUpdateRowStock;
+
+// ─── Low Stock Items → Stock Request (Nov 12 2026) ─────────────────────
+// Staff's own version of admin's Low Stock Items → Create PO picker — lets
+// staff browse every product/variant currently low/critical/out AT THEIR
+// OWN BRANCH (invProducts is already branch-filtered, and there's no
+// branch picker here since a staff Stock Request only ever requests for
+// their own branch), tick the ones to request, and pull them straight
+// into the Request Stock form instead of searching for each one by hand.
+function _staffLowStockLevelOf(q) {
+  q = Number(q);
+  if (q === 0) return 'out';
+  if (q > 0 && q <= 5) return 'critical';
+  if (q > 5 && q <= 10) return 'low';
+  return 'ok';
+}
+
+function _buildStaffLowStockEntries() {
+  const entries = [];
+  (invProducts || []).forEach(p => {
+    if (p.variant_stock && p.variant_stock.length) {
+      p.variant_stock
+        .filter(v => !staffBranchId || v.branch_id === staffBranchId)
+        .forEach(v => {
+          const level = _staffLowStockLevelOf(v.quantity);
+          if (level === 'ok') return;
+          entries.push({
+            idx: 0, productId: p.product_id, productName: p.product_name,
+            options: v.options || null, quantity: v.quantity, level,
+          });
+        });
+    } else {
+      const branchStock = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+      const qty   = branchStock ? branchStock.quantity : (p.quantity || 0);
+      const level = _staffLowStockLevelOf(qty);
+      if (level === 'ok') return;
+      entries.push({
+        idx: 0, productId: p.product_id, productName: p.product_name,
+        options: null, quantity: qty, level,
+      });
+    }
+  });
+  const rank = { out: 3, critical: 2, low: 1 };
+  entries.sort((a, b) => (rank[b.level] - rank[a.level]) || a.productName.localeCompare(b.productName));
+  // Index-based checkbox values, not raw JSON options — the same fix as
+  // admin's picker (embedding JSON with its own double quotes directly
+  // into a value="..." attribute breaks the attribute and silently
+  // truncates the real value, final-defense bug report, Nov 12 2026).
+  entries.forEach((e, i) => { e.idx = i; });
+  return entries;
+}
+
+let _staffLowStockEntriesCache = [];
+
+function _staffLowStockBadge(level) {
+  if (level === 'out')      return '<span class="badge badge--gray">Out of Stock</span>';
+  if (level === 'critical') return '<span class="badge badge--red">Critical Level</span>';
+  return '<span class="badge badge--yellow">Low Stock</span>';
+}
+
+async function updateStaffLowStockBadge() {
+  if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
+  const count = _buildStaffLowStockEntries().length;
+  const badge = document.getElementById('staffLowStockBadge');
+  if (badge) {
+    badge.textContent   = count;
+    badge.style.display = count > 0 ? 'inline' : 'none';
+  }
+}
+
+function _renderStaffLowStockList() {
+  const list = document.getElementById('staffLowStockList');
+  if (!list) return;
+  const entries = _staffLowStockEntriesCache;
+  list.innerHTML = entries.length
+    ? entries.map(e => `
+      <label style="display:flex;align-items:flex-start;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+        <input type="checkbox" class="staff-lowstock-check" value="${e.idx}" style="margin-top:2px;" onchange="updateStaffLowStockPickerBtn()"/>
+        <span style="flex:1;">
+          <strong>${e.productName}</strong>
+          ${e.options && Object.keys(e.options).length
+            ? '<div style="font-size:12px;color:var(--text-muted);">' + Object.entries(e.options).map(function(o){return o[0]+': '+o[1];}).join(', ') + '</div>'
+            : ''}
+          <div style="font-size:13px;color:var(--text-muted);">Stock: ${e.quantity} ${_staffLowStockBadge(e.level)}</div>
+        </span>
+      </label>`).join('')
+    : '<div class="table-empty" style="padding:1rem;">No low/critical/out-of-stock items at your branch.</div>';
+  updateStaffLowStockPickerBtn();
+}
+
+function toggleStaffLowStockPanel() {
+  const panel = document.getElementById('staffLowStockPanel');
+  if (!panel) return;
+  if (panel.style.display === 'none' || !panel.style.display) {
+    openStaffLowStockPanel();
+  } else {
+    panel.style.display = 'none';
+  }
+}
+window.toggleStaffLowStockPanel = toggleStaffLowStockPanel;
+
+async function openStaffLowStockPanel() {
+  if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
+  _staffLowStockEntriesCache = _buildStaffLowStockEntries();
+  _renderStaffLowStockList();
+  const selectAll = document.getElementById('staffLowStockSelectAll');
+  if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+  document.getElementById('staffLowStockPanel').style.display = 'block';
+}
+window.openStaffLowStockPanel = openStaffLowStockPanel;
+
+function toggleSelectAllStaffLowStock(checked) {
+  document.querySelectorAll('.staff-lowstock-check').forEach(cb => { cb.checked = checked; });
+  updateStaffLowStockPickerBtn();
+}
+window.toggleSelectAllStaffLowStock = toggleSelectAllStaffLowStock;
+
+function updateStaffLowStockPickerBtn() {
+  const all     = document.querySelectorAll('.staff-lowstock-check');
+  const checked = document.querySelectorAll('.staff-lowstock-check:checked').length;
+  const btn = document.getElementById('useStaffLowStockBtn');
+  if (btn) btn.disabled = checked === 0;
+
+  const selectAll = document.getElementById('staffLowStockSelectAll');
+  if (selectAll) {
+    selectAll.checked       = all.length > 0 && checked === all.length;
+    selectAll.indeterminate = checked > 0 && checked < all.length;
+  }
+}
+window.updateStaffLowStockPickerBtn = updateStaffLowStockPickerBtn;
+
+// Appends the checked entries straight into the Request Stock form that's
+// already open — one row per entry, reusing fillReqRowForProduct() (the
+// same per-variant-row filler openRequestModalForProduct() uses) so each
+// row's variant selects and Current Stock land pre-filled exactly like
+// picking that product from the search box would.
+function useSelectedStaffLowStock() {
+  const idxs = Array.from(document.querySelectorAll('.staff-lowstock-check:checked')).map(c => parseInt(c.value, 10));
+  const selected = _staffLowStockEntriesCache.filter(e => idxs.includes(e.idx));
+  if (!selected.length) return;
+
+  // Drop any still-empty row already in the form (e.g. the blank starter
+  // row) so picking from Low Stock doesn't leave a stray unfilled row
+  // mixed in — anything already filled by hand is left alone.
+  document.querySelectorAll('#reqItems > div').forEach(row => {
+    const hidden = row.querySelector('input[type="hidden"]');
+    if (hidden && !hidden.value) row.remove();
+  });
+
+  let added = 0;
+  selected.forEach(e => {
+    const p = invProducts.find(pr => pr.product_id === e.productId);
+    if (!p) return;
+    const variantRow = e.options ? { options: e.options, quantity: e.quantity } : null;
+    fillReqRowForProduct(p, variantRow);
+    added++;
+  });
+  _reqUpdateBtn();
+
+  // Collapse the panel and clear its own selections — reopening it starts fresh.
+  const panel = document.getElementById('staffLowStockPanel');
+  if (panel) panel.style.display = 'none';
+  document.querySelectorAll('.staff-lowstock-check').forEach(cb => { cb.checked = false; });
+  const selectAll = document.getElementById('staffLowStockSelectAll');
+  if (selectAll) { selectAll.checked = false; selectAll.indeterminate = false; }
+
+  if (added) {
+    showToast(`Added ${added} item${added !== 1 ? 's' : ''} to the request.`);
+    document.getElementById('reqItems')?.lastElementChild?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  } else {
+    showToast('Could not add the selected item(s) — try reopening Low Stock Items.', 'error');
+  }
+}
+window.useSelectedStaffLowStock = useSelectedStaffLowStock;
 
 function loadReqRowVariantsByProduct(product, rowId) {
   const row  = document.getElementById(rowId);
@@ -5465,7 +5708,7 @@ function loadReqRowVariantsByProduct(product, rowId) {
   cont.innerHTML = groups.map(g => `
     <div style="flex:1;min-width:100px;">
       <label style="font-size:11px;color:var(--text-muted);display:block;margin-bottom:2px;">${g.label}</label>
-      <select class="form-input form-select req-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;">
+      <select class="form-input form-select req-variant-opt" data-label="${g.label}" style="font-size:12px;padding:5px 7px;" onchange="_reqUpdateRowStock('${rowId}')">
         <option value="">Any</option>
         ${(g.choices || []).map(c => `<option value="${_choiceVal(c)}">${_choiceVal(c)}</option>`).join('')}
       </select>
