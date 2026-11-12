@@ -127,7 +127,7 @@
         <div class="pos-left">
           <div class="pos-search-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input type="text" class="search-input" id="posSearch" placeholder="Search product name or category..." onkeydown="if(event.key==='Enter') searchProducts(this.value)" oninput="if(!this.value) searchProducts('')"/>
+            <input type="text" class="search-input" id="posSearch" placeholder="Search product name or category..." onkeydown="if(event.key==='Enter'){ if(!_posScanFallback(this.value,this)) searchProducts(this.value); }" oninput="if(!this.value) searchProducts('')"/>
             <button class="search-btn" onclick="searchProducts(document.getElementById('posSearch').value)">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
               Search
@@ -173,7 +173,7 @@
           <!-- Customer name (optional) -->
           <div class="pos-customer-wrap">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><path d="M20 21a8 8 0 1 0-16 0"/><circle cx="12" cy="8" r="4"/></svg>
-            <input type="text" id="posCustomer" class="search-input" placeholder="Customer name (optional)" style="font-size:12px;"/>
+            <input type="text" id="posCustomer" class="search-input" placeholder="Customer name (optional)" style="font-size:12px;" onkeydown="if(event.key==='Enter' && _posScanFallback(this.value,this)) event.preventDefault();"/>
           </div>
 
           <!-- Order-level Discount -->
@@ -260,7 +260,7 @@
               <div class="form-row-2" style="margin-bottom:0;">
                 <div class="form-group" style="margin-bottom:0;">
                   <label class="form-label">Cash Received (₱)</label>
-                  <input type="number" id="posCashReceived" class="form-input" placeholder="0.00" oninput="computeChange()"/>
+                  <input type="number" id="posCashReceived" class="form-input" placeholder="0.00" oninput="computeChange()" onkeydown="if(event.key==='Enter' && _posScanFallback(this.value,this)) event.preventDefault();"/>
                 </div>
                 <div class="form-group" style="margin-bottom:0;">
                   <label class="form-label">Change</label>
@@ -609,10 +609,11 @@
              Oct 26 2026, so this is now the Deliveries card's first tab. -->
         <div id="staffDeliveriesTodayPanel" style="padding:1rem;">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
-            <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow.</span>
+            <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow. Remittance reopens at 6:00 AM.</span>
             <div style="display:flex;gap:8px;">
               <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="staffBulkRemitSelectedOrders()" title="Complete every selected order, trusting each order's computed total — no amount typing needed">Bulk Remit Selected</button>
               <button class="btn btn-cancel" style="font-size:12px;padding:6px 14px;" onclick="staffBulkNotDeliveredSelectedOrders()">Bulk Not Delivered Selected</button>
+              <button class="btn btn-outline-green" style="font-size:12px;padding:6px 14px;" onclick="staffCloseRemittanceNow()" title="Close today's remittance early for your branch — flags every still-pending delivery as Not Remitted right now instead of waiting for the 5pm auto-flag">Close Remittance</button>
             </div>
           </div>
           <div class="table-wrap">

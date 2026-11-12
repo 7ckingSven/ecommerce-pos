@@ -1431,6 +1431,11 @@ function updateQty(idx, delta) {
   }
   renderOrderItems();
   updateTotal();
+  // +/- is a plain button click, so it doesn't steal focus from a text
+  // field the way typing would — re-focus the scanner input right after so
+  // staff can scan the next item immediately without clicking back into it
+  // (adviser follow-up, Nov 11 2026).
+  focusBarcodeInput();
 }
 
 // Directly-typed quantity (replaces repeated "+" tapping for large quantities).
@@ -1447,6 +1452,7 @@ function setQty(idx, rawValue, inputEl) {
     orderItems.splice(idx, 1);
     renderOrderItems();
     updateTotal();
+    focusBarcodeInput();
     return;
   }
   if (qty > item.max) {
@@ -1456,12 +1462,16 @@ function setQty(idx, rawValue, inputEl) {
   item.quantity = qty;
   renderOrderItems();
   updateTotal();
+  // Only fires on change (blur/Enter), not per keystroke, so this is safe
+  // to re-focus the scanner right after without fighting active typing.
+  focusBarcodeInput();
 }
 
 function removeFromOrder(idx) {
   orderItems.splice(idx, 1);
   renderOrderItems();
   updateTotal();
+  focusBarcodeInput();
 }
 
 function renderOrderItems() {
@@ -1487,10 +1497,7 @@ function renderOrderItems() {
                onclick="this.select()"/>
         <button class="pos-qty-btn" onclick="updateQty(${idx}, 1)">+</button>
       </div>
-      <div class="pos-order-item-price">
-        ${(item.original_price && item.original_price > item.price) ? `<span class="pos-item-original-price" title="${item.discount_name ? item.discount_name + ' — ' : ''}original price before discount">${peso(item.original_price * item.quantity)}</span>` : ''}
-        <span>${peso(item.price * item.quantity)}</span>
-      </div>
+      <div class="pos-order-item-price">${peso(item.price * item.quantity)}</div>
       <button class="pos-remove-btn" onclick="removeFromOrder(${idx})">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
       </button>
@@ -1972,14 +1979,20 @@ async function checkPosVariantStock() {
   if (addBtn) addBtn.disabled = qty <= 5;
 }
 
-async function confirmPosVariant(btn) {
-  if (!posCurrentProduct) return;
-  const groups = posCurrentProduct.option_groups || [];
-
+// Shared by the variant-picker modal's "Add to Order" button AND a direct
+// barcode scan that already fully specifies every variant group (see
+// handleBarcodeScan below) — stock check, price resolution and the actual
+// addToOrder call used to live only inside confirmPosVariant, duplicated
+// here would drift out of sync. Returns true on success, false on a
+// validation/stock failure (caller decides what to do — close a modal,
+// re-focus the scanner, etc.). `btn` may be null (no modal button to spin
+// when this fires straight from a scan).
+async function _posConfirmVariantAdd(product, selectedVariants, btn) {
+  const groups = product.option_groups || [];
   for (const g of groups) {
-    if (!posSelectedVariants[g.label]) {
+    if (!selectedVariants[g.label]) {
       showToast(`Please select a ${g.label}.`, 'error');
-      return;
+      return false;
     }
   }
 
@@ -1994,44 +2007,51 @@ async function confirmPosVariant(btn) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          product_id: posCurrentProduct.product_id,
+          product_id: product.product_id,
           branch_id:  staffBranchId,
-          options:    posSelectedVariants,
+          options:    selectedVariants,
         }),
       });
       const data = await res.json();
       availableStock = data.quantity || 0;
     } catch (e) {
-      availableStock = getLocalVariantStock(posCurrentProduct, staffBranchId, posSelectedVariants);
+      availableStock = getLocalVariantStock(product, staffBranchId, selectedVariants);
     }
   } else {
-    availableStock = getLocalVariantStock(posCurrentProduct, staffBranchId, posSelectedVariants);
+    availableStock = getLocalVariantStock(product, staffBranchId, selectedVariants);
   }
   if (availableStock <= 5) {
     showToast(availableStock <= 0 ? 'This variant is out of stock!' : 'This variant is below its reserve stock level and cannot be sold right now.', 'error');
     setButtonLoading(btn, false);
-    return;
+    return false;
   }
 
-  const variantLabel = Object.entries(posSelectedVariants).map(([k,v]) => `${k}: ${v}`).join(', ');
-  const disc2 = posCurrentProduct.discount;
+  const variantLabel = Object.entries(selectedVariants).map(([k,v]) => `${k}: ${v}`).join(', ');
+  const disc2 = product.discount;
   // Resolved variant price (combo override -> per-choice override -> base
   // product price), THEN the product's discount applied on top — same order
   // as the live preview in the modal.
-  const { price: variantPrice } = resolveVariantPricing(posCurrentProduct, posSelectedVariants);
+  const { price: variantPrice } = resolveVariantPricing(product, selectedVariants);
   const variantEffectivePrice = disc2 ? variantPrice * (1 - disc2.percentage / 100) : variantPrice;
   addToOrder(
-    posCurrentProduct.product_id,
-    `${posCurrentProduct.product_name} (${variantLabel})`,
+    product.product_id,
+    `${product.product_name} (${variantLabel})`,
     variantEffectivePrice,
-    availableStock || posCurrentProduct.quantity,
-    { ...posSelectedVariants },
+    availableStock || product.quantity,
+    { ...selectedVariants },
     {
       original_price: disc2 ? variantPrice : null,
       discount_name:  disc2 ? disc2.discount_name     : null,
       discount_pct:   disc2 ? disc2.percentage        : null,
     }
   );
+  return true;
+}
+
+async function confirmPosVariant(btn) {
+  if (!posCurrentProduct) return;
+  const ok = await _posConfirmVariantAdd(posCurrentProduct, posSelectedVariants, btn);
+  if (!ok) return;
   posSelectedVariants = {};
   closeGenericModal(); // modal closes on success — no need to reset btn loading
   focusBarcodeInput();
@@ -2082,6 +2102,25 @@ function _findBarcodeMatch(code) {
   return null;
 }
 
+// Scanning is meant to be persistent across the POS tab — if staff
+// accidentally click into the product search box, Customer name, or Cash
+// Received field right before scanning, a USB scanner (keyboard emulation)
+// still types the code into whatever's focused and sends Enter. Rather
+// than that Enter silently triggering THAT field's own action (a product
+// search, nothing, computeChange) with a barcode string nobody wanted
+// there, each of those fields checks the just-typed value against known
+// barcodes first — a real match is handled as a scan and the field is
+// cleared; anything else falls through to that field's normal behavior
+// (adviser follow-up, Nov 11 2026).
+function _posScanFallback(value, inputEl) {
+  const code = (value || '').trim();
+  if (!code || !_findBarcodeMatch(code)) return false;
+  if (inputEl) inputEl.value = '';
+  handleBarcodeScan(code);
+  return true;
+}
+window._posScanFallback = _posScanFallback;
+
 function handleBarcodeScan(rawCode) {
   const code = (rawCode || '').trim();
   const wrap = document.getElementById('posBarcodeWrap');
@@ -2109,11 +2148,41 @@ function handleBarcodeScan(rawCode) {
   }
 
   flashBarcodeWrap(wrap, 'hit');
-  if (statusEl) statusEl.textContent = `Added: ${match.product_name}`;
-  // Reuses the same path as clicking the product card — handles the
-  // variant-picker modal automatically when the product has option groups.
-  // A choice- or combo-level barcode pre-selects that exact variant in the
-  // modal so staff only need to confirm (and finish any remaining groups).
+
+  // A scanned barcode already uniquely identifies either the base product
+  // (no variants) or one exact variant/combo — so a scan should land
+  // straight in the cart, never stop at the variant-picker modal for staff
+  // to confirm something the scan already determined (adviser follow-up,
+  // Nov 11 2026). The modal is still needed only when the code only
+  // narrows things down partially: a choice-level barcode on a product
+  // that has OTHER variant groups too, where the barcode can't know which
+  // choice staff want for those remaining groups.
+  const groups = match.option_groups || [];
+  const fullySpecified = groups.length > 0 && groups.every(g => presetOptions && presetOptions[g.label]);
+
+  if (groups.length === 0) {
+    // selectPosProduct() already adds straight to the order for a
+    // no-variant product — no modal involved for that case already.
+    if (statusEl) statusEl.textContent = `Added: ${match.product_name}`;
+    selectPosProduct(match.product_id, presetOptions);
+    focusBarcodeInput();
+    return;
+  }
+
+  if (fullySpecified) {
+    // Skip the modal entirely — go straight to the same stock-check +
+    // addToOrder path the modal's own "Add to Order" button uses.
+    _posConfirmVariantAdd(match, presetOptions, null).then(ok => {
+      if (statusEl) statusEl.textContent = ok ? `Added: ${match.product_name}` : 'Could not add';
+      if (!ok) flashBarcodeWrap(wrap, 'miss');
+      focusBarcodeInput();
+    });
+    return;
+  }
+
+  // Partial match (a choice-level barcode with other groups still unset) —
+  // still need staff to pick the rest of the variant in the modal.
+  if (statusEl) statusEl.textContent = `Select variant: ${match.product_name}`;
   selectPosProduct(match.product_id, presetOptions);
   focusBarcodeInput();
 }
@@ -2146,9 +2215,33 @@ function focusBarcodeInput() {
 }
 window.handleBarcodeScan = handleBarcodeScan;
 
+// Truly persistent scanning (adviser follow-up, Nov 11 2026): rather than
+// re-focusing only after specific actions we thought to wire up (remove,
+// clear, closing a modal, ...), listen for ANY click anywhere in the POS
+// tab and try to refocus afterward. This is what actually catches clicking
+// plain, non-interactive elements like a price/qty label — those don't go
+// through any button handler at all, so nothing would otherwise know to
+// hand focus back. Deferred a tick so a click that DID focus a real input
+// (search, customer name, cash received) keeps it — focusBarcodeInput()'s
+// own guard still backs off from those once it runs.
+document.addEventListener('click', (e) => {
+  const posSection = document.getElementById('section-pos');
+  if (!posSection || !posSection.classList.contains('active')) return;
+  if (!posSection.contains(e.target)) return;
+  setTimeout(focusBarcodeInput, 0);
+});
+
 function updateTotal() {
-  // Subtotal = sum of discounted item prices
+  // Discounted sum — what's actually owed before any order-level discount
+  // (this still drives finalTotal below; only the *displayed* Subtotal
+  // line changed to show the pre-discount figure instead, per adviser
+  // follow-up Nov 11 2026 — see originalSubtotal).
   const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
+
+  // Original (pre-discount) sum — this is what's shown as "Subtotal" now,
+  // with the per-product discount broken out as its own deducted line
+  // ("Product Savings") below it instead of being folded into each row.
+  const originalSubtotal = orderItems.reduce((s, i) => s + (i.original_price || i.price) * i.quantity, 0);
 
   // Product savings = sum of (original - discounted) per item
   const prodSavings = orderItems.reduce((s, i) => {
@@ -2166,7 +2259,7 @@ function updateTotal() {
 
   const finalTotal = subtotal - orderDiscAmt;
 
-  document.getElementById('posSubtotal').textContent = peso(subtotal);
+  document.getElementById('posSubtotal').textContent = peso(originalSubtotal);
 
   // Product savings row
   const prodRow = document.getElementById('posProdDiscountRow');
@@ -2215,6 +2308,7 @@ function clearOrder() {
   if (defaultBtn) defaultBtn.classList.add('active');
   document.getElementById('posRefNo').style.display     = 'none';
   document.getElementById('posCashInput').style.display = 'flex';
+  focusBarcodeInput();
 }
 
 function confirmClearOrder() {
@@ -3770,6 +3864,13 @@ function closeGenericModal() {
   if (overlay) overlay.style.display = 'none';
   if (modal)   modal.style.display   = 'none';
   document.body.style.overflow = '';
+  // Closing ANY generic modal (variant picker cancelled, confirm-clear
+  // dismissed or confirmed, etc.) should hand scanning back — staff
+  // shouldn't have to click back into the scan field after dismissing a
+  // popup (adviser follow-up, Nov 11 2026). No-ops automatically if the
+  // POS tab isn't the active section or something else is genuinely being
+  // typed into.
+  if (typeof focusBarcodeInput === 'function') focusBarcodeInput();
 }
 
 function viewStaffOrderItems(order) {
@@ -3992,6 +4093,13 @@ function closeGenericModal() {
   if (overlay) overlay.style.display = 'none';
   if (modal)   modal.style.display   = 'none';
   document.body.style.overflow = '';
+  // Closing ANY generic modal (variant picker cancelled, confirm-clear
+  // dismissed or confirmed, etc.) should hand scanning back — staff
+  // shouldn't have to click back into the scan field after dismissing a
+  // popup (adviser follow-up, Nov 11 2026). No-ops automatically if the
+  // POS tab isn't the active section or something else is genuinely being
+  // typed into.
+  if (typeof focusBarcodeInput === 'function') focusBarcodeInput();
 }
 
 function viewStaffOrderItems(order) {
