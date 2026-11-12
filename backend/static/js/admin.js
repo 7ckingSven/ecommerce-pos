@@ -3929,7 +3929,17 @@ async function submitAddStock(e) {
 
   const items = [];
   let hasError = false;
-  let tooManyBlankProduct = '';
+  // Leaving 2+ variant groups blank used to be a hard block here (final-
+  // defense bug report, Nov 12 2026 — a Pilot G-Tech restock meant for
+  // specific colors/packaging fanned out into dozens of unintended rows,
+  // each silently getting the full entered quantity). Turned into an
+  // explicit, named confirmation instead (Nov 12 2026, part 2) — bulk-
+  // applying the same qty across every combination of 2+ blank groups is
+  // a legitimate shortcut ("restock every color AND every bundle size at
+  // once"), it just needs to be something the admin knowingly opts into,
+  // with the real multiplier spelled out, rather than something that can
+  // happen by accident with no warning at all.
+  const bulkWarnings = [];
   rows.forEach(function(row) {
     const hiddenInput = row.querySelector('input[type="hidden"]');
     const qtySel      = row.querySelector('.add-stock-qty');
@@ -3944,20 +3954,12 @@ async function submitAddStock(e) {
       if (vs.value) selectedOpts[vs.dataset.label] = vs.value;
     });
 
-    // A group left on "Any" expands across every choice in that group —
-    // same qty applied to each resulting combination, not split between
-    // them. That's a useful shortcut for ONE blank group ("restock every
-    // color with 10 units"), but leaving 2+ groups blank at once cross-
-    // multiplies them together into a combinatorial mess — block that
-    // here rather than silently creating dozens of unintended rows.
     const groups = JSON.parse(row.dataset.optionGroups || '[]');
-    if (_unpinnedGroupCount(groups, selectedOpts) >= 2) {
-      hasError = true;
-      const ac = row.querySelector('input[type="text"]');
-      tooManyBlankProduct = ac?.value || 'This product';
-      return;
-    }
     const combos = expandVariantSelection(groups, selectedOpts);
+    if (_unpinnedGroupCount(groups, selectedOpts) >= 2 && combos.length > 1) {
+      const ac = row.querySelector('input[type="text"]');
+      bulkWarnings.push({ name: ac?.value || 'This product', comboCount: combos.length, qty });
+    }
     combos.forEach(variantOpts => {
       items.push({
         product_id:      productId,
@@ -3967,19 +3969,18 @@ async function submitAddStock(e) {
     });
   });
 
-  if (tooManyBlankProduct) {
-    showToast(`${tooManyBlankProduct}: pin down all but one variant group (or pick a specific choice for each) before adding stock — leaving 2+ groups blank would cross-multiply into many unintended combinations.`, 'error');
-    return;
-  }
   if (hasError || !items.length) {
     showToast('Please fill in all product rows correctly.', 'error');
     return;
   }
 
-  const confirmed = await showConfirmDialog(
-    'Confirm Add Stock',
-    `Add stock for ${items.length} item${items.length !== 1 ? 's' : ''}${items.length !== rows.length ? ` (expanded from "Any" variant selections)` : ''}?`
-  );
+  let confirmMsg = `Add stock for ${items.length} item${items.length !== 1 ? 's' : ''}${items.length !== rows.length ? ` (expanded from "Any" variant selections)` : ''}?`;
+  if (bulkWarnings.length) {
+    confirmMsg += '\n\n⚠ ' + bulkWarnings.map(w =>
+      `${w.name}: ${w.qty} unit(s) will be added to EACH of ${w.comboCount} variant combinations (${w.qty * w.comboCount} total units) — every blank variant group was left open.`
+    ).join('\n');
+  }
+  const confirmed = await showConfirmDialog('Confirm Add Stock', confirmMsg);
   if (!confirmed) return;
 
   setButtonLoading(addStockBtn, true);
@@ -4148,19 +4149,19 @@ async function submitTransfer(e) {
 
   // A group left on "All (no variant)" expands across every choice in that
   // group — same qty transferred for each resulting combination. Leaving
-  // 2+ groups blank at once cross-multiplies them together — block that
-  // the same way Add Stock does, instead of silently fanning out.
+  // 2+ groups blank at once cross-multiplies them together, same as Add
+  // Stock — that used to be a hard block, now it's just named explicitly
+  // in the confirm dialog below (Nov 12 2026, part 2) so a deliberate bulk
+  // transfer across every combination of 2+ blank groups is still possible,
+  // with the real multiplier spelled out before confirming.
   const product = allProducts?.find(p => p.product_id === productId);
   const groups  = product?.option_groups || [];
-  if (_unpinnedGroupCount(groups, selectedOpts) >= 2) {
-    showToast('Pin down all but one variant group (or pick a specific choice for each) before transferring — leaving 2+ groups blank would cross-multiply into many unintended combinations.', 'error');
-    return;
-  }
   const combos  = expandVariantSelection(groups, selectedOpts);
+  const unpinned = _unpinnedGroupCount(groups, selectedOpts);
 
   const btn = e.submitter || document.getElementById('transferSubmitBtn');
   const confirmMsg = combos.length > 1
-    ? `Transfer ${qty} unit(s) of EACH of ${combos.length} variants between branches?`
+    ? `Transfer ${qty} unit(s) of EACH of ${combos.length} variants between branches (${qty * combos.length} total units)?${unpinned >= 2 ? '\n\n⚠ Every variant group was left open — this covers every combination, not just a specific one.' : ''}`
     : `Transfer ${qty} unit(s) between branches?`;
   const confirmed = await showConfirmDialog('Confirm Transfer', confirmMsg);
   if (!confirmed) return;
@@ -4259,14 +4260,14 @@ async function submitAdjust(e) {
 
   // A group left on "All (no variant)" expands across every choice in that
   // group — same qty deducted from each resulting combination. Leaving 2+
-  // groups blank at once cross-multiplies them together — block that the
-  // same way Add Stock does, instead of silently fanning out.
+  // groups blank at once cross-multiplies them together, same as Add
+  // Stock — that used to be a hard block, now it's just named explicitly
+  // in the confirm dialog below (Nov 12 2026, part 2) so a deliberate bulk
+  // adjustment across every combination of 2+ blank groups is still
+  // possible, with the real multiplier spelled out before confirming.
   const groups = product.option_groups || [];
-  if (_unpinnedGroupCount(groups, selectedOpts) >= 2) {
-    showToast('Pin down all but one variant group (or pick a specific choice for each) before adjusting — leaving 2+ groups blank would cross-multiply into many unintended combinations.', 'error');
-    return;
-  }
   const combos = expandVariantSelection(groups, selectedOpts);
+  const unpinned = _unpinnedGroupCount(groups, selectedOpts);
 
   // Validate EVERY combination has enough stock before sending anything.
   for (const combo of combos) {
@@ -4280,7 +4281,7 @@ async function submitAdjust(e) {
 
   const btn = e.submitter || document.getElementById('adjustSubmitBtn');
   const confirmMsg = combos.length > 1
-    ? `Deduct ${qty} unit(s) from EACH of ${combos.length} variants (${reason})?`
+    ? `Deduct ${qty} unit(s) from EACH of ${combos.length} variants (${reason}) — ${qty * combos.length} total units?${unpinned >= 2 ? '\n\n⚠ Every variant group was left open — this covers every combination, not just a specific one.' : ''}`
     : `Deduct ${qty} unit(s) from stock (${reason})?`;
   const confirmed = await showConfirmDialog('Confirm Adjustment', confirmMsg);
   if (!confirmed) return;
@@ -7337,7 +7338,7 @@ function showConfirmDialog(title, message) {
     overlay.innerHTML = `
       <div style="background:var(--card-bg);border-radius:16px;padding:1.5rem;max-width:380px;width:90%;box-shadow:0 20px 60px rgba(0,0,0,0.3);">
         <h3 style="margin:0 0 0.5rem;font-size:16px;color:var(--text);">${title}</h3>
-        <p style="margin:0 0 1.2rem;font-size:13px;color:var(--text-muted);line-height:1.6;">${message}</p>
+        <p style="margin:0 0 1.2rem;font-size:13px;color:var(--text-muted);line-height:1.6;white-space:pre-line;">${message}</p>
         <div style="display:flex;gap:8px;justify-content:flex-end;">
           <button id="confirmNo"  style="padding:8px 18px;border-radius:8px;border:1.5px solid var(--border);background:none;color:var(--text);cursor:pointer;font-size:13px;">No</button>
           <button id="confirmYes" style="padding:8px 18px;border-radius:8px;border:none;background:linear-gradient(135deg,var(--g-700),var(--g-500));color:#fff;cursor:pointer;font-size:13px;font-weight:600;">Yes, Confirm</button>
