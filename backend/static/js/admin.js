@@ -136,6 +136,9 @@ let _prodFilteredCache   = [];
 const DISC_PAGE_SIZE = 10;
 let discountsPage        = 1;
 let _discFilteredCache   = [];
+const DISC_PRODUCTS_PAGE_SIZE = 10;
+let discountedProductsPage    = 1;
+let _discountedProductsCache  = [];
 const USER_PAGE_SIZE = 10;
 let usersPage            = 1;
 let _userFilteredCache   = [];
@@ -6551,8 +6554,18 @@ function filterDiscounts(q) {
 
 function loadDiscountedProducts() {
   const discounted = allProducts.filter(p => p.discount_id);
-  document.getElementById('discountedProductsBody').innerHTML = discounted.length
-    ? discounted.map(p => {
+  _discountedProductsCache = discounted;
+  if (discountedProductsPage > Math.max(1, Math.ceil(discounted.length / DISC_PRODUCTS_PAGE_SIZE))) {
+    discountedProductsPage = 1;
+  }
+  renderDiscountedProducts(discounted);
+}
+
+function renderDiscountedProducts(discounted) {
+  const start = (discountedProductsPage - 1) * DISC_PRODUCTS_PAGE_SIZE;
+  const paged = discounted.slice(start, start + DISC_PRODUCTS_PAGE_SIZE);
+  document.getElementById('discountedProductsBody').innerHTML = paged.length
+    ? paged.map(p => {
         const disc       = Array.isArray(p.discount) ? p.discount[0] : p.discount;
         const discPrice  = p.price * (1 - (disc?.percentage || 0) / 100);
         const savings    = p.price - discPrice;
@@ -6588,7 +6601,14 @@ function loadDiscountedProducts() {
           </tr>`;
       }).join('')
     : '<tr><td colspan="5" class="table-empty">No products with discounts yet. Use "Assign" button on any discount.</td></tr>';
+  renderPagerCustom('discountedProductsPagination', discounted.length, discountedProductsPage, DISC_PRODUCTS_PAGE_SIZE, 'changeDiscountedProductsPage');
 }
+
+function changeDiscountedProductsPage(page) {
+  discountedProductsPage = page;
+  renderDiscountedProducts(_discountedProductsCache);
+}
+window.changeDiscountedProductsPage = changeDiscountedProductsPage;
 
 async function removeProductDiscount(productId, name, btn) {
   const confirmed = await showConfirmDialog(
