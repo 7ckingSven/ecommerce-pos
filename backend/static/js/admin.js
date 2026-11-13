@@ -7071,7 +7071,17 @@ function renderLoginSessions(rows) {
           : '—';
         const loginAt    = toUtcDate(s.login_at);
         const logoutAt   = s.logout_at ? toUtcDate(s.logout_at) : null;
-        const durationMs = (logoutAt || new Date()) - loginAt;
+        // Bug fix (Nov 14 2026): a session marked "Ended" by the inactivity
+        // timeout (no ping within LOGIN_SESSION_ACTIVE_WINDOW_SECONDS) never
+        // gets an explicit logout_at written — only an actual Logout click
+        // or a fresh login elsewhere sets that. This used to fall back to
+        // `new Date()` for those too, so an abandoned session's "duration"
+        // grew every time this table was viewed (560h+ for something really
+        // only active a normal session length). A still-active session
+        // correctly keeps counting against now; an Ended one freezes at its
+        // last real activity (last_seen_at) instead.
+        const endTime    = logoutAt || (s.is_active ? new Date() : toUtcDate(s.last_seen_at)) || new Date();
+        const durationMs = endTime - loginAt;
         const mins       = Math.max(0, Math.round(durationMs / 60000));
         const duration   = mins < 60 ? `${mins}m` : `${Math.floor(mins / 60)}h ${mins % 60}m`;
         const dtFmt = { timeZone: 'Asia/Manila', dateStyle: 'short', timeStyle: 'short' };
