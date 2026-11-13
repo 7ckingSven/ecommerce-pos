@@ -4269,42 +4269,63 @@ async function submitAdjust(e) {
   const combos = expandVariantSelection(groups, selectedOpts);
   const unpinned = _unpinnedGroupCount(groups, selectedOpts);
 
-  // Validate EVERY combination has enough stock before sending anything.
+  // "Both Branches" used to be sent straight through as to_branch_id:
+  // "both", which Postgres rejected outright (it's not a real branch UUID
+  // — 22P02 invalid input syntax). Same fix as Add Stock already uses:
+  // expand it into one request per REAL branch instead (Nov 13 2026).
+  const branchIds = branchId === 'both'
+    ? allBranches.map(b => b.branch_id)
+    : [branchId];
+
+  // Validate EVERY combination has enough stock on EVERY branch it'll be
+  // deducted from before sending anything — "Both Branches" deducts the
+  // full qty from EACH branch independently, so each one needs its own
+  // qty in stock, not just the combined total across both.
   for (const combo of combos) {
-    const availableQty = _findVariantStockQty(product, branchId, combo);
-    if (qty > availableQty) {
-      const label = combo ? Object.values(combo).join(' / ') : 'this product';
-      showToast(`Cannot deduct ${qty} from ${label} — only ${availableQty} units in stock for this branch.`, 'error');
-      return;
+    for (const bId of branchIds) {
+      const availableQty = _findVariantStockQty(product, bId, combo);
+      if (qty > availableQty) {
+        const label = combo ? Object.values(combo).join(' / ') : 'this product';
+        const branchLabel = branchIds.length > 1 ? ` at ${_poBranchName(bId)}` : ' for this branch';
+        showToast(`Cannot deduct ${qty} from ${label}${branchLabel} — only ${availableQty} units in stock.`, 'error');
+        return;
+      }
     }
   }
 
   const btn = e.submitter || document.getElementById('adjustSubmitBtn');
-  const confirmMsg = combos.length > 1
-    ? `Deduct ${qty} unit(s) from EACH of ${combos.length} variants (${reason}) — ${qty * combos.length} total units?${unpinned >= 2 ? '\n\n⚠ Every variant group was left open — this covers every combination, not just a specific one.' : ''}`
-    : `Deduct ${qty} unit(s) from stock (${reason})?`;
+  const totalUnits = qty * combos.length * branchIds.length;
+  let confirmMsg = combos.length > 1
+    ? `Deduct ${qty} unit(s) from EACH of ${combos.length} variants (${reason})`
+    : `Deduct ${qty} unit(s) from stock (${reason})`;
+  confirmMsg += branchIds.length > 1 ? `, from EACH of ${branchIds.length} branches — ${totalUnits} total units?` : '?';
+  if (unpinned >= 2) confirmMsg += '\n\n⚠ Every variant group was left open — this covers every combination, not just a specific one.';
   const confirmed = await showConfirmDialog('Confirm Adjustment', confirmMsg);
   if (!confirmed) return;
 
   setButtonLoading(btn, true);
   try {
-    // Independent per-combo deductions — run them together instead of
-    // sequentially (final-defense speed follow-up, Nov 11 2026); stock was
-    // already validated per-combo above, so this is purely about not
-    // paying combos.length round-trips one after another.
-    const results = await Promise.all(combos.map(combo =>
-      fetch('/api/admin/inventory', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          product_id:      productId,
-          quantity:        -qty,
-          to_branch_id:    branchId,
-          note:            `[${reason.toUpperCase()}] ${note || reason}`,
-          type:            'adjustment',
-          variant_options: combo,
-        }),
-      })
-    ));
+    // Independent per-combo-per-branch deductions — run them together
+    // instead of sequentially (final-defense speed follow-up, Nov 11
+    // 2026); stock was already validated above, so this is purely about
+    // not paying combos.length × branchIds.length round-trips back to back.
+    const requests = [];
+    for (const combo of combos) {
+      for (const bId of branchIds) {
+        requests.push(fetch('/api/admin/inventory', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            product_id:      productId,
+            quantity:        -qty,
+            to_branch_id:    bId,
+            note:            `[${reason.toUpperCase()}] ${note || reason}`,
+            type:            'adjustment',
+            variant_options: combo,
+          }),
+        }));
+      }
+    }
+    const results = await Promise.all(requests);
     const allOk = results.every(res => res.ok);
     let lastErr = '';
     if (!allOk) {
@@ -4312,7 +4333,11 @@ async function submitAdjust(e) {
       try { lastErr = (await failed.json()).error || ''; } catch (_e) {}
     }
     if (allOk) {
-      showToast(`Stock adjusted — ${qty} unit(s) deducted${combos.length > 1 ? ` across ${combos.length} variants` : ''} (${reason}).`);
+      const scopeMsg = [
+        combos.length > 1 ? `across ${combos.length} variants` : '',
+        branchIds.length > 1 ? `across both branches` : '',
+      ].filter(Boolean).join(' and ');
+      showToast(`Stock adjusted — ${qty} unit(s) deducted${scopeMsg ? ` ${scopeMsg}` : ''} (${reason}).`);
       closeAdjustModal();
     } else {
       showToast(lastErr || 'Some adjustments failed — check inventory for the affected variant(s).', 'error');
