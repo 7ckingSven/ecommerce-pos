@@ -1009,7 +1009,7 @@ function toUtcDate(raw) {
 
 function offlineSyncTag(o) {
   return o.is_offline_sync
-    ? ' <span title="Made while offline, synced once reconnected" style="display:inline-block;margin-top:3px;background:rgba(245,158,11,0.15);color:#b45309;border:1px solid rgba(245,158,11,0.4);border-radius:999px;font-size:10px;font-weight:600;padding:1px 6px;">⚡ Offline Sync</span>'
+    ? ' <span class="tag-offline-sync" title="Made while offline, synced once reconnected">⚡ Offline Sync</span>'
     : '';
 }
 
@@ -5133,7 +5133,7 @@ function renderOrders(orders) {
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${(() => { const s = Array.isArray(o.staff) ? o.staff[0] : o.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</td>
-          <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
+          <td><span class="order-type-cell">${badge(o.order_type)}${offlineSyncTag(o)}</span></td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${(() => {
@@ -5146,10 +5146,10 @@ function renderOrders(orders) {
             const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
             const h = d.getUTCHours(), m = d.getUTCMinutes();
             const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
-            return `<span style="display:block;font-size:12px;">${date}</span><span style="display:block;font-size:11px;color:var(--text-muted);">${time}</span>`;
+            return `<span class="cell-date-main">${date}</span><span class="cell-date-sub">${time}</span>`;
           })()}</td>
           <td>${badge(o.status)}</td>
-          <td style="display:flex;gap:6px;align-items:center;">
+          <td class="order-actions-cell">
             ${orderStatusActionHtml(o, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>

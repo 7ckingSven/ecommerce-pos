@@ -568,12 +568,13 @@
         </select>
         <button id="staffClearFiltersBtn" class="btn btn-cancel" onclick="clearStaffOrderFilters()" disabled style="font-size:12px;padding:6px 12px;opacity:0.5;cursor:not-allowed;margin-left:auto;">Clear Filters</button>
       </div>
-      <!-- Bulk Mark Out for Delivery (user request, Oct 29 2026) — see the
-           matching note in admin_dashboard.html. -->
-      <div class="section-toolbar" style="margin-top:-0.5rem;">
-        <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="staffBulkMarkOutForDeliverySelected()">Mark Out for Delivery (Selected)</button>
-      </div>
       <div class="card">
+        <!-- Bulk Mark Out for Delivery (user request, Oct 29 2026) — see the
+             matching note in admin_dashboard.html. -->
+        <div class="table-toolbar">
+          <span style="font-size:11px;color:var(--text-muted);">Check processing orders below to batch-advance them.</span>
+          <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="staffBulkMarkOutForDeliverySelected()">Mark Out for Delivery (Selected)</button>
+        </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
