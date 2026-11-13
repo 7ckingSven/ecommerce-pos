@@ -1249,7 +1249,7 @@ async function loadOverview() {
               : ''}
           </td>
             <td>${r.branch?.branch_name || '—'}</td>
-            <td>${r.quantity_requested}</td>
+            <td>${r.quantity_needed ?? '—'}</td>
             <td>${r.staff ? `${r.staff.fname} ${r.staff.lname}` : '—'}</td>
           </tr>`).join('')
       : '<tr><td colspan="4" class="table-empty">No pending requests ✓</td></tr>';
