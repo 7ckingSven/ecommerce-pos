@@ -3033,10 +3033,10 @@ def admin_get_product_supplier(product_id):
     used to auto-fill the Create PO modal's Supplier field as soon as a
     product is added to the draft, per the Oct 25 adviser consultation."""
     try:
-        res = supabase.table('inventory').select('supplier, created_at') \
+        res = supabase.table('inventory').select('supplier, date') \
             .eq('product_id', product_id) \
             .not_.is_('supplier', 'null') \
-            .order('created_at', desc=False).limit(1).execute()
+            .order('date', desc=False).limit(1).execute()
         supplier = res.data[0]['supplier'] if res.data else None
         return jsonify({'supplier': supplier}), 200
     except Exception as e:

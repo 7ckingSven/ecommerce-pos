@@ -9203,8 +9203,8 @@ function openPODetail(poId) {
         </tr>
       </tbody>
     </table>
-    <div>
-      <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:6px;">Linked Inventory Entries</div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+      <div style="font-size:13.5px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Linked Inventory Entries</div>
       <div id="poLinkedInventoryWrap" style="font-size:13px;color:var(--text-muted);padding:4px 0;">Loading...</div>
     </div>`;
 
@@ -9240,9 +9240,9 @@ function openPODetail(poId) {
         // Already fully received in an earlier batch — nothing left to do
         // here. No data-item-idx, so validatePODistribution() skips it.
         return `
-          <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;opacity:0.7;">
-            <span style="font-size:14px;font-weight:600;">${productLabel}</span>
-            <span style="font-size:12px;color:var(--g-400);margin-left:8px;">✓ Fully received (${orderedQty}/${orderedQty})</span>
+          <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:14px;opacity:0.7;">
+            <span style="font-size:14.5px;font-weight:600;">${productLabel}</span>
+            <span style="font-size:12.5px;color:var(--g-400);margin-left:8px;">✓ Fully received (${orderedQty}/${orderedQty})</span>
           </div>`;
       }
 
@@ -9265,13 +9265,13 @@ function openPODetail(poId) {
         const isRequestingBranch = item.requesting_branch_id && b.branch_id === item.requesting_branch_id;
         const defaultVal = isRequestingBranch ? outstanding : 0;
         const currentStock = branchStockMap[b.branch_id];
-        return `<div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;">
-          <label style="font-size:13px;font-weight:500;min-width:120px;">${b.branch_name}${isRequestingBranch ? ' <span style="color:var(--g-400);font-size:11px;">(requested)</span>' : ''}</label>
+        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <label style="font-size:13.5px;font-weight:500;min-width:130px;">${b.branch_name}${isRequestingBranch ? ' <span style="color:var(--g-400);font-size:11.5px;">(requested)</span>' : ''}</label>
           <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="${defaultVal}"
             data-item="${idx}" data-branch="${b.branch_id}"
             oninput="this.value=this.value.replace(/[^0-9]/g,'');validatePODistribution()"
-            style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"/>
-          <span style="font-size:12px;color:var(--text-muted);">units ${currentStock !== undefined ? `<span style="color:var(--text-muted);">(currently ${currentStock})</span>` : ''}</span>
+            style="width:76px;padding:7px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:14px;"/>
+          <span style="font-size:12.5px;color:var(--text-muted);">units ${currentStock !== undefined ? `<span style="color:var(--text-muted);">(currently ${currentStock})</span>` : ''}</span>
         </div>`;
       }).join('');
 
@@ -9286,37 +9286,37 @@ function openPODetail(poId) {
       const supplierPrefill = item.supplier || '';
 
       return `
-        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:8px;padding:11px 13px;margin-bottom:10px;" data-item-idx="${idx}" data-max="${outstanding}" data-product-id="${item.product_id}">
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap;">
-            <span style="font-size:14px;font-weight:600;">${productLabel}</span>
-            <span style="font-size:12px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
-            ${alreadyReceived > 0 ? `<span style="font-size:12px;color:var(--text-muted);">Already received: ${alreadyReceived}</span>` : ''}
-            <div style="display:flex;align-items:center;gap:6px;">
-              <label style="font-size:12px;color:var(--text-muted);">Receiving now:</label>
+        <div style="background:var(--surface-2,var(--surface));border:1px solid var(--border);border-radius:10px;padding:16px 18px;margin-bottom:16px;" data-item-idx="${idx}" data-max="${outstanding}" data-product-id="${item.product_id}">
+          <div style="display:flex;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap;">
+            <span style="font-size:15px;font-weight:600;">${productLabel}</span>
+            <span style="font-size:12.5px;color:var(--text-muted);">Ordered: ${orderedQty}</span>
+            ${alreadyReceived > 0 ? `<span style="font-size:12.5px;color:var(--text-muted);">Already received: ${alreadyReceived}</span>` : ''}
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="font-size:12.5px;color:var(--text-muted);">Receiving now:</label>
               <input type="number" id="recv_${idx}" min="0" max="${outstanding}" value="${outstanding}"
                 oninput="this.value=this.value.replace(/[^0-9]/g,'');validatePODistribution()"
-                style="width:68px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:13px;font-weight:600;"/>
-              <span style="font-size:12px;color:var(--text-muted);">/ ${outstanding} outstanding</span>
+                style="width:76px;padding:7px 10px;border-radius:7px;border:1.5px solid var(--g-400);background:var(--surface);color:var(--text-primary);font-size:14px;font-weight:600;"/>
+              <span style="font-size:12.5px;color:var(--text-muted);">/ ${outstanding} outstanding</span>
             </div>
           </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px;">
-            <div style="display:flex;align-items:center;gap:6px;">
-              <label style="font-size:12px;color:var(--text-muted);">Unit Cost:</label>
+          <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:14px;">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <label style="font-size:12.5px;color:var(--text-muted);">Unit Cost:</label>
               <input type="number" id="cost_${idx}" min="0" step="0.01" value="${costPrefill}" placeholder="0.00"
                 oninput="validatePODistribution()"
-                style="width:90px;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"/>
+                style="width:100px;padding:7px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:14px;"/>
             </div>
-            <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:180px;">
-              <label style="font-size:12px;color:var(--text-muted);">Supplier:</label>
+            <div style="display:flex;align-items:center;gap:8px;flex:1;min-width:200px;">
+              <label style="font-size:12.5px;color:var(--text-muted);">Supplier:</label>
               <input type="text" id="supplier_${idx}" list="poSupplierDatalist" value="${supplierPrefill}" placeholder="e.g. Natasha Distributor"
                 oninput="validatePODistribution()"
-                style="flex:1;padding:5px 9px;border-radius:6px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:13px;"/>
+                style="flex:1;padding:7px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:14px;"/>
             </div>
           </div>
-          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:6px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
+          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
           ${branchInputs}
-          <div id="distError_${idx}" style="font-size:12px;color:#ef4444;margin-top:4px;display:none;"></div>
-          <div id="distCount_${idx}" style="font-size:12px;color:var(--text-muted);margin-top:4px;"></div>
+          <div id="distError_${idx}" style="font-size:12.5px;color:#ef4444;margin-top:6px;display:none;"></div>
+          <div id="distCount_${idx}" style="font-size:12.5px;color:var(--text-muted);margin-top:6px;"></div>
         </div>`;
     };
 
@@ -9336,8 +9336,8 @@ function openPODetail(poId) {
     // to match its height (flex default align-items:stretch). Keeping the
     // footer to just the two buttons keeps them a normal size.
     document.getElementById('poDetailContent').innerHTML += `
-      <div style="width:100%;max-height:380px;overflow-y:auto;padding-right:2px;">
-        <div style="font-size:13px;font-weight:700;color:var(--text-primary);margin-bottom:8px;">Receive &amp; Distribute Items</div>
+      <div style="width:100%;margin-top:16px;padding-top:14px;border-top:1px solid var(--border);">
+        <div style="font-size:14px;font-weight:700;color:var(--text-primary);margin-bottom:12px;">Receive &amp; Distribute Items</div>
         ${itemRows}
       </div>
       <datalist id="poSupplierDatalist">${(allSuppliers || []).map(s => `<option value="${s}"></option>`).join('')}</datalist>`;
