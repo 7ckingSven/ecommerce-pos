@@ -1530,10 +1530,16 @@ async function openPriceHistoryModal(productId, productName) {
     const qs  = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
     const res = await fetch(`/api/admin/price-history${qs}`, { credentials: 'same-origin' });
     const rows = await res.json();
+    // Bug fix (Nov 13 2026): this used to parse the response body and show
+    // it regardless of status — a 500 (e.g. a bad column reference) came
+    // back as {error: '...'}, which isn't an array, so it silently fell
+    // through to the same empty state as "genuinely no history yet"
+    // instead of surfacing the real failure.
+    if (!res.ok) throw new Error(rows?.error || `Request failed (${res.status})`);
     renderPriceHistoryRows(Array.isArray(rows) ? rows : [], !productId);
   } catch (e) {
     const wrap = document.getElementById('priceHistoryBody');
-    if (wrap) wrap.innerHTML = '<p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Failed to load price history.</p>';
+    if (wrap) wrap.innerHTML = `<p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Failed to load price history${e?.message ? `: ${e.message}` : ''}.</p>`;
   }
 }
 window.openPriceHistoryModal = openPriceHistoryModal;
