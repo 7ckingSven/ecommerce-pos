@@ -6735,7 +6735,36 @@ def admin_get_stock_transfers():
 # depends on DATABASE_URL + the Postgres trigger migration being run, which
 # isn't confirmed live yet.
 
+# Disk-IO relief (Nov 13 2026): _stock_alert_counts and
+# _delivery_notification_counts were each re-running a full, unfiltered scan
+# of product/branch_stock/variant_stock (resp. two order-table scans) on
+# EVERY poll of /api/admin/notifications and /api/staff/notifications — and
+# that poll fires every NOTIF_POLL_MS (20s) per open browser tab, admin or
+# staff, with no sharing between tabs/users. With several dashboards open at
+# once that's dozens of full-catalog scans a minute for data that's already
+# "stale enough" at a 20s poll interval. A short, process-wide TTL cache
+# below keeps the same "always a fresh-ish read" feel (worst case ~30s old,
+# same ballpark as today's poll gap) while making concurrent pollers share
+# one underlying query instead of each paying for their own.
+_notif_cache      = {}
+_notif_cache_lock = threading.Lock()
+_NOTIF_CACHE_TTL  = 30  # seconds
+
+def _notif_cached(cache_key, ttl, compute_fn):
+    now = _time.time()
+    with _notif_cache_lock:
+        hit = _notif_cache.get(cache_key)
+        if hit and (now - hit[0]) < ttl:
+            return hit[1]
+    value = compute_fn()
+    with _notif_cache_lock:
+        _notif_cache[cache_key] = (now, value)
+    return value
+
 def _stock_alert_counts(branch_id=None):
+    return _notif_cached(('stock_alert', branch_id), _NOTIF_CACHE_TTL, lambda: _stock_alert_counts_uncached(branch_id))
+
+def _stock_alert_counts_uncached(branch_id=None):
     """Counts products by worst stock tier, mirroring the existing Admin
     Stock Alert table's classification: a product counts once, under the
     worst tier any of its branches/variants currently sit at (out-of-stock
@@ -6782,6 +6811,9 @@ def _stock_alert_items(alerts):
     return items
 
 def _delivery_notification_counts(branch_id=None):
+    return _notif_cached(('delivery_counts', branch_id), _NOTIF_CACHE_TTL, lambda: _delivery_notification_counts_uncached(branch_id))
+
+def _delivery_notification_counts_uncached(branch_id=None):
     """Two more actionable categories, added right after the bell first
     shipped (team follow-up, Oct 25 2026):
       - out_for_delivery: every order currently dispatched and sitting in

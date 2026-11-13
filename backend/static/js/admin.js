@@ -546,7 +546,7 @@ if (document.readyState !== 'loading') {
 // /api/admin/notifications on its OWN timer, independent of the live-update
 // channel above — that one depends on a Postgres trigger migration that
 // isn't confirmed live yet, and the bell needs to work regardless.
-const NOTIF_POLL_MS = 20000;
+const NOTIF_POLL_MS = 45000;
 let _notifSeenCounts = {}; // type -> count, so a repeat poll only toasts what went UP
 let _notifTimer = null;
 
