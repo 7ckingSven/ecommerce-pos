@@ -1069,6 +1069,58 @@ function populateBranchSelects(...selectIds) {
   });
 }
 
+// Sidebar nav badges (Inventory low-stock, Orders pending, Purchase Orders
+// pending stock requests) used to populate only inside loadOverview() —
+// so they only ever filled in once the Dashboard section itself had been
+// visited. Since the app restores whichever section was last open
+// (admin-section in localStorage), landing straight into Orders/Inventory/
+// etc. on a fresh load or refresh left every nav badge stuck hidden until
+// Dashboard was clicked at least once. This computes the same three
+// badges independently, on every page load, regardless of which section
+// ends up showing. loadOverview() still recomputes them too when Dashboard
+// is visited — a little redundant on that one page, but keeps this self-
+// contained and low-risk to add.
+async function refreshNavBadges() {
+  try {
+    const [products, orders, stockRequests] = await Promise.all([
+      fetch('/api/admin/products').then(r => r.json()),
+      fetch('/api/admin/orders?limit=80').then(r => r.json()),
+      fetch('/api/admin/stock-requests').then(r => r.json()),
+    ]);
+
+    const activeProducts = (Array.isArray(products) ? products : []).filter(p => p.status === 'active');
+    const critQ = q => Number(q) > 0 && Number(q) <= 5;
+    const lowQ  = q => Number(q) > 0 && Number(q) <= 10;
+    const hasAnyBranchCritical = p => p.branch_stock?.some(bs => critQ(bs.quantity)) || p.variant_stock?.some(vs => critQ(vs.quantity));
+    const hasAnyBranchLow      = p => !hasAnyBranchCritical(p) && (p.branch_stock?.some(bs => lowQ(bs.quantity)) || p.variant_stock?.some(vs => lowQ(vs.quantity)));
+    const hasAnyBranchZero     = p => p.branch_stock?.some(bs => Number(bs.quantity) === 0) || p.variant_stock?.some(vs => Number(vs.quantity) === 0);
+    const totalLow = activeProducts.filter(hasAnyBranchCritical).length
+                    + activeProducts.filter(hasAnyBranchLow).length
+                    + activeProducts.filter(hasAnyBranchZero).length;
+
+    const invBadge = document.getElementById('invLowStockBadge');
+    if (invBadge) {
+      invBadge.textContent   = totalLow > 99 ? '99+' : totalLow;
+      invBadge.style.display = totalLow > 0 ? 'inline-block' : 'none';
+    }
+
+    const pendingOrders = (Array.isArray(orders) ? orders : []).filter(o => o.status === 'pending' && o.order_type === 'online');
+    const ordersBadge = document.getElementById('adminOrdersBadge');
+    if (ordersBadge) {
+      ordersBadge.textContent   = pendingOrders.length > 99 ? '99+' : pendingOrders.length;
+      ordersBadge.style.display = pendingOrders.length > 0 ? 'inline-block' : 'none';
+    }
+
+    const pendingReqs = (Array.isArray(stockRequests) ? stockRequests : []).filter(r => r.status === 'pending');
+    const poBadge = document.getElementById('poRequestBadge');
+    if (poBadge) {
+      poBadge.textContent   = pendingReqs.length;
+      poBadge.style.display = pendingReqs.length > 0 ? 'inline' : 'none';
+    }
+  } catch (e) { console.error('Nav badges error:', e); }
+}
+window.refreshNavBadges = refreshNavBadges;
+
 // ─── OVERVIEW ─────────────────────────────────────────
 async function loadOverview() {
   // ── Skeleton ──
@@ -9626,6 +9678,7 @@ document.addEventListener('DOMContentLoaded', async function () {
   _loadedSections.add('products'); loadProducts();
   switchDeliveriesTab('today');
   _startNotifPolling();
+  refreshNavBadges();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');

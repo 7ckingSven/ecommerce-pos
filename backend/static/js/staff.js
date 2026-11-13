@@ -3104,6 +3104,53 @@ function renderInvHistory(data) {
   renderPager('staffHistoryPagination', filteredHist.length, staffHistoryPage, 'changeStaffHistoryPage');
 }
 
+// Sidebar nav badges (Inventory low-stock, Orders pending, Stock Requests
+// pending) used to populate only inside each section's own lazy loader —
+// so landing straight into Orders/Requests/etc. on a fresh load or refresh
+// (the app restores whichever section was last open via staff-section in
+// localStorage) left every nav badge stuck hidden until that specific
+// section had been visited at least once. This computes the same three
+// badges independently, on every page load, regardless of which section
+// ends up showing. Each section's own loader still refreshes its badge too
+// when actually visited — a little redundant, but keeps this self-
+// contained and low-risk to add.
+async function refreshStaffNavBadges() {
+  try {
+    const [productsRaw, orders, requestsRaw] = await Promise.all([
+      fetch('/api/products').then(r => r.json()),
+      fetch('/api/staff/orders?limit=50').then(r => r.json()),
+      fetch('/api/staff/stock-requests').then(r => r.json()),
+    ]);
+
+    const allProducts = Array.isArray(productsRaw) ? productsRaw : [];
+    const branchProducts = allProducts.filter(p => {
+      if (!staffBranchId) return true;
+      const bs = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+      return bs !== undefined;
+    });
+    const criticalCount = branchProducts.filter(p => staffStockInfo(p).level === 'critical').length;
+    const lowCount      = branchProducts.filter(p => staffStockInfo(p).level === 'low').length;
+    const outCount      = branchProducts.filter(p => staffStockInfo(p).level === 'out').length;
+    const invBadge = document.getElementById('invLowStockBadge');
+    if (invBadge) {
+      const badgeCount = criticalCount + lowCount + outCount;
+      invBadge.textContent   = badgeCount > 99 ? '99+' : badgeCount;
+      invBadge.style.display = badgeCount > 0 ? 'inline-block' : 'none';
+    }
+
+    updateOrdersBadge(Array.isArray(orders) ? orders : []);
+
+    const requests = Array.isArray(requestsRaw) ? requestsRaw : [];
+    const pending  = requests.filter(r => r.status === 'pending').length;
+    const reqBadge = document.getElementById('reqBadge');
+    if (reqBadge) {
+      reqBadge.textContent   = pending;
+      reqBadge.style.display = pending > 0 ? 'inline' : 'none';
+    }
+  } catch (e) { console.error('Nav badges error:', e); }
+}
+window.refreshStaffNavBadges = refreshStaffNavBadges;
+
 async function loadInventory() {
   // ── Skeleton ──
   skStats(['invTotalProducts','invLowStock','invCriticalStock','invOutOfStock','invRecentRestocks']);
@@ -5839,6 +5886,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   startConnectivityWatch();
   staffSwitchDeliveriesTab('today');
   _startNotifPolling();
+  refreshStaffNavBadges();
 
   // Restore last section from URL hash or localStorage
   const hash    = window.location.hash.replace('#', '');
