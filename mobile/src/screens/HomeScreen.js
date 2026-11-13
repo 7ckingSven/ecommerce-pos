@@ -289,7 +289,20 @@ export default function HomeScreen({ navigation }) {
     return true;
   }
 
-  async function loadProducts() {
+  // Bug fix (Nov 13 2026): this used to always setProducts(expanded) — the
+  // full, unfiltered, BOTH-branch list — no matter what the branch chip (or
+  // category/brand/sort/search) was currently set to. Since this runs on
+  // every screen focus (useFocusEffect below — e.g. Home → ProductDetail →
+  // back), pull-to-refresh, the error screen's "Try Again", and clearing
+  // search, the visible list would silently snap back to both branches
+  // while the branch chip itself still looked selected. Now it re-applies
+  // whatever filters are actually active, same as loadProductsSilent
+  // already did correctly. `overrides` lets a caller supply freshly-reset
+  // values synchronously (see onRefresh/search handlers below) — reading
+  // state directly here would be stale, since this function is captured
+  // once by useFocusEffect's empty-deps callback; liveFiltersRef (kept
+  // current by the effect above) avoids that same trap.
+  async function loadProducts(overrides) {
     try {
       setError(false);
       // Always fetch ALL products — filter client-side to preserve chip list
@@ -313,7 +326,10 @@ export default function HomeScreen({ navigation }) {
         });
       });
       setAllProducts(expanded);
-      setProducts(expanded);
+      {
+        const { cat, brand, search: q, sort, branch } = overrides || liveFiltersRef.current;
+        applyFilters(cat, brand, q, expanded, sort, branch);
+      }
 
       // Build category and brand lists from full dataset
       const cats   = [...new Set(data.map(p => p.category?.trim()).filter(Boolean))].sort();
@@ -556,7 +572,12 @@ export default function HomeScreen({ navigation }) {
     setSelectedBrand('');
     setSelectedSort('relevance');
     setSearch('');
-    loadProducts();
+    // Explicit overrides, not just the state setters above — liveFiltersRef
+    // only catches up to these resets after the next render/effect, which
+    // hasn't happened yet by the time loadProducts runs synchronously here.
+    // selectedBranch is intentionally kept (pull-to-refresh clears search/
+    // category/brand/sort, not which branch you're shopping).
+    loadProducts({ cat: '', brand: '', search: '', sort: 'relevance', branch: selectedBranch });
   }
 
   function handleProductPress(p) {
@@ -603,7 +624,11 @@ export default function HomeScreen({ navigation }) {
               setSearch('');
               setSuggestions([]);
               Keyboard.dismiss();
-              loadProducts(selectedCat);
+              // Explicit overrides (not the old loadProducts(selectedCat),
+              // which the function signature ignored entirely and which
+              // silently reset to the full both-branch list) — keep every
+              // other active filter, just clear the search term.
+              loadProducts({ cat: selectedCat, brand: selectedBrand, search: '', sort: selectedSort, branch: selectedBranch });
             }} style={{ padding: 4, marginRight: 4 }}>
               <Feather name="arrow-left" size={20} color="#fff"/>
             </TouchableOpacity>
@@ -630,7 +655,8 @@ export default function HomeScreen({ navigation }) {
               <TouchableOpacity onPress={() => {
                 setSearch('');
                 setSuggestions([]);
-                loadProducts(selectedCat);
+                // Same explicit-overrides fix as the back arrow above.
+                loadProducts({ cat: selectedCat, brand: selectedBrand, search: '', sort: selectedSort, branch: selectedBranch });
               }}>
                 <Feather name="x" size={14} color={COLORS.textMuted}/>
               </TouchableOpacity>
