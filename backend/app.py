@@ -275,6 +275,31 @@ def _clear_pending_login():
 # ══════════════════════════════════════════════════════
 LOGIN_SESSION_ACTIVE_WINDOW_SECONDS = 15 * 60  # no ping within this window => treated as Ended even without an explicit logout
 
+# Retention/pruning (Nov 14 2026): login_sessions is a pure audit log —
+# nothing else in the schema references it — so left alone it only ever
+# grows, one row per login, forever. This app has no separate scheduler
+# (see the _auto_* lazy-check pattern used for discounts/orders elsewhere),
+# so cleanup is piggybacked onto the one place new rows get written: every
+# login opportunistically prunes anything past the retention window, but
+# throttled in-memory to at most once a day process-wide, so a burst of
+# logins doesn't turn into a burst of DELETEs.
+LOGIN_SESSIONS_RETENTION_DAYS          = 90
+_LOGIN_SESSIONS_PRUNE_LAST_RUN         = 0
+_LOGIN_SESSIONS_PRUNE_INTERVAL_SECONDS = 24 * 60 * 60
+
+def _prune_old_login_sessions():
+    """Best-effort — a failure here must never block an actual login."""
+    global _LOGIN_SESSIONS_PRUNE_LAST_RUN
+    now = _time.time()
+    if now - _LOGIN_SESSIONS_PRUNE_LAST_RUN < _LOGIN_SESSIONS_PRUNE_INTERVAL_SECONDS:
+        return
+    _LOGIN_SESSIONS_PRUNE_LAST_RUN = now
+    try:
+        cutoff = (datetime.now() - timedelta(days=LOGIN_SESSIONS_RETENTION_DAYS)).isoformat()
+        supabase.table('login_sessions').delete().lt('login_at', cutoff).execute()
+    except Exception as e:
+        print(f"login_sessions prune error: {e}")
+
 def _client_ip():
     """Best-effort real client IP behind Render's reverse proxy."""
     forwarded = request.headers.get('X-Forwarded-For', '')
@@ -292,6 +317,7 @@ def _record_login_session(user_id, role, staff_id=None, branch_id=None):
     # created, before admin/staff were split on branch assignment).
     if role == 'admin':
         branch_id = None
+    _prune_old_login_sessions()
     try:
         now_iso = datetime.now().isoformat()
         res = supabase.table('login_sessions').insert({
