@@ -4458,7 +4458,7 @@ function switchDeliveriesTab(tab) {
   };
   Object.keys(panels).forEach(key => {
     if (panels[key]) panels[key].style.display = tab === key ? '' : 'none';
-    if (btns[key])   btns[key].className = `btn ${tab === key ? 'btn-solid-green' : 'btn-cancel'}`;
+    if (btns[key])   btns[key].className = `deliv-tab${tab === key ? ' active' : ''}`;
   });
 }
 
@@ -4505,7 +4505,7 @@ function renderDeliveriesForToday(orders) {
       ? scheduled.map(o => {
           const attempts = o.delivery_attempts || 0;
           const retryBadge = attempts > 0
-            ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(217,119,6,0.12);color:#d97706;">RETRY ${attempts}/3</span>`
+            ? `<span class="badge badge--yellow" style="margin-left:6px;">RETRY ${attempts}/3</span>`
             : '';
           return `
           <tr>
@@ -4522,7 +4522,7 @@ function renderDeliveriesForToday(orders) {
   document.getElementById('deliveriesTodayBody').innerHTML = today.length
     ? today.map(o => {
         const notRemittedBadge = o.status === 'not_remitted'
-          ? `<span style="display:inline-block;margin-left:6px;padding:1px 7px;border-radius:999px;font-size:10px;font-weight:700;background:rgba(220,38,38,0.12);color:#dc2626;">NOT REMITTED</span>`
+          ? `<span class="badge badge--red" style="margin-left:6px;">NOT REMITTED</span>`
           : '';
         return `
         <tr>

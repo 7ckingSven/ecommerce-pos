@@ -597,29 +597,53 @@
 
       <!-- ─── Deliveries ───────────────────────── -->
       <div class="card" style="margin-top:16px;">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:14px 1rem 0;">
+        <div class="deliv-card-head">
           <h3 class="card-title" style="margin:0;">Deliveries</h3>
-          <div style="display:flex;gap:6px;flex-wrap:wrap;">
-            <button id="deliveriesTabTodayBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('today')">Out for Deliveries</button>
-            <button id="deliveriesTabDeliveredBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('delivered')">Delivered Today</button>
-            <button id="deliveriesTabScheduledBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('scheduled')">Scheduled for Retry</button>
-            <button id="deliveriesTabFailedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('failed')">Failed Attempts Today</button>
-            <button id="deliveriesTabReturnedBtn" class="btn btn-cancel" style="font-size:12px;padding:5px 12px;" onclick="switchDeliveriesTab('returned')">Returned/Failed Today</button>
+          <div class="deliv-tabs">
+            <button id="deliveriesTabTodayBtn" class="deliv-tab active" onclick="switchDeliveriesTab('today')">Out for Deliveries</button>
+            <button id="deliveriesTabDeliveredBtn" class="deliv-tab" onclick="switchDeliveriesTab('delivered')">Delivered Today</button>
+            <button id="deliveriesTabScheduledBtn" class="deliv-tab" onclick="switchDeliveriesTab('scheduled')">Scheduled for Retry</button>
+            <button id="deliveriesTabFailedBtn" class="deliv-tab" onclick="switchDeliveriesTab('failed')">Failed Attempts Today</button>
+            <button id="deliveriesTabReturnedBtn" class="deliv-tab" onclick="switchDeliveriesTab('returned')">Returned/Failed Today</button>
           </div>
         </div>
-        <div id="deliveriesCountsStrip" style="margin:10px 1rem 0;padding:10px 12px;background:var(--surface-2);border:1px solid var(--border);border-radius:8px;font-size:13px;display:flex;gap:1.5rem;flex-wrap:wrap;">
-          <span>Total Deliveries Today: <strong id="deliveriesCountTotal">0</strong></span>
-          <span style="color:#16a34a;">Completed/Remitted: <strong id="deliveriesCountCompleted">0</strong></span>
-          <span style="color:#d97706;">Failed Attempts: <strong id="deliveriesCountFailed">0</strong></span>
-          <span style="color:#dc2626;">Returned/Failed: <strong id="deliveriesCountReturned">0</strong></span>
-          <span style="color:#dc2626;">Not Remitted (past 5pm): <strong id="deliveriesCountNotRemitted">0</strong></span>
+        <div id="deliveriesCountsStrip" class="deliv-stats">
+          <div class="deliv-stat">
+            <span class="deliv-stat-label">Total Today</span>
+            <span class="deliv-stat-value" id="deliveriesCountTotal">0</span>
+          </div>
+          <div class="deliv-stat deliv-stat--green">
+            <span class="deliv-stat-label">Completed / Remitted</span>
+            <span class="deliv-stat-value" id="deliveriesCountCompleted">0</span>
+          </div>
+          <div class="deliv-stat deliv-stat--yellow">
+            <span class="deliv-stat-label">Failed Attempts</span>
+            <span class="deliv-stat-value" id="deliveriesCountFailed">0</span>
+          </div>
+          <div class="deliv-stat deliv-stat--red">
+            <span class="deliv-stat-label">Returned / Failed</span>
+            <span class="deliv-stat-value" id="deliveriesCountReturned">0</span>
+          </div>
+          <div class="deliv-stat deliv-stat--red">
+            <span class="deliv-stat-label">Not Remitted (5pm)</span>
+            <span class="deliv-stat-value" id="deliveriesCountNotRemitted">0</span>
+          </div>
         </div>
-        <div id="remittanceSummaryStrip" style="margin:10px 1rem 0;padding:10px 12px;background:rgba(22,163,74,0.08);border:1px solid rgba(22,163,74,0.2);border-radius:8px;font-size:13px;font-weight:600;color:#16a34a;display:flex;gap:1.5rem;flex-wrap:wrap;">
-          <span>Expected Today: <span id="remitExpectedTotal">₱0.00</span> <span id="remitExpectedCount" style="font-weight:400;color:var(--text-muted);"></span></span>
-          <span>Remitted So Far: <span id="remitActualTotal">₱0.00</span> <span id="remitActualCount" style="font-weight:400;color:var(--text-muted);"></span></span>
-          <span>Remaining: <span id="remitRemainingTotal">₱0.00</span></span>
+        <div id="remittanceSummaryStrip" class="deliv-remit-strip">
+          <div class="deliv-remit-item">
+            <span class="deliv-remit-label">Expected Today</span>
+            <span class="deliv-remit-value"><span id="remitExpectedTotal">₱0.00</span><small id="remitExpectedCount"></small></span>
+          </div>
+          <div class="deliv-remit-item">
+            <span class="deliv-remit-label">Remitted So Far</span>
+            <span class="deliv-remit-value"><span id="remitActualTotal">₱0.00</span><small id="remitActualCount"></small></span>
+          </div>
+          <div class="deliv-remit-item">
+            <span class="deliv-remit-label">Remaining</span>
+            <span class="deliv-remit-value"><span id="remitRemainingTotal">₱0.00</span></span>
+          </div>
         </div>
-        <div style="margin:4px 1rem 0;font-size:11px;color:var(--text-muted);">
+        <div class="deliv-note">
           Total Deliveries Today = Out for Deliveries + Delivered Today. Completed/Remitted = Delivered Today. Failed Attempts = a Not-Delivered click recorded today, rescheduled to retry (not yet final). Returned/Failed = 3rd attempt failed. Full order history for any date is still in the Orders table's status filter above.
         </div>
 
@@ -629,12 +653,12 @@
              advance) — the separate "To Dispatch" staging tab was removed
              Oct 26 2026, so this is now the Deliveries card's first tab. -->
         <div id="deliveriesTodayPanel" style="padding:1rem;">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;flex-wrap:wrap;gap:8px;">
+          <div class="deliv-panel-toolbar">
             <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow. Remittance reopens at 6:00 AM.</span>
             <div style="display:flex;gap:8px;">
-              <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="bulkRemitSelectedOrders()" title="Complete every selected order, trusting each order's computed total — no amount typing needed">Bulk Remit Selected</button>
-              <button class="btn btn-cancel" style="font-size:12px;padding:6px 14px;" onclick="bulkNotDeliveredSelectedOrders()">Bulk Not Delivered Selected</button>
-              <button class="btn btn-outline-green" style="font-size:12px;padding:6px 14px;" onclick="closeRemittanceNow()" title="Close today's remittance early — flags every still-pending delivery as Not Remitted right now instead of waiting for the 5pm auto-flag">Close Remittance</button>
+              <button class="btn btn-solid-green" onclick="bulkRemitSelectedOrders()" title="Complete every selected order, trusting each order's computed total — no amount typing needed">Bulk Remit Selected</button>
+              <button class="btn btn-cancel" onclick="bulkNotDeliveredSelectedOrders()">Bulk Not Delivered Selected</button>
+              <button class="btn btn-outline-green" onclick="closeRemittanceNow()" title="Close today's remittance early — flags every still-pending delivery as Not Remitted right now instead of waiting for the 5pm auto-flag">Close Remittance</button>
             </div>
           </div>
           <div class="table-wrap">
