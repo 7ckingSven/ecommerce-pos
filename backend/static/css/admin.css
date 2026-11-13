@@ -609,6 +609,30 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   outline: none;
 }
 .search-input::placeholder { color: var(--text-muted); opacity: 0.85; }
+
+/* Clear ("x") button inside a search bar — unstyled before this (native
+   button chrome) and, with no default display:none, visible even with an
+   empty input; each input's own oninput only toggled it reactively after
+   the first keystroke. Hidden by default now, toggled the same way, and
+   colored off theme variables so it reads correctly in dark and light mode. */
+.search-clear-btn {
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  padding: 0 10px;
+  margin: 0;
+  cursor: pointer;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1;
+  flex-shrink: 0;
+  align-self: stretch;
+  border-radius: 999px;
+  transition: color var(--transition), background var(--transition);
+}
+.search-clear-btn:hover { color: var(--text); background: var(--hover); }
 .filter-select {
   border: 1.5px solid var(--border);
   background: var(--card-bg);
