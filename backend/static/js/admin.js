@@ -1520,11 +1520,11 @@ async function openPriceHistoryModal(productId, productName) {
         </div>
         <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
       </div>
-      <div id="priceHistoryBody" style="max-height:60vh;overflow-y:auto;">
+      <div id="priceHistoryBody" style="max-height:75vh;overflow-y:auto;">
         <p style="text-align:center;color:var(--text-muted);padding:1.5rem 0;">Loading…</p>
       </div>
     </div>
-  `, '780px', false);
+  `, '1100px', false);
 
   try {
     const qs  = productId ? `?product_id=${encodeURIComponent(productId)}` : '';
@@ -1577,16 +1577,16 @@ function renderPriceHistoryRows(rows, showProductCol) {
   }
 
   wrap.innerHTML = `
-    <table style="width:100%;border-collapse:collapse;font-size:13.5px;">
+    <table style="width:100%;border-collapse:collapse;font-size:15px;">
       <thead>
         <tr style="text-align:left;color:var(--text-muted);border-bottom:1px solid var(--border);">
-          <th style="padding:6px 8px;">Date</th>
-          ${showProductCol ? '<th style="padding:6px 8px;">Product</th>' : ''}
-          <th style="padding:6px 8px;">Type</th>
-          <th style="padding:6px 8px;text-align:right;">Old</th>
-          <th style="padding:6px 8px;text-align:right;">New</th>
-          <th style="padding:6px 8px;text-align:right;">Change</th>
-          <th style="padding:6px 8px;">Changed By</th>
+          <th style="padding:10px 12px;">Date</th>
+          ${showProductCol ? '<th style="padding:10px 12px;">Product</th>' : ''}
+          <th style="padding:10px 12px;">Type</th>
+          <th style="padding:10px 12px;text-align:right;">Old</th>
+          <th style="padding:10px 12px;text-align:right;">New</th>
+          <th style="padding:10px 12px;text-align:right;">Change</th>
+          <th style="padding:10px 12px;">Changed By</th>
         </tr>
       </thead>
       <tbody>
@@ -1599,13 +1599,13 @@ function renderPriceHistoryRows(rows, showProductCol) {
           const typeBadgeColor = r._type === 'Base Price' ? '#3b82f6' : '#16a34a';
           return `
             <tr style="border-bottom:1px solid var(--border);">
-              <td style="padding:7px 8px;white-space:nowrap;">${movementDateStr(r.created_at)}</td>
-              ${showProductCol ? `<td style="padding:7px 8px;">${r.product_name || '—'}</td>` : ''}
-              <td style="padding:7px 8px;"><span style="font-size:11px;font-weight:600;color:${typeBadgeColor};background:${typeBadgeColor}1a;border-radius:4px;padding:2px 6px;white-space:nowrap;">${r._type}</span></td>
-              <td style="padding:7px 8px;text-align:right;color:var(--text-muted);text-decoration:line-through;">${peso(oldP)}</td>
-              <td style="padding:7px 8px;text-align:right;font-weight:600;">${peso(newP)}</td>
-              <td style="padding:7px 8px;text-align:right;font-weight:700;color:${deltaColor};">${deltaStr}</td>
-              <td style="padding:7px 8px;">${r.changed_by_name || '—'}${r.changed_by_role ? `<br><span style="font-size:11.5px;color:var(--text-muted);text-transform:capitalize;">${r.changed_by_role}</span>` : ''}</td>
+              <td style="padding:10px 12px;white-space:nowrap;">${movementDateStr(r.created_at)}</td>
+              ${showProductCol ? `<td style="padding:10px 12px;">${r.product_name || '—'}</td>` : ''}
+              <td style="padding:10px 12px;"><span style="font-size:12.5px;font-weight:600;color:${typeBadgeColor};background:${typeBadgeColor}1a;border-radius:4px;padding:3px 8px;white-space:nowrap;">${r._type}</span></td>
+              <td style="padding:10px 12px;text-align:right;color:var(--text-muted);text-decoration:line-through;">${peso(oldP)}</td>
+              <td style="padding:10px 12px;text-align:right;font-weight:600;">${peso(newP)}</td>
+              <td style="padding:10px 12px;text-align:right;font-weight:700;color:${deltaColor};">${deltaStr}</td>
+              <td style="padding:10px 12px;">${r.changed_by_name || '—'}${r.changed_by_role ? `<br><span style="font-size:12.5px;color:var(--text-muted);text-transform:capitalize;">${r.changed_by_role}</span>` : ''}</td>
             </tr>`;
         }).join('')}
       </tbody>
