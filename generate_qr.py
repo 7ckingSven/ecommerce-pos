@@ -4,7 +4,7 @@ from PIL import Image
 # APK download URL — now hosted on Flask backend for faster, more reliable downloads
 # Change this to your deployed domain in production (e.g., https://yourdomain.com/download-apk)
 # Change the URL "https://drive.google.com/uc?export=download&id= " 
-url = "https://drive.google.com/uc?export=download&id=1yhbj2QoczKN3oV9B6AYSLBIAKSdTzDu0"
+url = "https://drive.google.com/uc?export=download&id=1jFZP0wAziiYq5lD5Cju3R8dCiTouehev"
 # url = "https://ecommerce-pos-8rsf.onrender.com/download-apk"
 
 # Create QR code with green branding

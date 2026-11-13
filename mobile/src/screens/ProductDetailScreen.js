@@ -352,15 +352,18 @@ export default function ProductDetailScreen({ route, navigation }) {
               ? <View style={styles.tag}><Text style={styles.tagText}>{product.brand}</Text></View>
               : null
             }
-            {(() => {
-              const bs = (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL);
-              const branchName = bs?.branch?.branch_name;
-              return branchName ? (
-                <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
+            {/* Bug fix (Nov 13 2026): this used to re-derive the branch by
+                scanning branch_stock for the FIRST branch with qualifying
+                stock, ignoring branchId entirely — so this tag could show
+                e.g. Fiel Collince even when the Triple E card was the one
+                tapped (same anti-pattern already fixed in HomeScreen.js's
+                tap handlers). branchName (computed above from branchId) is
+                the branch that was actually shown/tapped, so reuse it. */}
+            {branchName ? (
+              <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
                 <Text style={styles.tagText}>{branchName}</Text>
-                </View>
-              ) : null;
-            })()}
+              </View>
+            ) : null}
           {hasDiscount && (
               <View style={styles.discountTag}>
                 <Feather name="tag" size={10} color={COLORS.white} style={{ marginRight: 3 }}/>
