@@ -8182,16 +8182,22 @@ function _poSplitRowByVariant(btn) {
   combos.forEach(combo => {
     const variantLabel = Object.entries(combo).map(([k, v]) => `${k}: ${v}`).join(', ');
     const newRow = document.createElement('div');
-    newRow.style.cssText = 'display:grid;grid-template-columns:1fr 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
+    newRow.className = 'po-item-row';
+    newRow.style.cssText = 'display:grid;grid-template-columns:1fr 110px 40px;gap:14px;align-items:start;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;';
     newRow.dataset.variantOptions = JSON.stringify(combo);
     newRow.innerHTML = `
-      <div style="display:flex;flex-direction:column;gap:2px;min-width:0;">
+      <div style="display:flex;flex-direction:column;gap:4px;min-width:0;">
         <input type="hidden" class="po-product" value="${productId}">
-        <span style="font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${productName}</span>
-        <span style="font-size:11px;color:var(--g-400);">${variantLabel}</span>
+        <span style="font-size:14px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${productName}</span>
+        <span style="font-size:12px;color:var(--g-400);">${variantLabel}</span>
       </div>
-      <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()"/>
-      <button type="button" onclick="this.parentElement.remove();updatePOTotal();" title="Remove this item" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
+      <div style="display:flex;flex-direction:column;gap:5px;">
+        <label style="font-size:11px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;color:var(--text-muted);">Qty</label>
+        <input type="number" class="form-input po-qty" min="1" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()" style="font-size:14px;padding:8px 10px;"/>
+      </div>
+      <button type="button" class="btn-icon btn-icon--red" onclick="removePOItemRow(this)" title="Remove this item" style="align-self:start;margin-top:22px;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+      </button>
     `;
     frag.appendChild(newRow);
   });
@@ -8200,15 +8206,26 @@ function _poSplitRowByVariant(btn) {
 }
 window._poSplitRowByVariant = _poSplitRowByVariant;
 
+// Shared removal handler for both row shapes below (the normal product row
+// and the one-row-per-variant rows _poSplitRowByVariant creates) — looks up
+// the row by class instead of relying on DOM nesting depth, so the button
+// itself is free to sit inside its own little alignment wrapper.
+function removePOItemRow(btn) {
+  btn.closest('.po-item-row')?.remove();
+  updatePOTotal();
+}
+window.removePOItemRow = removePOItemRow;
+
 function addPOItemRow() {
   const wrap = document.getElementById('poItemsWrap');
   const idx  = wrap.children.length;
   const row  = document.createElement('div');
   // Unit Cost column removed (Oct 26 2026 adviser follow-up) — cost is now
   // entered per item at Receive & Distribute time instead of at creation.
-  row.style.cssText = 'display:grid;grid-template-columns:1fr 100px 32px;gap:8px;margin-bottom:8px;align-items:center;';
+  row.className = 'po-item-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1fr 110px 40px;gap:14px;align-items:start;background:var(--surface-2);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:12px;';
   row.innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:4px;">
+    <div style="display:flex;flex-direction:column;gap:8px;">
       <select class="form-input form-select po-product" onchange="updatePORowStock(this);updatePOTotal();loadPORowVariants(this);_poFillSupplier(this);">
         <option value="">Select product</option>
         ${allProducts.map(p => {
@@ -8219,20 +8236,25 @@ function addPOItemRow() {
           return `<option value="${p.product_id}" data-stock="${totalStock}" data-bs='${JSON.stringify(bs)}' data-groups='${JSON.stringify(p.option_groups||[])}'>${p.product_name}</option>`;
         }).join('')}
       </select>
-      <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
-      <span class="po-stock-info" style="font-size:12px;padding-left:4px;"></span>
-      <div style="display:flex;gap:4px;">
-        <select class="form-input form-select po-branch-for" style="font-size:12px;padding:5px 7px;flex:1;"
+      <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:6px;"></div>
+      <span class="po-stock-info" style="font-size:12.5px;padding-left:2px;"></span>
+      <div style="display:flex;gap:8px;">
+        <select class="form-input form-select po-branch-for" style="font-size:13px;padding:7px 10px;flex:1;"
           title="Which branch this item is for — pre-fills that branch's full amount at Receive & Distribute time, the same way an Approved Request's branch does. Leave on Both Branches to split manually when receiving.">
           <option value="">📦 Both Branches</option>
           ${(allBranches || []).map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('')}
         </select>
-        <input type="text" class="form-input po-supplier" placeholder="Supplier" style="font-size:12px;padding:5px 7px;flex:1;"
+        <input type="text" class="form-input po-supplier" placeholder="Supplier" style="font-size:13px;padding:7px 10px;flex:1;"
           title="Auto-filled from this product's very first Add Stock entry — edit if this PO is going to a different supplier."/>
       </div>
     </div>
-    <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()"/>
-    <button type="button" onclick="this.parentElement.remove();updatePOTotal();" title="Remove this item" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
+    <div style="display:flex;flex-direction:column;gap:5px;">
+      <label style="font-size:11px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;color:var(--text-muted);">Qty</label>
+      <input type="number" class="form-input po-qty" min="1" placeholder="0" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()" style="font-size:14px;padding:8px 10px;"/>
+    </div>
+    <button type="button" class="btn-icon btn-icon--red" onclick="removePOItemRow(this)" title="Remove this item" style="align-self:start;margin-top:22px;">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/></svg>
+    </button>
   `;
   wrap.appendChild(row);
 }
