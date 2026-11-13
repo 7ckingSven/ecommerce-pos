@@ -327,7 +327,7 @@
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
             <button class="btn" onclick="openStaffTransferModal()" style="display:inline-flex;align-items:center;gap:6px;background:#3b82f6;color:#fff;border-color:#3b82f6;font-size:12px;padding:8px 12px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="17 1 21 5 17 9"/><path d="M3 11V9a4 4 0 0 1 4-4h14"/><polyline points="7 23 3 19 7 15"/><path d="M21 13v2a4 4 0 0 1-4 4H3"/></svg>
-              Transfer Stock
+              Request Transfer Stock
             </button>
             <select class="filter-select" id="staffStockLevelFilter" onchange="filterStaffInventoryType(this.value)" style="font-size:12px;">
               <option value="">All Stock Levels</option>
@@ -398,13 +398,17 @@
       </div>
 
       <!-- ─── Branch Stock Transfers ─── Staff-initiated cross-branch
-           transfers. Outgoing = requests this branch filed (cancellable
-           while pending). Incoming = requests from other branches sent TO
-           this branch — this is where Approve/Reject actually moves stock,
-           since the destination branch is the one that confirms receipt. -->
+           transfers. Incoming = stock coming INTO this branch; Outgoing =
+           stock leaving FROM this branch — that direction never changes.
+           What changed (Nov 13 2026 rework): the requester is now the
+           RECEIVER, not the sender, so Incoming rows are this branch's
+           OWN requests (cancellable while pending, nothing to approve —
+           you filed it), and Outgoing rows are other branches asking for
+           THIS branch's stock, which only this branch can Approve/Reject,
+           since it's the one whose stock would actually leave. -->
       <div class="card" style="margin-top:1rem;">
         <div class="card-header">
-          <h3 class="card-title">Incoming Transfers <span style="font-size:12px;color:var(--text-muted);font-weight:500;">— from other branches, needs your action</span></h3>
+          <h3 class="card-title">Incoming Transfers <span style="font-size:12px;color:var(--text-muted);font-weight:500;">— requests you filed to receive stock</span></h3>
         </div>
         <div class="table-wrap">
           <table class="data-table">
@@ -418,7 +422,7 @@
 
       <div class="card" style="margin-top:1rem;">
         <div class="card-header">
-          <h3 class="card-title">Outgoing Transfers <span style="font-size:12px;color:var(--text-muted);font-weight:500;">— requests you filed to send stock out</span></h3>
+          <h3 class="card-title">Outgoing Transfers <span style="font-size:12px;color:var(--text-muted);font-weight:500;">— from other branches, needs your action</span></h3>
         </div>
         <div class="table-wrap">
           <table class="data-table">
@@ -431,44 +435,46 @@
       </div>
     </section>
 
-    <!-- ─── Staff Transfer Stock Modal ───────────────────────
-         Mirrors Admin's transferModal, except "From Branch" is fixed to
-         this staff's own branch (read-only text, not a selectable field —
-         a staff account can only initiate a transfer OUT of its own
-         branch) and submitting files a pending request instead of moving
-         stock immediately; the destination branch approves/rejects it
-         from their own Incoming Transfers table above.
+    <!-- ─── Staff Request Transfer Stock Modal ───────────────────────
+         A staff account requests stock be sent to its OWN branch — "To
+         Branch" is fixed to this staff's own branch (read-only text, not
+         a selectable field — a staff account can only request stock come
+         IN to its own branch) and submitting files a pending request
+         instead of moving stock immediately; the SOURCE branch (picked
+         in "From Branch") approves/rejects it from their own Outgoing
+         Transfers table above, since releasing their own stock needs
+         their consent, not the requester's.
 
-         Multi-product: "To Branch" is one shared destination for the
-         whole submission, but any number of product rows (each with its
-         own product/variant/qty) can be added via "+ Add Product" —
-         mirrors the Stock Request modal's multi-item pattern. The
-         backend has no batch concept for transfers (each product is
-         approved/rejected independently by the destination branch), so
-         submitting N rows simply fires N separate transfer requests. -->
+         Multi-product: "From Branch" is one shared source for the whole
+         submission, but any number of product rows (each with its own
+         product/variant/qty) can be added via "+ Add Product" — mirrors
+         the Stock Request modal's multi-item pattern. The backend has no
+         batch concept for transfers (each product is approved/rejected
+         independently by the source branch), so submitting N rows simply
+         fires N separate transfer requests. -->
     <div class="modal-overlay" id="staffTransferModalOverlay"></div>
     <div class="modal" id="staffTransferModal" style="max-width:640px;">
       <div class="modal-header">
-        <h3 class="modal-title">Transfer Stock to Another Branch</h3>
+        <h3 class="modal-title">Request Stock Transfer From Another Branch</h3>
         <button class="modal-close" onclick="closeModalWithConfirm('staffTransferModal', closeStaffTransferModal)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:18px;height:18px;"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
       <div class="modal-body">
         <p style="font-size:12.5px;color:var(--text-muted);margin-bottom:12px;">
-          This sends a request to the destination branch — stock only moves once their staff approves it.
+          This sends a request to the source branch — stock only moves to you once their staff approves releasing it.
         </p>
         <form id="staffTransferForm" onsubmit="submitStaffTransfer(event)">
           <div class="form-row-2">
             <div class="form-group">
-              <label class="form-label">From Branch</label>
-              <input type="text" id="staffTransferFromLabel" class="form-input" readonly/>
-            </div>
-            <div class="form-group">
-              <label class="form-label">To Branch <span class="req">*</span></label>
-              <select id="staffTransferTo" class="form-input form-select" required>
+              <label class="form-label">From Branch <span class="req">*</span></label>
+              <select id="staffTransferFrom" class="form-input form-select" required>
                 <option value="">Select branch</option>
               </select>
+            </div>
+            <div class="form-group">
+              <label class="form-label">To Branch (You)</label>
+              <input type="text" id="staffTransferToLabel" class="form-input" readonly/>
             </div>
           </div>
 

@@ -3373,24 +3373,26 @@ window.requestStockForSelected = requestStockForSelected;
 
 // ─── Staff-initiated Branch Stock Transfer (new, adviser follow-up) ─────
 // Unlike Admin's instant Transfer Stock, a staff-filed transfer is a
-// request: "From Branch" is locked to this staff's own branch, and
-// submitting does NOT move any stock — it only does so once the
-// destination branch's own staff approves it (see loadStockTransfers /
-// approveStockTransfer below). Reuses the same product-autocomplete
-// helper already built for the Stock Request modal (reqProductAcHTML /
-// buildReqProductAutocomplete), since both just need a simple searchable
-// product picker.
+// request: "To Branch" is locked to this staff's own branch (the branch
+// requesting — and receiving — the stock), "From Branch" is the other
+// branch being asked to give it up, and submitting does NOT move any
+// stock — it only does so once the SOURCE branch's own staff approves it
+// (see loadStockTransfers / approveStockTransfer below), since they're
+// the one whose stock is actually leaving. Reuses the same
+// product-autocomplete helper already built for the Stock Request modal
+// (reqProductAcHTML / buildReqProductAutocomplete), since both just need
+// a simple searchable product picker.
 
 async function openStaffTransferModal() {
   if (!invProducts.length) { invalidateSection('inventory'); await loadInventory(); }
   if (!allBranches.length) await loadBranches();
 
-  const fromLabel = document.getElementById('staffTransferFromLabel');
-  if (fromLabel) fromLabel.value = staffBranchName || '(your branch)';
+  const toLabel = document.getElementById('staffTransferToLabel');
+  if (toLabel) toLabel.value = staffBranchName || '(your branch)';
 
-  const toEl = document.getElementById('staffTransferTo');
-  if (toEl) {
-    toEl.innerHTML = '<option value="">Select branch</option>' +
+  const fromEl = document.getElementById('staffTransferFrom');
+  if (fromEl) {
+    fromEl.innerHTML = '<option value="">Select branch</option>' +
       allBranches.filter(b => b.branch_id !== staffBranchId)
         .map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
   }
@@ -3403,7 +3405,11 @@ async function openStaffTransferModal() {
   _setStaffTransferBtn(false);
   document.getElementById('staffTransferItems')?.addEventListener('input',  _staffTransferUpdateBtn);
   document.getElementById('staffTransferItems')?.addEventListener('change', _staffTransferUpdateBtn);
-  document.getElementById('staffTransferTo')?.addEventListener('change', _staffTransferUpdateBtn);
+  document.getElementById('staffTransferFrom')?.addEventListener('change', () => {
+    // Current Stock (per row) reflects the source branch, which just changed.
+    document.querySelectorAll('#staffTransferItems > div').forEach(row => _xferUpdateRowStock(row.id));
+    _staffTransferUpdateBtn();
+  });
   document.getElementById('staffTransferModalOverlay')?.classList.add('open');
   document.getElementById('staffTransferModal')?.classList.add('open');
   captureModalSnapshot('staffTransferModal');
@@ -3452,7 +3458,7 @@ function addStaffTransferItemRow() {
         <input type="number" class="form-input xfer-qty" min="1" required placeholder="e.g. 20" oninput="this.value=this.value.replace(/[^0-9]/g,'')"/>
       </div>
       <div class="form-group" style="margin:0;">
-        <label class="form-label" style="font-size:12px;">Current Stock <span style="font-size:11px;color:var(--text-muted);">(this branch)</span></label>
+        <label class="form-label" style="font-size:12px;">Current Stock <span style="font-size:11px;color:var(--text-muted);">(source branch)</span></label>
         <input type="text" class="form-input xfer-current-stock" disabled placeholder="Select product first"/>
       </div>
     </div>
@@ -3473,21 +3479,24 @@ window.addStaffTransferItemRow = addStaffTransferItemRow;
 
 // Same per-variant Current Stock fix as the Request Stock modal (Nov 12
 // 2026) — Transfer Stock had no Current Stock field at all before, so a
-// staff member transferring a specific variant had no way to see how much
-// of THAT variant was actually on hand at their branch before typing a
-// quantity. Scoped to staffBranchId (the "From" branch — transfers always
-// originate from the staff member's own branch).
+// staff member had no way to see how much of a specific variant was
+// actually on hand before typing a quantity. Scoped to whichever branch
+// is picked in the "From Branch" select — requests now originate FROM
+// the other branch and land IN the staff member's own branch (Nov 13
+// 2026 rework: the requester is the receiver, not the sender), so the
+// stock being checked lives at the source branch, not staffBranchId.
 function _xferUpdateRowStock(rowId) {
   const row     = document.getElementById(rowId);
   const stockEl = row?.querySelector('.xfer-current-stock');
   if (!row || !stockEl) return;
   const product = row._xferProduct;
-  if (!product) { stockEl.value = ''; return; }
+  const fromBranchId = document.getElementById('staffTransferFrom')?.value;
+  if (!product || !fromBranchId) { stockEl.value = ''; return; }
   const opts = {};
   row.querySelectorAll('.xfer-variant-opt').forEach(sel => {
     if (sel.value) opts[sel.dataset.label] = sel.value;
   });
-  const stock = _reqVariantStock(product, staffBranchId, opts);
+  const stock = _reqVariantStock(product, fromBranchId, opts);
   stockEl.value = `${stock} units`;
 }
 window._xferUpdateRowStock = _xferUpdateRowStock;
@@ -3522,8 +3531,8 @@ function _setStaffTransferBtn(forceEnabled) {
 }
 
 function _staffTransferAllValid() {
-  const toId = document.getElementById('staffTransferTo')?.value;
-  if (!toId) return false;
+  const fromId = document.getElementById('staffTransferFrom')?.value;
+  if (!fromId) return false;
   const rows = document.querySelectorAll('#staffTransferItems > div');
   if (!rows.length) return false;
   return Array.from(rows).every(row => {
@@ -3537,7 +3546,7 @@ function _staffTransferUpdateBtn() { _setStaffTransferBtn(); }
 
 async function submitStaffTransfer(e) {
   e.preventDefault();
-  const toId = document.getElementById('staffTransferTo').value;
+  const fromId = document.getElementById('staffTransferFrom').value;
   const rows = document.querySelectorAll('#staffTransferItems > div');
 
   if (!rows.length) {
@@ -3567,13 +3576,13 @@ async function submitStaffTransfer(e) {
     });
   });
 
-  if (hasError || !items.length || !toId) {
-    showToast('Please fill in all product rows and select a destination branch.', 'error');
+  if (hasError || !items.length || !fromId) {
+    showToast('Please fill in all product rows and select a source branch.', 'error');
     return;
   }
 
   const confirmed = await showConfirmDialog('Send Transfer Request',
-    `Request to send ${items.length} product${items.length !== 1 ? 's' : ''} to the selected branch? They'll need to approve each item before stock moves.`);
+    `Request ${items.length} product${items.length !== 1 ? 's' : ''} from the selected branch? They'll need to approve each item before stock moves to you.`);
   if (!confirmed) return;
 
   const btn = e.submitter || document.getElementById('staffTransferSubmitBtn');
@@ -3584,7 +3593,7 @@ async function submitStaffTransfer(e) {
       const res = await fetch('/api/staff/stock-transfers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          product_id: item.product_id, to_branch_id: toId,
+          product_id: item.product_id, from_branch_id: fromId,
           quantity: item.quantity, variant_options: item.variant_options,
         }),
       });
@@ -3632,6 +3641,13 @@ async function loadStockTransfers() {
     _staffTransfersCache = {};
     transfers.forEach(t => { _staffTransfersCache[t.transfer_id] = t; });
 
+    // Incoming = stock coming INTO my branch (to_branch_id === mine).
+    // Outgoing = stock leaving FROM my branch (from_branch_id === mine).
+    // That direction hasn't changed — but who files vs. who approves has
+    // (Nov 13 2026 rework): the requester is now the RECEIVER, so an
+    // Incoming row is MY OWN request, cancellable by me while pending;
+    // an Outgoing row is someone ELSE requesting MY branch's stock, which
+    // only I (the source) can approve or reject.
     const incoming = transfers.filter(t => t.to_branch_id === staffBranchId);
     const outgoing = transfers.filter(t => t.from_branch_id === staffBranchId);
 
@@ -3644,8 +3660,7 @@ async function loadStockTransfers() {
           <td>${t.requested_at ? new Date(t.requested_at).toLocaleString() : '—'}</td>
           <td>${_transferStatusBadge(t)}</td>
           <td>${t.status === 'pending'
-            ? `<button class="btn btn-sm btn-primary" onclick="approveStockTransfer('${t.transfer_id}')" style="margin-right:4px;">Approve</button>
-               <button class="btn btn-sm btn-cancel" onclick="rejectStockTransfer('${t.transfer_id}')">Reject</button>`
+            ? `<button class="btn btn-sm btn-cancel" onclick="cancelStockTransfer('${t.transfer_id}')">Cancel</button>`
             : '—'}</td>
         </tr>
       `).join('') : '<tr><td colspan="6" class="table-empty">No incoming transfers</td></tr>';
@@ -3660,7 +3675,8 @@ async function loadStockTransfers() {
           <td>${t.requested_at ? new Date(t.requested_at).toLocaleString() : '—'}</td>
           <td>${_transferStatusBadge(t)}</td>
           <td>${t.status === 'pending'
-            ? `<button class="btn btn-sm btn-cancel" onclick="cancelStockTransfer('${t.transfer_id}')">Cancel</button>`
+            ? `<button class="btn btn-sm btn-primary" onclick="approveStockTransfer('${t.transfer_id}')" style="margin-right:4px;">Approve</button>
+               <button class="btn btn-sm btn-cancel" onclick="rejectStockTransfer('${t.transfer_id}')">Reject</button>`
             : '—'}</td>
         </tr>
       `).join('') : '<tr><td colspan="6" class="table-empty">No outgoing transfers</td></tr>';
@@ -3683,10 +3699,10 @@ function _transferDetailLine(t) {
 async function approveStockTransfer(transferId) {
   const t      = _staffTransfersCache[transferId];
   const detail = _transferDetailLine(t);
-  const from   = t?.from_branch?.branch_name || 'the source branch';
+  const to     = t?.to_branch?.branch_name || 'the requesting branch';
   const confirmed = await showConfirmDialog('Approve Transfer',
-    `Confirm you received ${detail || 'this stock'} from <strong>${from}</strong>? ` +
-    `It will be added to your branch and deducted from ${from} now. This can't be undone.`);
+    `Send ${detail || 'this stock'} to <strong>${to}</strong>? ` +
+    `It will be deducted from your branch and added to ${to} now. This can't be undone.`);
   if (!confirmed) return;
   try {
     const res  = await fetch(`/api/staff/stock-transfers/${transferId}/approve`, { method: 'POST' });
@@ -3705,9 +3721,9 @@ window.approveStockTransfer = approveStockTransfer;
 async function rejectStockTransfer(transferId) {
   const t      = _staffTransfersCache[transferId];
   const detail = _transferDetailLine(t);
-  const from   = t?.from_branch?.branch_name || 'the source branch';
+  const to     = t?.to_branch?.branch_name || 'the requesting branch';
   const confirmed = await showConfirmDialog('Reject Transfer',
-    `Reject the request for ${detail || 'this item'} from <strong>${from}</strong>? No stock will move.`);
+    `Reject the request for ${detail || 'this item'} from <strong>${to}</strong>? No stock will move.`);
   if (!confirmed) return;
   try {
     const res  = await fetch(`/api/staff/stock-transfers/${transferId}/reject`, {
