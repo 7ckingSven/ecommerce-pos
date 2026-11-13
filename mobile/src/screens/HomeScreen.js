@@ -494,9 +494,13 @@ export default function HomeScreen({ navigation }) {
     saveSearchTerm(prod.product_name);
     Keyboard.dismiss();
     // Keep searchFocused=true so back button returns to search
+    // Same branch-mismatch fix as handleAddToCart/handleBuyNow above —
+    // suggestions are drawn from the same branch-expanded allProducts list
+    // (see loadProducts), so prod._branchId is this exact suggestion
+    // card's own branch and must win over re-scanning branch_stock.
     navigation.navigate('ProductDetail', {
       product: prod,
-      branchId:       (prod.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null,
+      branchId:       prod._branchId || (prod.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null,
       fromSearch:     true,
     });
   }
@@ -515,7 +519,18 @@ export default function HomeScreen({ navigation }) {
 
   // ─── Add to Cart (requires login) ────────────────────
   async function handleAddToCart(product) {
-    const branchId = (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
+    // Bug fix (Nov 13 2026): this used to ignore product._branchId and just
+    // scan branch_stock for the FIRST branch with qualifying stock — fine
+    // for a product only stocked at one branch, but silently wrong for one
+    // stocked at both, where Home shows a separate card per branch (see
+    // loadProducts' expansion below). Tapping "Add to Cart" on, say, the
+    // Triple E card could resolve to Fiel Collince instead, just because
+    // that branch happened to come first in branch_stock — the wrong
+    // branch then rode all the way through ProductDetail, Checkout, and
+    // the placed order. _branchId (stamped on this exact card) is the
+    // branch that was actually shown/tapped, so it must win first — same
+    // fallback order handleProductPress below already uses correctly.
+    const branchId = product._branchId || (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
     // Pass the full product (not just its id) + branchId so LoginScreen can
     // resume straight into ProductDetail for this exact product after login.
     const ok = await requireLogin('addToCart', { product, branchId });
@@ -526,7 +541,9 @@ export default function HomeScreen({ navigation }) {
 
   // ─── Buy Now (requires login → ProductDetail) ────────
   async function handleBuyNow(product) {
-    const branchId = (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
+    // Same branch-mismatch fix as handleAddToCart above — prefer the exact
+    // card's own branch over re-scanning branch_stock from scratch.
+    const branchId = product._branchId || (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
     const ok = await requireLogin('buyNow', { product, branchId });
     if (!ok) return;
     // Navigate to ProductDetail — customer selects options then buys

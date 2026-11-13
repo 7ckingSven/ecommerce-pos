@@ -3040,7 +3040,7 @@ function classifyMovement(i) {
   const note   = (i.note || '').toLowerCase();
   const qty    = Number(i.quantity_added);
   const before = Number(i.quantity_before);
-  if (note.includes('[cancelled]'))   return { key: 'cancelled',    ...MOVEMENT_TYPES.cancelled };
+  if (note.startsWith('cancelled'))   return { key: 'cancelled',    ...MOVEMENT_TYPES.cancelled };
   if (note.startsWith('return'))      return { key: 'returned',     ...MOVEMENT_TYPES.returned };
   if (note.startsWith('po received')) return { key: 'po_receiving', ...MOVEMENT_TYPES.po_receiving };
   if (note.includes('sale') || note.includes('order #') || note.includes('sold'))
