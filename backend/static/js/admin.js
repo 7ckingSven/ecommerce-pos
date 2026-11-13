@@ -8124,8 +8124,15 @@ function addPOItemRow() {
       </select>
       <div class="po-variant-wrap" style="display:none;flex-wrap:wrap;gap:4px;"></div>
       <span class="po-stock-info" style="font-size:12px;padding-left:4px;"></span>
-      <input type="text" class="form-input po-supplier" placeholder="Supplier" style="font-size:12px;padding:5px 7px;"
-        title="Auto-filled from this product's very first Add Stock entry — edit if this PO is going to a different supplier."/>
+      <div style="display:flex;gap:4px;">
+        <select class="form-input form-select po-branch-for" style="font-size:12px;padding:5px 7px;flex:1;"
+          title="Which branch this item is for — pre-fills that branch's full amount at Receive & Distribute time, the same way an Approved Request's branch does. Leave on Both Branches to split manually when receiving.">
+          <option value="">📦 Both Branches</option>
+          ${(allBranches || []).map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('')}
+        </select>
+        <input type="text" class="form-input po-supplier" placeholder="Supplier" style="font-size:12px;padding:5px 7px;flex:1;"
+          title="Auto-filled from this product's very first Add Stock entry — edit if this PO is going to a different supplier."/>
+      </div>
     </div>
     <input type="number" class="form-input po-qty" min="1" placeholder="Qty" oninput="this.value=this.value.replace(/[^0-9]/g,'');updatePOTotal()"/>
     <button type="button" onclick="this.parentElement.remove();updatePOTotal();" title="Remove this item" style="background:#ef4444;color:#fff;border:none;border-radius:6px;cursor:pointer;width:32px;height:32px;font-size:16px;">&times;</button>
@@ -8186,6 +8193,13 @@ function fillPORowForProduct(product, variantRow, requestId, qty, branchLock) {
   // quickCreatePOForBranchProduct) so "Triple E: 248 | Fiel Collince: 256"
   // doesn't show for a PO that only concerns one of those branches.
   if (branchLock) row.dataset.branchLock = branchLock;
+  // Reflect the branch lock in the new branch-for selector too, so the
+  // admin can see (and, if needed, change) which branch will be auto-filled
+  // at Receive & Distribute time — same mechanism as an Approved Request.
+  if (branchLock) {
+    const branchForSel = row.querySelector('.po-branch-for');
+    if (branchForSel) branchForSel.value = branchLock;
+  }
 
   const sel = row.querySelector('.po-product');
   if (sel) {
@@ -8348,7 +8362,8 @@ function useSelectedApprovedRequests() {
     const variantRow = (r.variant_options && Object.keys(r.variant_options).length)
       ? { options: r.variant_options }
       : null;
-    fillPORowForProduct(p, variantRow, r.request_id, r.quantity_needed);
+    const reqBranchId = r.branch_id || r.branch?.branch_id || null;
+    fillPORowForProduct(p, variantRow, r.request_id, r.quantity_needed, reqBranchId);
   });
   updatePOTotal();
 }
@@ -8742,10 +8757,14 @@ async function submitCreatePO() {
   // and no variant_options at all — this is exactly the undifferentiated
   // "291 units" the adviser flagged in the Ordered PO modal, since there's
   // nothing recorded afterward to break that number back down by variant.
-  // Block it here instead: a product with option_groups must either have
-  // every group pinned to a specific choice, or be run through "Split qty
-  // per variant" first.
-  const unsplitProducts = [];
+  // Nov 13 2026: this used to hard-block submission until every group was
+  // pinned or the row was run through "Split qty per variant." Same call as
+  // Add Stock/Transfer/Adjust that day — sometimes one combined PO line
+  // really is what's wanted (the supplier ships a mixed case, say), so this
+  // is now a confirm-dialog warning instead of a block: the admin sees
+  // exactly which products/qty would stay undifferentiated and can still
+  // say yes, or cancel and use "Split qty per variant" first.
+  const unsplitWarnings = [];
   for (const row of rows) {
     const productSel = row.querySelector('select.po-product');
     const productId  = productSel?.value || row.querySelector('input[type="hidden"].po-product')?.value;
@@ -8768,20 +8787,24 @@ async function submitCreatePO() {
       if (productSel && !row.dataset.variantOptions) {
         const groupsForRow = JSON.parse(productSel.options[productSel.selectedIndex]?.dataset?.groups || '[]');
         if (groupsForRow.length && Object.keys(variantOpts).length < groupsForRow.length) {
-          unsplitProducts.push(productSel.options[productSel.selectedIndex]?.textContent || 'This product');
-          continue; // don't add it to items — the toast below blocks submission anyway
+          const pName = productSel.options[productSel.selectedIndex]?.textContent || 'This product';
+          unsplitWarnings.push(`⚠ ${pName}: ${qty} unit(s) will be recorded as ONE combined line, not broken down by variant.`);
         }
       }
 
       // If this row came from a staff stock request (via fillPORowForProduct),
-      // or was stamped directly by the bulk "Generate PO for Selected"
-      // critical-stock action (row.dataset.requestingBranchId), carry that
-      // branch along as requesting_branch_id so the Receive & Distribute
-      // step later can pre-fill that branch's amount.
+      // was stamped directly by the bulk "Generate PO for Selected"
+      // critical-stock action (row.dataset.requestingBranchId), or the admin
+      // picked a specific branch in this row's own "po-branch-for" selector,
+      // carry that branch along as requesting_branch_id so the Receive &
+      // Distribute step later can pre-fill that branch's amount instead of
+      // defaulting every branch to 0.
       const sourceReq = row.dataset.requestId
         ? (allStockRequests || []).find(r => r.request_id === row.dataset.requestId)
         : null;
-      const requestingBranchId = row.dataset.requestingBranchId
+      const manualBranchSel = row.querySelector('.po-branch-for')?.value || '';
+      const requestingBranchId = manualBranchSel
+        || row.dataset.requestingBranchId
         || (sourceReq ? (sourceReq.branch_id || sourceReq.branch?.branch_id || null) : null);
       // Supplier brought back into Create PO (Nov 12 2026) — auto-filled by
       // _poFillSupplier but still editable per row, since different
@@ -8791,13 +8814,11 @@ async function submitCreatePO() {
       if (row.dataset.requestId) stockRequestIds.push(row.dataset.requestId);
     }
   }
-  if (unsplitProducts.length) {
-    showToast(`${unsplitProducts.join(', ')} ${unsplitProducts.length > 1 ? 'have' : 'has'} variants — pin down each option or use "Split qty per variant" before creating this PO, so quantities stay trackable per variant instead of one combined number.`, 'error');
-    return;
-  }
   if (!items.length) { showToast('Add at least one item.', 'error'); return; }
 
-  const confirmed = await showConfirmDialog('Confirm Create PO', `Create this purchase order with ${items.length} item(s)? Cost and supplier will be entered when it's received.`);
+  let confirmMsg = `Create this purchase order with ${items.length} item(s)? Cost and supplier will be entered when it's received.`;
+  if (unsplitWarnings.length) confirmMsg += '\n\n' + unsplitWarnings.join('\n');
+  const confirmed = await showConfirmDialog('Confirm Create PO', confirmMsg);
   if (!confirmed) return;
 
   // Validation passed — now (and only now) enter the loading state, so a
@@ -8840,36 +8861,46 @@ function showPOReceipt(po, items, total) {
   const dateStr = now.toLocaleDateString('en-PH', { year:'numeric', month:'long', day:'numeric' });
   const timeStr = now.toLocaleTimeString('en-PH', { hour:'2-digit', minute:'2-digit' });
 
-  // Unit Cost/Subtotal columns are only meaningful once the PO has actually
-  // been received (cost is now entered at Receive time, not creation) —
-  // `total === null` signals the draft-creation call, which has no cost
-  // data at all yet.
+  // Still used for the "Cost & supplier are recorded per item when this PO
+  // is received" note below — `total === null` signals the draft-creation
+  // call, before anything has a cost yet.
   const hasCost = total !== null && total !== undefined;
-  // Variant now sits inline right after the product name, same size as the
-  // name itself (final-defense follow-up, Nov 12 2026 — it used to be a
-  // separate, much smaller line underneath, easy to miss/misread on a
-  // thermal printout). branch_note stays as a smaller sub-line.
+
+  // Nov 13 2026: matched up to the on-screen PO Detail modal's table
+  // instead of its own slimmer layout — same 5 columns (Product / Qty per
+  // variant / Received / Unit Cost / Subtotal) with the same real values
+  // (received_quantity, unit_cost), not just Product/Qty. Variant moved
+  // back to its own sub-line under the product name (not inline) to match
+  // that view too; branch_note stays as an even smaller sub-line under it.
   // Grouped by supplier (Nov 12 2026, part 2) — same "Supplier: X" header
   // row + its items underneath pattern the on-screen PO Detail view
   // already uses (_poGroupItemsBySupplier), instead of repeating the
   // supplier name on every single line.
   const itemsHtml = _poGroupItemsBySupplier(items).map(g => `
     <tr>
-      <td colspan="${hasCost ? 4 : 2}" style="background:var(--surface-2,var(--surface));font-weight:700;padding:4px 6px;border-bottom:1px solid var(--border);">
+      <td colspan="5" style="background:var(--surface-2,var(--surface));font-weight:700;padding:4px 6px;border-bottom:1px solid var(--border);">
         Supplier: ${g.supplier || '<span style="color:var(--text-muted);font-weight:500;">Not yet assigned</span>'}
       </td>
     </tr>
-    ${g.rows.map(({ item: i }) => `
+    ${g.rows.map(({ item: i }) => {
+      const orderedQty  = Number(i.quantity);
+      const receivedQty = Number(i.received_quantity || 0);
+      const complete    = receivedQty >= orderedQty;
+      const recvColor   = complete ? 'var(--g-400)' : receivedQty > 0 ? '#eab308' : 'var(--text-muted)';
+      const lineHasCost = receivedQty > 0;
+      return `
     <tr>
       <td style="padding:4px 6px;border-bottom:1px solid var(--border);">
-        ${i.product?.product_name || i.product_name || '—'}${i.variant_options ? ` — ${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}` : ''}
+        ${i.product?.product_name || i.product_name || '—'}
+        ${i.variant_options ? `<div style="font-size:9px;color:var(--text-muted);">${Object.entries(i.variant_options).map(([k,v]) => k+': '+v).join(', ')}</div>` : ''}
         ${i.branch_note ? `<div style="font-size:9px;color:var(--text-muted);">→ ${i.branch_note}</div>` : ''}
       </td>
-      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${i.quantity}</td>
-      ${hasCost ? `
-      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right;">${peso(i.unit_cost)}</td>
-      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${peso(Number(i.unit_cost) * Number(i.quantity))}</td>` : ''}
-    </tr>`).join('')}`).join('');
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;">${orderedQty}</td>
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:center;color:${recvColor};font-weight:600;">${receivedQty} / ${orderedQty}</td>
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right;">${lineHasCost ? peso(i.unit_cost) : '—'}</td>
+      <td style="padding:4px 6px;border-bottom:1px solid var(--border);text-align:right;font-weight:600;">${lineHasCost ? peso(Number(i.unit_cost) * receivedQty) : '—'}</td>
+    </tr>`;
+    }).join('')}`).join('');
 
   showModal(`
     <div style="padding:1rem;" id="poReceiptContent">
@@ -8895,19 +8926,19 @@ function showPOReceipt(po, items, total) {
         <thead>
           <tr style="background:var(--surface-2);">
             <th style="padding:5px;text-align:left;font-size:10px;">Product</th>
-            <th style="padding:5px;text-align:center;font-size:10px;">Qty</th>
-            ${hasCost ? `<th style="padding:5px;text-align:right;font-size:10px;">Unit Cost</th>
-            <th style="padding:5px;text-align:right;font-size:10px;">Subtotal</th>` : ''}
+            <th style="padding:5px;text-align:center;font-size:10px;">Qty (per variant)</th>
+            <th style="padding:5px;text-align:center;font-size:10px;">Received</th>
+            <th style="padding:5px;text-align:right;font-size:10px;">Unit Cost</th>
+            <th style="padding:5px;text-align:right;font-size:10px;">Subtotal</th>
           </tr>
         </thead>
         <tbody>${itemsHtml}</tbody>
-        ${hasCost ? `
         <tfoot>
           <tr style="background:var(--surface-2);">
-            <td colspan="3" style="padding:5px;text-align:right;font-weight:700;">TOTAL</td>
-            <td style="padding:5px;text-align:right;font-weight:700;color:var(--g-400);font-size:13px;">${peso(total)}</td>
+            <td colspan="4" style="padding:5px;text-align:right;font-weight:700;">TOTAL (received so far)</td>
+            <td style="padding:5px;text-align:right;font-weight:700;color:var(--g-400);font-size:13px;">${total > 0 ? peso(total) : '—'}</td>
           </tr>
-        </tfoot>` : ''}
+        </tfoot>
       </table>
 
       <!-- Footer -->
@@ -8947,9 +8978,10 @@ function printPOReceipt() {
           @page { size: 80mm auto; margin: 0; }
           * { box-sizing: border-box; }
           html, body { width: 80mm; }
-          body { font-family: 'Courier New', monospace; font-size: 10px; padding: 2mm; margin: 0 auto; color: #000; }
-          table { width: 100%; border-collapse: collapse; }
-          th, td { padding: 2px; border-bottom: 1px dashed #000; font-size: 10px; word-break: break-word; }
+          body { font-family: 'Courier New', monospace; font-size: 9px; padding: 2mm; margin: 0 auto; color: #000; }
+          table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+          th, td { padding: 2px 1px; border-bottom: 1px dashed #000; font-size: 9px; word-break: break-word; }
+          th:first-child, td:first-child { width: 34%; }
           div[style*="grid-template-columns"] { display: block !important; }
           div[style*="grid-template-columns"] > div { margin-bottom: 2px; }
           @media print { button { display: none; } }
