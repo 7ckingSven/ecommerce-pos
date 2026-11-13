@@ -329,7 +329,8 @@
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;color:var(--text-muted);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="productSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterProducts(this.value)" oninput="if(!this.value) filterProducts('')"/>
+          <input type="text" id="productSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterProducts(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterProducts('')"/>
+          <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterProducts('');this.previousElementSibling.focus();">✕</button>
           <button class="search-btn" onclick="filterProducts(document.getElementById('productSearchInput').value)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             Search
@@ -440,7 +441,8 @@
             </select>
             <div class="search-wrap" style="max-width:260px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" id="branchStockSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterBranchStock(this.value)" oninput="if(!this.value) filterBranchStock('')" style="font-size:12px;"/>
+              <input type="text" id="branchStockSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterBranchStock(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterBranchStock('')" style="font-size:12px;"/>
+              <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterBranchStock('');this.previousElementSibling.focus();">✕</button>
               <button class="search-btn" onclick="filterBranchStock(document.getElementById('branchStockSearchInput').value)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 Search
@@ -462,7 +464,8 @@
           <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
             <div class="search-wrap" style="max-width:320px;">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-              <input type="text" id="invHistorySearchInput" class="search-input" placeholder="Search..." onkeydown="if(event.key==='Enter') filterInventorySearch(this.value)" oninput="if(!this.value) filterInventorySearch('')" style="font-size:12px;"/>
+              <input type="text" id="invHistorySearchInput" class="search-input" placeholder="Search..." onkeydown="if(event.key==='Enter') filterInventorySearch(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterInventorySearch('')" style="font-size:12px;"/>
+              <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterInventorySearch('');this.previousElementSibling.focus();">✕</button>
               <button class="search-btn" onclick="filterInventorySearch(document.getElementById('invHistorySearchInput').value)">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
                 Search
@@ -529,7 +532,8 @@
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="orderSearchInput" class="search-input" placeholder="Search orders..." onkeydown="if(event.key==='Enter') filterOrderSearch(this.value)" oninput="if(!this.value) filterOrderSearch('')"/>
+          <input type="text" id="orderSearchInput" class="search-input" placeholder="Search orders..." onkeydown="if(event.key==='Enter') filterOrderSearch(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterOrderSearch('')"/>
+          <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterOrderSearch('');this.previousElementSibling.focus();">✕</button>
           <button class="search-btn" onclick="filterOrderSearch(document.getElementById('orderSearchInput').value)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             Search
@@ -997,7 +1001,8 @@
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="discountSearchInput" class="search-input" placeholder="Search discounts..." onkeydown="if(event.key==='Enter') filterDiscounts(this.value)" oninput="if(!this.value) filterDiscounts('')"/>
+          <input type="text" id="discountSearchInput" class="search-input" placeholder="Search discounts..." onkeydown="if(event.key==='Enter') filterDiscounts(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterDiscounts('')"/>
+          <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterDiscounts('');this.previousElementSibling.focus();">✕</button>
           <button class="search-btn" onclick="filterDiscounts(document.getElementById('discountSearchInput').value)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             Search
@@ -1064,7 +1069,8 @@
       <div class="section-toolbar">
         <div class="search-wrap">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="userSearchInput" class="search-input" placeholder="Search users..." onkeydown="if(event.key==='Enter') filterUserSearch(this.value)" oninput="if(!this.value) filterUserSearch('')"/>
+          <input type="text" id="userSearchInput" class="search-input" placeholder="Search users..." onkeydown="if(event.key==='Enter') filterUserSearch(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterUserSearch('')"/>
+          <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterUserSearch('');this.previousElementSibling.focus();">✕</button>
           <button class="search-btn" onclick="filterUserSearch(document.getElementById('userSearchInput').value)">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
             Search
@@ -1441,7 +1447,8 @@
       <div style="display:flex;gap:8px;margin-bottom:1rem;">
         <div class="search-wrap" style="flex:1;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="assignSearchInput" class="search-input" placeholder="Search products..." oninput="filterAssignProducts(this.value)"/>
+          <input type="text" id="assignSearchInput" class="search-input" placeholder="Search products..." oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; filterAssignProducts(this.value)"/>
+          <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterAssignProducts('');this.previousElementSibling.focus();">✕</button>
         </div>
         <select id="assignBranchFilter" class="filter-select" style="width:160px;" onchange="filterAssignProducts(document.getElementById('assignSearchInput').value)">
           <option value="">All Branches</option>

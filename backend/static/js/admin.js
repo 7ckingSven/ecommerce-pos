@@ -773,6 +773,38 @@ async function dashGoToDiscounts() {
   showSection('discounts', _navEl('discounts'));
 }
 
+// Overview's Top Selling / Least Selling cards → Sales Report's own Top/Least
+// Selling Products tables, same "jump + flash" pattern as
+// dashGoToBranchInventory/dashGoToBranchSales above. The two tables are
+// built from different sources (Overview ranks by product.total_sold,
+// an all-time running total; Sales Report recomputes from order_item rows
+// under its own date/branch filter, which defaults to all-time on load —
+// see loadSales()), so they usually agree, but there's no shared product_id
+// to match on in the Sales Report table (it's keyed by product name only).
+// Matching by name is the best available link; if the Sales Report's
+// filter has since been narrowed (or the product has no sales in that
+// window) the row just won't be found, and this quietly no-ops rather than
+// scrolling to the wrong thing.
+async function dashGoToSalesProduct(productName) {
+  await _ensureSectionLoaded('sales');
+  showSection('sales', _navEl('sales'));
+  setTimeout(() => {
+    const bodies = [document.getElementById('topProductsBody'), document.getElementById('leastProductsBody')];
+    for (const body of bodies) {
+      if (!body) continue;
+      const row = Array.from(body.querySelectorAll('tr'))
+        .find(tr => tr.children[0]?.textContent.trim() === productName);
+      if (row) {
+        row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        row.style.transition = 'background-color 0.3s ease';
+        row.style.backgroundColor = 'rgba(22,163,74,0.18)';
+        setTimeout(() => { row.style.backgroundColor = ''; }, 1600);
+        return;
+      }
+    }
+  }, 150);
+}
+
 async function dashGoToPurchaseOrders() {
   await _ensureSectionLoaded('purchase_orders');
   showSection('purchase_orders', _navEl('purchase_orders'));
@@ -785,6 +817,7 @@ window.dashGoToOrders          = dashGoToOrders;
 window.dashGoToSales           = dashGoToSales;
 window.dashGoToDiscounts       = dashGoToDiscounts;
 window.dashGoToPurchaseOrders  = dashGoToPurchaseOrders;
+window.dashGoToSalesProduct    = dashGoToSalesProduct;
 
 // Keyboard activation for the clickable dashboard cards (role="button"
 // tabindex="0" divs don't fire click on Enter/Space the way a native
@@ -1177,10 +1210,12 @@ async function loadOverview() {
     renderStockAlert(alertProducts);
 
     // ── Top Selling Products table ──────────────────────
+    // Each row jumps to Sales Report and highlights the matching product
+    // there (dashGoToSalesProduct, matched by name — see its own comment).
     const sorted = [...activeProducts].sort((a, b) => Number(b.total_sold || 0) - Number(a.total_sold || 0));
     document.getElementById('topSellingBody').innerHTML = sorted.slice(0, 5).length
       ? sorted.slice(0, 5).map(p => `
-          <tr>
+          <tr onclick="dashGoToSalesProduct('${p.product_name.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="View in Sales Report">
             <td><strong>${p.product_name}</strong></td>
             <td>${p.category || '—'}</td>
             <td><span style="font-weight:700;color:var(--g-400);">${Number(p.total_sold || 0).toLocaleString()} sold</span></td>
@@ -1193,7 +1228,7 @@ async function loadOverview() {
       .sort((a, b) => Number(a.total_sold || 0) - Number(b.total_sold || 0));
     document.getElementById('leastSellingBody').innerHTML = leastSorted.slice(0, 5).length
       ? leastSorted.slice(0, 5).map(p => `
-          <tr>
+          <tr onclick="dashGoToSalesProduct('${p.product_name.replace(/'/g, "\\'")}')" style="cursor:pointer;" title="View in Sales Report">
             <td><strong>${p.product_name}</strong></td>
             <td>${p.category || '—'}</td>
             <td><span style="font-weight:700;color:${Number(p.total_sold || 0) === 0 ? '#ef4444' : '#f59e0b'};">${Number(p.total_sold || 0).toLocaleString()} sold</span></td>

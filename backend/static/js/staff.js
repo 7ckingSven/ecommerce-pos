@@ -4054,7 +4054,7 @@ function renderStaffOrders(orders) {
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
-          <td>${o.order_item?.length || 0} item(s)</td>
+          <td>${(o.order_item || []).reduce((sum, i) => sum + (Number(i.qty) || 0), 0)} item(s)</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${(() => {
@@ -4283,7 +4283,7 @@ function renderStaffOrders(orders) {
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td>${badge(o.order_type)}${offlineSyncTag(o)}</td>
-          <td>${o.order_item?.length || 0} item(s)</td>
+          <td>${(o.order_item || []).reduce((sum, i) => sum + (Number(i.qty) || 0), 0)} item(s)</td>
           <td>${peso(o.total)}</td>
           <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
           <td>${(() => {
