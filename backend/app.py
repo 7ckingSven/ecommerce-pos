@@ -283,7 +283,7 @@ LOGIN_SESSION_ACTIVE_WINDOW_SECONDS = 15 * 60  # no ping within this window => t
 # login opportunistically prunes anything past the retention window, but
 # throttled in-memory to at most once a day process-wide, so a burst of
 # logins doesn't turn into a burst of DELETEs.
-LOGIN_SESSIONS_RETENTION_DAYS          = 90
+LOGIN_SESSIONS_RETENTION_DAYS          = 30
 _LOGIN_SESSIONS_PRUNE_LAST_RUN         = 0
 _LOGIN_SESSIONS_PRUNE_INTERVAL_SECONDS = 24 * 60 * 60
 
