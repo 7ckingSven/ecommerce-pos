@@ -1862,7 +1862,7 @@
 
   <!-- Approved Stock Requests Picker Modal -->
   <div class="modal-overlay" id="approvedRequestsModalOverlay"></div>
-  <div class="modal" id="approvedRequestsModal" style="max-width:780px;">
+  <div class="modal" id="approvedRequestsModal" style="max-width:960px;">
     <div class="modal-header">
       <h3 class="modal-title">Approved Stock Requests</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('approvedRequestsModal', closeApprovedRequestsModal)">
@@ -1871,9 +1871,12 @@
     </div>
     <div class="modal-body">
       <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">Select one or more approved requests to pre-fill into a new PO. Unit price still needs to be entered manually.</p>
-      <label style="display:flex;align-items:center;gap:8px;padding:7px 9px;margin-bottom:6px;cursor:pointer;">
+      <label class="appr-req-row appr-req-head" style="cursor:pointer;">
         <input type="checkbox" id="approvedReqSelectAll" onchange="toggleSelectAllApprovedReq(this.checked)"/>
         <span style="font-size:13px;font-weight:600;">Select All</span>
+        <span class="appr-req-col-head">Qty</span>
+        <span class="appr-req-col-head">Branch</span>
+        <span class="appr-req-col-head">Requested By</span>
       </label>
       <div id="approvedRequestsList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;">
         <!-- rows injected by openApprovedRequestsModal() -->

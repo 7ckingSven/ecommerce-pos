@@ -746,6 +746,48 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 }
 .disc-row-ended { opacity: 0.55; }
 
+/* ─── Approved Stock Requests picker modal ─── */
+.appr-req-row {
+  display: grid;
+  grid-template-columns: 24px 1fr 70px 160px 190px;
+  gap: 14px;
+  align-items: center;
+  padding: 9px;
+}
+.appr-req-head {
+  border-radius: 8px;
+  margin-bottom: 6px;
+}
+.appr-req-col-head {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+label.appr-req-row:not(.appr-req-head) {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
+.appr-req-row input[type="checkbox"] { margin: 0; align-self: start; margin-top: 2px; }
+.appr-req-product { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+.appr-req-product strong { font-size: 13.5px; }
+.appr-req-variant {
+  display: inline-flex;
+  align-self: flex-start;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 1px 9px;
+}
+.appr-req-qty { font-size: 13.5px; font-weight: 600; }
+.appr-req-branch, .appr-req-reqby { font-size: 13px; color: var(--text-muted); }
+
 /* Product Image in table */
 .product-img-cell {
   width: 40px; height: 40px;

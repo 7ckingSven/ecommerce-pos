@@ -8426,7 +8426,7 @@ function ensureApprovedRequestsUI() {
   if (!document.getElementById('approvedRequestsModalOverlay')) {
     document.body.insertAdjacentHTML('beforeend', `
       <div class="modal-overlay" id="approvedRequestsModalOverlay" onclick="closeApprovedRequestsModal()"></div>
-      <div class="modal" id="approvedRequestsModal" style="max-width:720px;">
+      <div class="modal" id="approvedRequestsModal" style="max-width:960px;">
         <div class="modal-header">
           <h3 class="modal-title">Approved Stock Requests</h3>
           <button class="modal-close" onclick="closeApprovedRequestsModal()">
@@ -8435,9 +8435,12 @@ function ensureApprovedRequestsUI() {
         </div>
         <div class="modal-body">
           <p style="font-size:12px;color:var(--text-muted);margin-bottom:10px;">Select one or more approved requests to pre-fill into a new PO. Unit price still needs to be entered manually.</p>
-          <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;margin-bottom:6px;cursor:pointer;">
+          <label class="appr-req-row appr-req-head" style="cursor:pointer;">
             <input type="checkbox" id="approvedReqSelectAll" onchange="toggleSelectAllApprovedReq(this.checked)"/>
             <span style="font-size:12px;font-weight:600;">Select All</span>
+            <span class="appr-req-col-head">Qty</span>
+            <span class="appr-req-col-head">Branch</span>
+            <span class="appr-req-col-head">Requested By</span>
           </label>
           <div id="approvedRequestsList" style="max-height:320px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
           <div class="modal-footer">
@@ -8465,15 +8468,17 @@ function openApprovedRequestsModal() {
   const list = document.getElementById('approvedRequestsList');
   list.innerHTML = available.length
     ? available.map(r => `
-      <label style="display:flex;align-items:flex-start;gap:8px;padding:9px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
-        <input type="checkbox" class="approved-req-check" value="${r.request_id}" style="margin-top:2px;" onchange="updateApprovedReqBtn()"/>
-        <span style="flex:1;">
+      <label class="appr-req-row">
+        <input type="checkbox" class="approved-req-check" value="${r.request_id}" onchange="updateApprovedReqBtn()"/>
+        <span class="appr-req-product">
           <strong>${r.product?.product_name || '—'}</strong>
           ${r.variant_options && Object.keys(r.variant_options).length
-            ? '<div style="font-size:12px;color:var(--text-muted);">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(', ') + '</div>'
+            ? '<span class="appr-req-variant">' + Object.entries(r.variant_options).map(function(e){return e[0]+': '+e[1];}).join(' · ') + '</span>'
             : ''}
-          <div style="font-size:13px;color:var(--text-muted);">Qty: ${r.quantity_needed} · Branch: ${r.branch?.branch_name || '—'} · Requested by: ${r.staff ? r.staff.fname + ' ' + r.staff.lname : '—'}</div>
         </span>
+        <span class="appr-req-qty">${r.quantity_needed}</span>
+        <span class="appr-req-branch">${r.branch?.branch_name || '—'}</span>
+        <span class="appr-req-reqby">${r.staff ? r.staff.fname + ' ' + r.staff.lname : '—'}</span>
       </label>`).join('')
     : '<div class="table-empty" style="padding:1rem;">No approved requests waiting to be ordered.</div>';
   const selectAll = document.getElementById('approvedReqSelectAll');
