@@ -5919,7 +5919,7 @@ function renderSalesData(completed, allOrders) {
           backgroundColor:['rgba(22,163,74,0.7)','rgba(59,130,246,0.7)','rgba(234,179,8,0.7)'],
           borderWidth:2 }]
       },
-      options: { responsive:true, maintainAspectRatio:true,
+      options: { responsive:true, maintainAspectRatio:false,
         cutout: '70%',
         plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } } } }
     });
