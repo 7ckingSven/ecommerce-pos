@@ -2396,6 +2396,14 @@ function selectPayment(method, el) {
 let gcashPollTimer       = null;
 let gcashPaymentIntentId = null;
 let gcashConfirmed       = false;
+// Same fix applied to Cash checkout (Nov 12 2026, see processOrder()) but
+// never carried over to GCash — final-defense follow-up, Nov 14 2026.
+// Minted once, the moment payment is confirmed (pollGcashStatus), and
+// reused on every call to confirmGcashOrder() for THIS payment, including
+// a retry after a dropped response. Without this, a lost response + a
+// second tap of "Confirm Order" created a second real order and
+// double-deducted stock for a GCash payment that was only made once.
+let gcashCheckoutIdempotencyId = null;
 
 function computePosTotal() {
   const subtotal = orderItems.reduce((s, i) => s + i.price * i.quantity, 0);
@@ -2406,8 +2414,9 @@ function computePosTotal() {
 
 function resetGcashPayment() {
   if (gcashPollTimer) { clearInterval(gcashPollTimer); gcashPollTimer = null; }
-  gcashPaymentIntentId = null;
-  gcashConfirmed        = false;
+  gcashPaymentIntentId        = null;
+  gcashConfirmed              = false;
+  gcashCheckoutIdempotencyId  = null;
   document.getElementById('posGcashRef').value        = '';
   document.getElementById('posPaymentIntentId').value = '';
   const genBtn = document.getElementById('posGcashGenerateBtn');
@@ -2502,6 +2511,11 @@ async function pollGcashStatus(intentId) {
 
     if (data.status === 'succeeded') {
       gcashConfirmed = true;
+      // Minted once, right here, the moment the payment itself is confirmed
+      // — not inside confirmGcashOrder() — so every call to that function
+      // for this same payment (including a retry after a dropped response)
+      // reuses the same id instead of minting a fresh one each time.
+      if (!gcashCheckoutIdempotencyId) gcashCheckoutIdempotencyId = genOfflineId();
       if (gcashPollTimer) { clearInterval(gcashPollTimer); gcashPollTimer = null; }
       document.getElementById('posGcashRef').value = intentId;
       const inlineStatus = document.getElementById('posGcashInlineStatus');
@@ -2556,6 +2570,11 @@ async function confirmGcashOrder() {
   const discAmt  = subtotal * (discPct / 100);
   const total    = subtotal - discAmt;
 
+  // Should already be set by pollGcashStatus() the moment payment succeeded
+  // — this fallback only guards against it somehow being missing so this
+  // call never sends client_offline_id as null.
+  if (!gcashCheckoutIdempotencyId) gcashCheckoutIdempotencyId = genOfflineId();
+
   const orderPayload = {
     order_type:        'walk_in',
     quantity,
@@ -2570,11 +2589,12 @@ async function confirmGcashOrder() {
       price:            i.price,
       selected_options: i.selected_options || {},
     })),
-    customer_name:   document.getElementById('posCustomer').value.trim(),
-    discount_id:     discId,
-    discount_name:   discName,
-    discount_pct:    discPct || null,
-    discount_amount: discAmt || null,
+    customer_name:      document.getElementById('posCustomer').value.trim(),
+    discount_id:        discId,
+    discount_name:      discName,
+    discount_pct:       discPct || null,
+    discount_amount:    discAmt || null,
+    client_offline_id:  gcashCheckoutIdempotencyId,
   };
 
   // Snapshot for the receipt before clearOrder() wipes the cart.
@@ -3646,7 +3666,8 @@ async function submitStaffTransfer(e) {
   const btn = e.submitter || document.getElementById('staffTransferSubmitBtn');
   setButtonLoading(btn, true);
   try {
-    let allOk = true;
+    let allOk   = true;
+    let lastErr = '';
     for (const item of items) {
       const res = await fetch('/api/staff/stock-transfers', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3655,15 +3676,22 @@ async function submitStaffTransfer(e) {
           quantity: item.quantity, variant_options: item.variant_options,
         }),
       });
-      if (!res.ok) allOk = false;
+      if (!res.ok) {
+        allOk = false;
+        // Keep the first real error we see rather than discarding the body
+        // (final-defense follow-up, Nov 14 2026) — previously a partial
+        // failure only ever showed a generic "some failed", with no hint
+        // which item or why (e.g. not enough stock at the source branch).
+        if (!lastErr) { try { lastErr = (await res.json()).error || ''; } catch (_e) {} }
+      }
     }
     if (allOk) {
       showToast(`${items.length} transfer request${items.length !== 1 ? 's' : ''} sent!`);
       closeStaffTransferModal();
-      loadStockTransfers();
     } else {
-      showToast('Some transfer requests failed to submit. Please check.', 'error');
+      showToast(lastErr || 'Some transfer requests failed to submit. Please check.', 'error');
     }
+    loadStockTransfers();
   } catch (err) {
     showToast('Error sending transfer request.', 'error');
   } finally {
@@ -4481,11 +4509,24 @@ function applyStaffOrderFilters() {
 }
 window.filterStaffOrderType = filterStaffOrderType;
 
+// Order ids currently mid-update — guards against a fast double-click
+// firing two PUTs for the same order before the first one's response
+// comes back (final-defense follow-up, Nov 14 2026). The row's trigger
+// button has no handle passed into this function to disable directly, and
+// the backend's own "already processed" check isn't atomic, so two near-
+// simultaneous requests for a 'processing' transition could both pass it
+// and deduct stock twice. Keyed by order id (not a single global flag) so
+// updating one order never blocks acting on a different one.
+const _orderStatusUpdatesInFlight = new Set();
+
 async function updateOrderStatus(id, status) {
+  if (_orderStatusUpdatesInFlight.has(id)) return;
   // Fired from the single contextual trigger button in orderStatusActionHtml
   // (e.g. "Mark Out for Delivery") — no dropdown to snap back on cancel.
   const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
   if (!confirmed) return;
+  if (_orderStatusUpdatesInFlight.has(id)) return;
+  _orderStatusUpdatesInFlight.add(id);
   try {
     const res  = await fetch(`/api/staff/orders/${id}`, {
       method: 'PUT',
@@ -4504,6 +4545,7 @@ async function updateOrderStatus(id, status) {
     }
     else showToast(body.error || 'Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
+  finally { _orderStatusUpdatesInFlight.delete(id); }
 }
 
 // Pending → Processing manual batch action removed (team decision, Oct 26
@@ -5687,7 +5729,8 @@ async function submitRequest(e) {
     // treating each product/variant as an unrelated request. Harmless for a
     // single-item submission (a "batch" of one renders exactly as before).
     const batchId = genUUID();
-    let allOk = true;
+    let allOk   = true;
+    let lastErr = '';
     for (const item of items) {
       const res = await fetch('/api/staff/stock-requests', {
         method: 'POST',
@@ -5701,15 +5744,22 @@ async function submitRequest(e) {
           batch_id:        batchId,
         }),
       });
-      if (!res.ok) allOk = false;
+      if (!res.ok) {
+        allOk = false;
+        // Keep the first real error we see rather than discarding the body
+        // (final-defense follow-up, Nov 14 2026) — previously a partial
+        // failure only ever showed a generic "some failed", with no hint
+        // which item or why.
+        if (!lastErr) { try { lastErr = (await res.json()).error || ''; } catch (_e) {} }
+      }
     }
     if (allOk) {
       showToast(`${items.length} stock request${items.length !== 1 ? 's' : ''} submitted!`);
       closeRequestModal();
-      invalidateSection('requests'); loadRequests();
     } else {
-      showToast('Some requests failed to submit. Please check.', 'error');
+      showToast(lastErr || 'Some requests failed to submit. Please check.', 'error');
     }
+    invalidateSection('requests'); loadRequests();
   } catch (err) {
     showToast('Error submitting request.', 'error');
   } finally {
@@ -5977,6 +6027,14 @@ async function saveProfile() {
     const infoData = await infoRes.json();
     if (!infoRes.ok) { showToast(infoData.error || 'Failed to save profile.', 'error'); return; }
 
+    // Update the dirty-check baseline as soon as the info fields are
+    // actually saved, not after the password step too (final-defense
+    // follow-up, Nov 14 2026). Previously, if info saved but the password
+    // step below then failed (e.g. wrong current password), this never
+    // ran — so the form kept reporting itself "dirty" for info fields that
+    // were, in fact, already saved.
+    _profOrigInfo = { fname, mi, lname, username, email, phone_number: phone };
+
     if (changingPw) {
       const pwRes  = await fetch('/auth/profile', {
         method: 'PATCH', headers: {'Content-Type':'application/json'},
@@ -5987,7 +6045,6 @@ async function saveProfile() {
     }
 
     showToast(changingPw ? 'Profile and password updated!' : 'Profile updated successfully!');
-    _profOrigInfo = { fname, mi, lname, username, email, phone_number: phone };
     document.getElementById('profCurrentPw').value = '';
     document.getElementById('profNewPw').value     = '';
     document.getElementById('profConfirmPw').value = '';

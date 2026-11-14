@@ -2884,7 +2884,8 @@ async function confirmProductToggle() {
       closeProductToggleModal();
       invalidateSection('products'); loadProducts();
     } else {
-      showToast(isActive ? 'Failed to deactivate product.' : 'Failed to activate product.', 'error');
+      const body = await res.json().catch(() => ({}));
+      showToast(body.error || (isActive ? 'Failed to deactivate product.' : 'Failed to activate product.'), 'error');
     }
   } catch (e) { showToast('Error.', 'error'); }
   finally { setButtonLoading(btn, false); }
@@ -4114,16 +4115,26 @@ async function submitAddStock(e) {
     }
     const results = await Promise.all(requests);
     const allOk = results.every(res => res.ok);
+    let lastErr = '';
+    if (!allOk) {
+      const failed = results.find(res => !res.ok);
+      try { lastErr = (await failed.json()).error || ''; } catch (_e) {}
+    }
     if (allOk) {
       const msg = branchVal === 'both'
         ? `${items.length} product(s) added to both branches!`
         : `${items.length} product(s) added successfully!`;
       showToast(msg);
       closeAddStockModal();
-      invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
     } else {
-      showToast('Some items failed to add. Please check.', 'error');
+      // Refresh even on partial failure (final-defense follow-up, Nov 14
+      // 2026) — previously only refreshed on full success, leaving the
+      // modal open with no indication which item×branch combos already
+      // went through. An admin who assumed nothing saved and resubmitted
+      // would double-add stock for the rows that actually succeeded.
+      showToast(lastErr || 'Some items failed to add — check stock for the affected item(s).', 'error');
     }
+    invalidateSection('inventory'); invalidateSection('products'); loadInventory(); loadProducts();
   } catch (err) {
     showToast('Error adding stock.', 'error');
   } finally {
@@ -4605,11 +4616,22 @@ window.toggleAllTodayDeliverySelections = toggleAllTodayDeliverySelections;
 // Remit modal still requires (per the clarifying answer: "skip per-order
 // amount entry") — it trusts each order's server-computed grand total and
 // completes every eligible selected order in one request.
+// Simple single-flight locks (final-defense follow-up, Nov 14 2026) — none
+// of these three buttons have a handle passed in to disable directly, and
+// each is a one-shot store-wide/batch action with no natural id to key a
+// guard on, so a plain boolean per function is enough to stop a fast
+// double-click from firing the same batch twice.
+let _bulkRemitInFlight         = false;
+let _bulkNotDeliveredInFlight  = false;
+let _closeRemittanceInFlight   = false;
+
 async function bulkRemitSelectedOrders() {
+  if (_bulkRemitInFlight) return;
   const ids = Array.from(document.querySelectorAll('.delivery-today-select-cb:checked')).map(el => el.value);
   if (!ids.length) { showToast('Select at least one order to remit.', 'error'); return; }
   const confirmed = await showConfirmDialog('Confirm Bulk Remit', `Mark ${ids.length} order(s) as remitted/completed? Each order's full computed total will be used — no amount entry needed.`);
   if (!confirmed) return;
+  _bulkRemitInFlight = true;
   try {
     const res  = await fetch('/api/admin/orders/remit-bulk', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4623,14 +4645,17 @@ async function bulkRemitSelectedOrders() {
       showToast(body.error || 'Failed to bulk remit.', 'error');
     }
   } catch (e) { showToast('Error during bulk remit.', 'error'); }
+  finally { _bulkRemitInFlight = false; }
 }
 window.bulkRemitSelectedOrders = bulkRemitSelectedOrders;
 
 async function bulkNotDeliveredSelectedOrders() {
+  if (_bulkNotDeliveredInFlight) return;
   const ids = Array.from(document.querySelectorAll('.delivery-today-select-cb:checked')).map(el => el.value);
   if (!ids.length) { showToast('Select at least one order to mark not delivered.', 'error'); return; }
   const confirmed = await showConfirmDialog('Confirm Bulk Not Delivered', `Record a failed delivery attempt for ${ids.length} order(s)?`);
   if (!confirmed) return;
+  _bulkNotDeliveredInFlight = true;
   try {
     const res  = await fetch('/api/admin/orders/not-delivered-bulk', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4645,6 +4670,7 @@ async function bulkNotDeliveredSelectedOrders() {
       showToast(body.error || 'Failed to bulk-record not-delivered.', 'error');
     }
   } catch (e) { showToast('Error during bulk not-delivered.', 'error'); }
+  finally { _bulkNotDeliveredInFlight = false; }
 }
 window.bulkNotDeliveredSelectedOrders = bulkNotDeliveredSelectedOrders;
 
@@ -4655,8 +4681,10 @@ window.bulkNotDeliveredSelectedOrders = bulkNotDeliveredSelectedOrders;
 // remitted afterward, they just count toward tomorrow's totals per
 // _remittance_business_date.
 async function closeRemittanceNow() {
+  if (_closeRemittanceInFlight) return;
   const confirmed = await showConfirmDialog('Close Remittance', 'Flag every still-pending delivery (store-wide) as Not Remitted right now, instead of waiting for the 5pm auto-flag?');
   if (!confirmed) return;
+  _closeRemittanceInFlight = true;
   try {
     const res  = await fetch('/api/admin/orders/close-remittance', { method: 'POST' });
     const body = await res.json().catch(() => ({}));
@@ -4667,6 +4695,7 @@ async function closeRemittanceNow() {
       showToast(body.error || 'Failed to close remittance.', 'error');
     }
   } catch (e) { showToast('Error closing remittance.', 'error'); }
+  finally { _closeRemittanceInFlight = false; }
 }
 window.closeRemittanceNow = closeRemittanceNow;
 
@@ -4845,7 +4874,15 @@ function openRemitModal(orderId) {
   `, '520px', false);
 }
 
+// Guards submitRemitAmount/submitProcessReturn against a fast double-click
+// on "Complete Order"/"Confirm Return" firing two requests for the same
+// order before the first response lands (final-defense follow-up, Nov 14
+// 2026) — neither button has a handle passed in to disable directly.
+const _remitSubmitsInFlight  = new Set();
+const _returnSubmitsInFlight = new Set();
+
 async function submitRemitAmount(orderId, grandTotal) {
+  if (_remitSubmitsInFlight.has(orderId)) return;
   const input   = document.getElementById('remitAmountInput');
   const errorEl = document.getElementById('remitAmountError');
   const amount  = parseFloat(input ? input.value : NaN);
@@ -4861,6 +4898,7 @@ async function submitRemitAmount(orderId, grandTotal) {
     return;
   }
 
+  _remitSubmitsInFlight.add(orderId);
   try {
     const res = await fetch(`/api/admin/orders/${orderId}/delivered`, {
       method: 'POST',
@@ -4879,6 +4917,8 @@ async function submitRemitAmount(orderId, grandTotal) {
   } catch (e) {
     errorEl.textContent   = 'Error completing the order.';
     errorEl.style.display = 'block';
+  } finally {
+    _remitSubmitsInFlight.delete(orderId);
   }
 }
 
@@ -5316,6 +5356,7 @@ function openProcessReturn(order) {
 }
 
 async function submitProcessReturn(orderId) {
+  if (_returnSubmitsInFlight.has(orderId)) return;
   const rows = document.querySelectorAll('#returnItemsWrap [data-return-row]');
   const items = [];
   rows.forEach(row => {
@@ -5334,6 +5375,8 @@ async function submitProcessReturn(orderId) {
 
   const confirmed = await showConfirmDialog('Confirm Return', 'Process this return and restore stock for the entered items?');
   if (!confirmed) return;
+  if (_returnSubmitsInFlight.has(orderId)) return;
+  _returnSubmitsInFlight.add(orderId);
 
   try {
     const res = await fetch(`/api/admin/orders/${orderId}/return`, {
@@ -5351,14 +5394,30 @@ async function submitProcessReturn(orderId) {
     }
   } catch (e) {
     showToast('Error processing return.', 'error');
+  } finally {
+    _returnSubmitsInFlight.delete(orderId);
   }
 }
 
+// Order ids currently mid-update — guards against a fast double-click
+// firing two PUTs for the same order before the first one's response
+// comes back (final-defense follow-up, Nov 14 2026; same fix applied in
+// staff.js). The row's trigger button has no handle passed into this
+// function to disable directly, and the backend's own "already processed"
+// check isn't atomic, so two near-simultaneous requests for a 'processing'
+// transition could both pass it and deduct stock twice. Keyed by order id
+// (not a single global flag) so updating one order never blocks acting on
+// a different one.
+const _orderStatusUpdatesInFlight = new Set();
+
 async function updateOrderStatus(id, status) {
+  if (_orderStatusUpdatesInFlight.has(id)) return;
   // Fired from the single contextual trigger button in orderStatusActionHtml
   // (e.g. "Mark Out for Delivery") — no dropdown to snap back on cancel.
   const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
   if (!confirmed) return;
+  if (_orderStatusUpdatesInFlight.has(id)) return;
+  _orderStatusUpdatesInFlight.add(id);
   try {
     const res  = await fetch(`/api/admin/orders/${id}`, {
       method: 'PUT',
@@ -5369,6 +5428,7 @@ async function updateOrderStatus(id, status) {
     if (res.ok) { showToast('Order status updated!'); loadOrders(); }
     else showToast(body.error || 'Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
+  finally { _orderStatusUpdatesInFlight.delete(id); }
 }
 
 let adminOrderTypeFilter   = '';
@@ -8145,13 +8205,22 @@ async function submitReview(status) {
       })
     ));
     const allOk = results.every(res => res.ok);
+    let lastErr = '';
+    if (!allOk) {
+      const failed = results.find(res => !res.ok);
+      try { lastErr = (await failed.json()).error || ''; } catch (_e) {}
+    }
     if (allOk) {
       showToast(ids.length > 1 ? `${ids.length} requests ${status}!` : `Request ${status}!`);
       closeReviewRequestModal();
-      invalidateSection('purchase_orders'); loadPurchaseOrders();
     } else {
-      showToast('Some requests failed to update. Please check.', 'error');
+      // Refresh even on partial failure (final-defense follow-up, Nov 14
+      // 2026) — previously only refreshed on full success, leaving the
+      // modal open with stale "Approve/Reject Remaining (N)" counts that
+      // no longer matched which items were actually decided.
+      showToast(lastErr || 'Some requests failed to update. Please check.', 'error');
     }
+    invalidateSection('purchase_orders'); loadPurchaseOrders();
   } catch (e) { showToast('Error.', 'error'); }
   finally {
     setButtonLoading(clickedBtn, false);

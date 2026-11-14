@@ -5618,10 +5618,25 @@ def admin_update_user(user_id):
         updates = {}
         if 'status' in data: updates['status'] = data['status']
         if 'role'   in data: updates['role']   = data['role']
+        # The Edit Staff modal sends 'username' (and its dirty-check gates
+        # Save on it changing), but this route never used to read it, so an
+        # admin editing a username got a success toast with no actual DB
+        # change — final-defense follow-up, Nov 14 2026. Same uniqueness
+        # check as admin_add_user()/the self-service /auth/profile PATCH,
+        # just excluding this user's own row.
+        if 'username' in data:
+            new_username = (data['username'] or '').strip()
+            if new_username:
+                taken = supabase.table('user').select('user_id') \
+                    .eq('username', new_username).neq('user_id', user_id).execute()
+                if taken.data:
+                    return jsonify({'error': 'Username is already taken.'}), 409
+                updates['username'] = new_username
         supabase.table('user').update(updates).eq('user_id', user_id).execute()
 
         staff_updates = {}
         if 'fname'     in data: staff_updates['fname']        = data['fname']
+        if 'mi'        in data: staff_updates['mi']            = data['mi']
         if 'lname'     in data: staff_updates['lname']        = data['lname']
         if 'email'     in data: staff_updates['email']        = data['email']
         if 'phone'     in data: staff_updates['phone_number'] = data['phone']
