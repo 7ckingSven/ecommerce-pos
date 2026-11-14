@@ -761,7 +761,7 @@ function badge(text) {
     online: 'blue', walk_in: 'green', paid: 'green', failed: 'red',
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
   };
-  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text === 'not_remitted' ? 'Not Remitted' : text.replace(/_/g, ' ');
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned' : text === 'not_remitted' ? 'Not Remitted' : text.replace(/_/g, ' ');
   return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 

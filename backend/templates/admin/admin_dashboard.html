@@ -552,7 +552,7 @@
           <option value="not_remitted">Not Remitted</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
-          <option value="returned_failed">Returned / Failed</option>
+          <option value="returned_failed">Returned</option>
         </select>
         <select class="filter-select" id="adminOrderYearFilter" onchange="filterOrderYear(this.value)">
           <option value="">All Years</option>
@@ -605,7 +605,7 @@
             <button id="deliveriesTabDeliveredBtn" class="deliv-tab" onclick="switchDeliveriesTab('delivered')">Delivered Today</button>
             <button id="deliveriesTabScheduledBtn" class="deliv-tab" onclick="switchDeliveriesTab('scheduled')">Scheduled for Retry</button>
             <button id="deliveriesTabFailedBtn" class="deliv-tab" onclick="switchDeliveriesTab('failed')">Failed Attempts Today</button>
-            <button id="deliveriesTabReturnedBtn" class="deliv-tab" onclick="switchDeliveriesTab('returned')">Returned/Failed Today</button>
+            <button id="deliveriesTabReturnedBtn" class="deliv-tab" onclick="switchDeliveriesTab('returned')">Returned Today</button>
           </div>
         </div>
         <div id="deliveriesCountsStrip" class="deliv-stats">
@@ -622,7 +622,7 @@
             <span class="deliv-stat-value" id="deliveriesCountFailed">0</span>
           </div>
           <div class="deliv-stat deliv-stat--red">
-            <span class="deliv-stat-label">Returned / Failed</span>
+            <span class="deliv-stat-label">Returned</span>
             <span class="deliv-stat-value" id="deliveriesCountReturned">0</span>
           </div>
           <div class="deliv-stat deliv-stat--red">

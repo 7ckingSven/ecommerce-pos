@@ -981,7 +981,7 @@ function badge(text, type) {
     gcash: 'blue', walk_in_cash: 'green', cash_on_delivery: 'yellow',
     draft: 'gray', ordered: 'blue', partially_received: 'yellow', received: 'green',
   };
-  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned / Failed' : text === 'not_remitted' ? 'Not Remitted' : text.replace(/_/g, ' ');
+  const label = text === 'out_for_delivery' ? 'Out for Delivery' : text === 'returned_failed' ? 'Returned' : text === 'not_remitted' ? 'Not Remitted' : text.replace(/_/g, ' ');
   return `<span class="badge badge--${map[text] || 'gray'}">${label}</span>`;
 }
 
@@ -5084,7 +5084,7 @@ function viewOrderItems(order) {
 // action, which enforces the COD remittance-confirmation step. The row dropdown
 // still locks once an order reaches out_for_delivery (no 'next' option to offer).
 const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
-const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned' };
 
 // Orders list hierarchy — active orders (pending/processing/out for delivery)
 // always float above Completed/Cancelled, and within the same tier the
