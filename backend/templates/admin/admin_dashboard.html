@@ -773,7 +773,12 @@
       <div class="section-toolbar" style="margin-bottom:1rem;">
         <div class="search-wrap" style="max-width:240px;">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:16px;height:16px;flex-shrink:0;"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-          <input type="text" id="poNumberSearch" class="search-input" placeholder="Search PO # / request..." oninput="filterPOBySearch(this.value)" title="Look up one specific PO number or request note"/>
+          <input type="text" id="poNumberSearch" class="search-input" placeholder="Search PO # / request..." title="Look up one specific PO number or request note" onkeydown="if(event.key==='Enter') filterPOBySearch(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterPOBySearch('')"/>
+          <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterPOBySearch('');this.previousElementSibling.focus();">✕</button>
+          <button class="search-btn" onclick="filterPOBySearch(document.getElementById('poNumberSearch').value)">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            Search
+          </button>
         </div>
         <select class="filter-select" id="poStatusFilter" onchange="filterPOByStatus(this.value)">
           <option value="">All Status</option>
@@ -787,8 +792,7 @@
         <input type="date" id="poDateFrom" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applyPODateRange()"/>
         <span style="font-size:13px;color:var(--text-muted);">to</span>
         <input type="date" id="poDateTo" class="form-input" style="width:140px;padding:6px 10px;font-size:12px;" onchange="applyPODateRange()"/>
-        <button class="btn btn-cancel" onclick="viewAllPOs()" style="margin-left:auto;" title="Clear search, status, and date filters — show every PO">View All</button>
-        <button class="btn btn-cancel" onclick="resetPODateFilter()" title="Clear the PO Created Date filter">Reset</button>
+        <button class="btn btn-cancel" onclick="resetPOFilters()" title="Clear search, status, and date filters — show every PO">Reset</button>
       </div>
       <div class="card">
         <div class="table-toolbar">

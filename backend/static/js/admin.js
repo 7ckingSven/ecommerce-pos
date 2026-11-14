@@ -7654,39 +7654,35 @@ function filterPOBySearch(value) {
   renderPOs(getFilteredPOs());
 }
 window.filterPOBySearch = filterPOBySearch;
-function viewAllPOs() {
-  poSearchVal   = '';
-  poStatusFilterVal = '';
-  poDateFromVal = '';
-  poDateToVal   = '';
-  const searchEl = document.getElementById('poNumberSearch');
-  const statusEl = document.getElementById('poStatusFilter');
-  const fromEl   = document.getElementById('poDateFrom');
-  const toEl     = document.getElementById('poDateTo');
-  if (searchEl) searchEl.value = '';
-  if (statusEl) statusEl.value = '';
-  if (fromEl)   fromEl.value   = '';
-  if (toEl)     toEl.value     = '';
-  poPage = 1;
-  renderPOs(getFilteredPOs());
-}
-window.viewAllPOs = viewAllPOs;
 function applyPODateRange() {
   poDateFromVal = document.getElementById('poDateFrom').value;
   poDateToVal   = document.getElementById('poDateTo').value;
   poPage = 1;
   renderPOs(getFilteredPOs());
 }
-function resetPODateFilter() {
-  document.getElementById('poDateFrom').value = '';
-  document.getElementById('poDateTo').value   = '';
-  poDateFromVal = '';
-  poDateToVal   = '';
+// Clears search, status, and both date fields — the single "clear
+// everything" action for the Purchase Orders toolbar (previously split
+// across a separate "View All" button and a date-only "Reset" button).
+function resetPOFilters() {
+  poSearchVal       = '';
+  poStatusFilterVal = '';
+  poDateFromVal     = '';
+  poDateToVal       = '';
+  const searchEl = document.getElementById('poNumberSearch');
+  const clearBtn = searchEl?.nextElementSibling;
+  const statusEl = document.getElementById('poStatusFilter');
+  const fromEl   = document.getElementById('poDateFrom');
+  const toEl     = document.getElementById('poDateTo');
+  if (searchEl) searchEl.value = '';
+  if (clearBtn && clearBtn.classList.contains('search-clear-btn')) clearBtn.style.display = 'none';
+  if (statusEl) statusEl.value = '';
+  if (fromEl)   fromEl.value   = '';
+  if (toEl)     toEl.value     = '';
   poPage = 1;
   renderPOs(getFilteredPOs());
 }
-window.applyPODateRange  = applyPODateRange;
-window.resetPODateFilter = resetPODateFilter;
+window.applyPODateRange = applyPODateRange;
+window.resetPOFilters   = resetPOFilters;
 function filterSRByStatus(status) {
   srStatusFilterVal = status || '';
   srPage = 1;
