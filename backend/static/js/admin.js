@@ -6550,27 +6550,30 @@ function renderDiscounts(discounts) {
         const previewNames     = assignedProducts.slice(0, 3).map(p => p.product_name).join(', ');
         const hasMore          = assignedCount > 3;
         const status = getDiscountStatus(d);
+        const fullProductList = assignedProducts.map(p => p.product_name).join(', ');
         return `
-          <tr style="${status.ended ? 'opacity:0.6;' : ''}">
-            <td><strong>${d.discount_name}</strong></td>
-            <td style="font-size:13px;color:var(--text-muted);white-space:nowrap;">${d.created_at ? toUtcDate(d.created_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric'}) : '—'}</td>
-            <td style="font-size:13px;color:var(--text-muted);white-space:nowrap;">${d.starts_at ? toUtcDate(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
-            <td style="font-size:13px;color:var(--text-muted);white-space:nowrap;">${d.ends_at ? toUtcDate(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+          <tr class="${status.ended ? 'disc-row-ended' : ''}">
+            <td class="disc-name-cell">${d.discount_name}</td>
+            <td class="disc-date-text">${d.created_at ? toUtcDate(d.created_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric'}) : '—'}</td>
+            <td class="disc-date-text">${d.starts_at ? toUtcDate(d.starts_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
+            <td class="disc-date-text">${d.ends_at ? toUtcDate(d.ends_at).toLocaleDateString('en-PH', {month:'short',day:'numeric',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—'}</td>
             <td>
-              <span style="font-size:20px;font-weight:700;color:${status.ended ? '#ef4444' : 'var(--g-400)'};">${d.percentage}%</span>
-              <div style="font-size:11px;color:var(--text-muted);">off original price</div>
-              <span class="badge ${status.class}" style="margin-top:4px;display:inline-block;">${status.label}</span>
+              <div class="disc-percent-block">
+                <span class="disc-percent-value" style="color:${status.ended ? '#ef4444' : 'var(--g-400)'};">${d.percentage}%</span>
+                <span class="disc-percent-sub">off original price</span>
+                <span class="badge ${status.class}">${status.label}</span>
+              </div>
             </td>
             <td>
-              <div style="display:flex;flex-direction:column;gap:4px;">
-                <span class="badge badge--blue" style="align-self:flex-start;">${assignedCount} product${assignedCount !== 1 ? 's' : ''}</span>
-                <span style="font-size:11px;color:var(--text-muted);">
+              <div class="disc-assigned-block">
+                <span class="badge badge--blue">${assignedCount} product${assignedCount !== 1 ? 's' : ''}</span>
+                <span class="disc-assigned-preview" ${fullProductList ? `title="${fullProductList.replace(/"/g, '&quot;')}"` : ''}>
                   ${assignedCount > 0 ? previewNames + (hasMore ? ` +${assignedCount - 3} more` : '') : 'No products assigned yet'}
                 </span>
               </div>
             </td>
             <td>
-              <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
+              <div class="disc-actions-cell">
                 <button class="btn btn-cancel" style="font-size:12px;padding:5px 10px;display:inline-flex;align-items:center;gap:4px;"
                   onclick="openAssignModal('${d.discount_id}', '${d.discount_name.replace(/'/g, "\\'")}')">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:13px;height:13px;"><path d="M20.59 13.41l-7.17 7.17a2 2 0 0 1-2.83 0L2 12V2h10l8.59 8.59a2 2 0 0 1 0 2.82z"/><line x1="7" y1="7" x2="7.01" y2="7"/></svg>
