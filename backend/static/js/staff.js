@@ -4062,6 +4062,96 @@ async function staffBulkMarkOutForDeliverySelected() {
 }
 window.staffBulkMarkOutForDeliverySelected = staffBulkMarkOutForDeliverySelected;
 
+const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
+const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned' };
+const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4, returned_failed: 4 };
+const ORDER_DONE_TIER = 4; // completed/cancelled
+function sortOrdersHierarchy(orders) {
+  return [...orders].sort((a, b) => {
+    const pa = ORDER_STATUS_PRIORITY[a.status] ?? 5;
+    const pb = ORDER_STATUS_PRIORITY[b.status] ?? 5;
+    if (pa !== pb) return pa - pb;
+    const da = new Date(a.created_at || a.date || 0).getTime();
+    const db = new Date(b.created_at || b.date || 0).getTime();
+    // Active tiers (pending/processing/out for delivery): oldest first (FIFO).
+    // Done tier (completed/cancelled): newest first, so the oldest sinks to the very bottom.
+    return pa === ORDER_DONE_TIER ? db - da : da - db;
+  });
+}
+
+// Per the Oct 25 adviser consultation: a free-form status dropdown is "not
+// supposed to be" the way an order moves forward — each step now needs its
+// own explicit trigger action instead. Pending -> Processing is purely
+// system-driven (30-min auto-advance in app.py — the manual "Move to
+// Processing" batch button was removed Oct 26 2026), so it gets no manual
+// button here at all; Processing -> Out for Delivery is the one step this
+// row-level action still drives, as a single contextual button. Everything
+// past that (Delivered, Not Delivered) already goes through the dedicated
+// Deliveries-for-Today actions, not this cell.
+function orderStatusActionHtml(order, updateFnName) {
+  const status = order.status;
+  if (status === 'pending') {
+    // Adviser follow-up (Oct 26 2026): give a manual bypass instead of
+    // only ever waiting out the 30-min auto-advance — same endpoint/cap
+    // enforcement as the auto-advance, just triggered per-order by hand.
+    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>
+      <button class="btn btn-outline-green" style="font-size:11px;padding:4px 9px;white-space:nowrap;" title="Move to Processing now instead of waiting"
+          onclick="${updateFnName}('${order.order_id}', 'processing')">Process Now</button>`;
+  }
+  const next = ORDER_STATUS_FLOW[status];
+  if (!next) return '';
+  return `<button class="btn btn-solid-green" style="font-size:11px;padding:5px 10px;white-space:nowrap;"
+      onclick="${updateFnName}('${order.order_id}', '${next}')">Mark ${ORDER_STATUS_LABELS[next]}</button>`;
+}
+
+// ─── Print Parcel Label ─────────────────────────────────
+// Only ever offered while an order is 'processing' (see renderStaffOrders) —
+// the window between stock being deducted and the order actually leaving,
+// which is when a label needs to go on the parcel. Opens a small print-only
+// window rather than reusing the receipt modal, since this is a shipping
+// label (recipient + items to pack), not a payment receipt.
+function printOrderLabel(order) {
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : (order.address || '');
+  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
+  const phone    = order.customer?.phone_number || '';
+  const itemsHtml = (order.order_item || []).map(i => {
+    const opts = i.selected_options && Object.keys(i.selected_options).length
+      ? ' (' + Object.entries(i.selected_options).map(([k, v]) => `${k}: ${v}`).join(', ') + ')'
+      : '';
+    return `<tr><td style="padding:4px 0;">${i.product?.product_name || '—'}${opts}</td><td style="padding:4px 0;text-align:right;">x${i.qty}</td></tr>`;
+  }).join('');
+
+  const html = `
+    <html><head><title>Parcel Label — ${shortId(order.order_id)}</title>
+    <style>
+      body{font-family:Arial,sans-serif;padding:24px;color:#111;}
+      h2{margin:0 0 4px;font-size:18px;}
+      .muted{color:#666;font-size:12px;}
+      .box{border:2px solid #111;border-radius:8px;padding:16px;margin-top:16px;}
+      table{width:100%;font-size:13px;margin-top:10px;border-top:1px solid #ccc;padding-top:6px;}
+      .label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;}
+    </style></head><body>
+      <h2>TEFC E-Commerce — Parcel Label</h2>
+      <div class="muted">Order #${shortId(order.order_id)} · ${(order.order_type || '').toUpperCase()}</div>
+      <div class="box">
+        <div class="label">Deliver To</div>
+        <div style="font-size:15px;font-weight:bold;margin:2px 0 6px;">${customer}</div>
+        <div>${addrString || 'No address provided'}</div>
+        ${order.address_note ? `<div class="muted">Note: ${order.address_note}</div>` : ''}
+        ${phone ? `<div class="muted">Phone: ${phone}</div>` : ''}
+        <table>${itemsHtml}</table>
+      </div>
+      <script>window.onload = () => { window.print(); };</script>
+    </body></html>`;
+  const win = window.open('', '_blank', 'width=480,height=640');
+  if (!win) { showToast('Allow pop-ups to print the parcel label.', 'error'); return; }
+  win.document.write(html);
+  win.document.close();
+}
+
 function renderStaffOrders(orders) {
   const paged = paginate(orders, staffOrdersPage);
   document.getElementById('staffOrdersBody').innerHTML = paged.length
