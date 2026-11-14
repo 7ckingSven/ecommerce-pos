@@ -1313,7 +1313,7 @@
 
   <!-- Product Modal -->
   <div class="modal-overlay" id="productModalOverlay"></div>
-  <div class="modal" id="productModal" style="max-width:760px;width:95%;">
+  <div class="modal" id="productModal" style="max-width:920px;width:95%;">
     <div class="modal-header">
       <h3 class="modal-title" id="productModalTitle">Add Product</h3>
       <button class="modal-close" onclick="closeModalWithConfirm('productModal', closeProductModal)">
@@ -1323,6 +1323,7 @@
     <div class="modal-body">
       <form id="productForm" onsubmit="submitProduct(event)">
         <input type="hidden" id="productId"/>
+        <div class="form-section-title">Basic Information</div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Product Name <span class="req">*</span></label>
@@ -1347,6 +1348,7 @@
             <datalist id="subCategoryList"></datalist>
           </div>
         </div>
+        <div class="form-section-title">Pricing</div>
         <div class="form-row-2">
           <div class="form-group">
             <label class="form-label">Resale Price (₱) <span class="req">*</span> <span style="font-weight:400;color:var(--text-muted);">(what the customer pays)</span></label>
@@ -1370,9 +1372,10 @@
             Product becomes <strong>Active</strong> automatically when stock is added via Purchase Order.
           </p>
         </div>
+        <div class="form-section-title">Description &amp; Media</div>
         <div class="form-group">
           <label class="form-label">Description</label>
-          <textarea id="pDescription" class="form-input form-textarea" rows="3" placeholder="Product description..." oninput="_prodUpdateSaveBtn()"></textarea>
+          <textarea id="pDescription" class="form-input form-textarea" rows="4" placeholder="Product description..." oninput="_prodUpdateSaveBtn()"></textarea>
         </div>
         <div class="form-group">
           <label class="form-label">Product Images <span style="font-weight:400;color:var(--text-muted);">(optional — first image is main thumbnail)</span></label>
@@ -1413,6 +1416,7 @@
         </div>
 
         <!-- Option Groups -->
+        <div class="form-section-title">Variants <span style="font-weight:400;text-transform:none;letter-spacing:0;color:var(--text-muted);">(optional)</span></div>
         <div class="form-group">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
             <label class="form-label" style="margin:0;">Option Groups <span style="font-weight:400;color:var(--text-muted);">(optional — e.g. Size, Color)</span></label>
