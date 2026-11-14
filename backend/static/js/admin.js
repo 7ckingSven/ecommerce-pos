@@ -5920,8 +5920,8 @@ function renderSalesData(completed, allOrders) {
           borderWidth:2 }]
       },
       options: { responsive:true, maintainAspectRatio:false,
-        cutout: '70%',
-        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } } } }
+        cutout: '68%',
+        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:13, padding:14, font:{ size:12 } } } } }
     });
   }
 
