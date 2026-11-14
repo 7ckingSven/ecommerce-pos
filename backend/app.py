@@ -1193,7 +1193,16 @@ def login_post():
 
                 # MFA check: does this browser already carry an MFA-trust
                 # cookie that's on file for THIS account?
-                mfa_token   = request.cookies.get('tefc_mfa_token')
+                # One cookie per account (tefc_mfa_token_<user_id>), not one
+                # shared cookie for the whole browser — a single shared
+                # cookie gets overwritten every time a DIFFERENT account
+                # verifies on this browser, silently un-trusting whichever
+                # account was trusted before it. The legacy unscoped
+                # 'tefc_mfa_token' is still accepted as a fallback so
+                # whichever single account was already trusted under the
+                # old scheme doesn't get logged out the moment this ships.
+                mfa_token = request.cookies.get(f"tefc_mfa_token_{user['user_id']}") \
+                    or request.cookies.get('tefc_mfa_token')
                 mfa_trusted = False
                 if mfa_token:
                     try:
@@ -1451,7 +1460,10 @@ def verify_mfa():
 
             # ...and remember this browser/device from now on (trusted
             # forever, until its cookie is cleared or a different browser
-            # is used).
+            # is used). Stored under a cookie name scoped to this account
+            # (tefc_mfa_token_<user_id>) so trusting a second account on
+            # the same browser doesn't overwrite and un-trust the first
+            # one — see the matching comment in login_post().
             new_mfa_token = secrets.token_hex(32)
             supabase.table('mfa_device').insert({
                 'user_id':    user_id,
@@ -1463,7 +1475,7 @@ def verify_mfa():
 
             resp = redirect(url_for('admin_dashboard') if role == 'admin' else url_for('staff_dashboard'))
             resp.set_cookie(
-                'tefc_mfa_token', new_mfa_token,
+                f'tefc_mfa_token_{user_id}', new_mfa_token,
                 max_age=60 * 60 * 24 * 365 * 5,  # effectively permanent
                 httponly=True, secure=True, samesite='Lax'
             )
