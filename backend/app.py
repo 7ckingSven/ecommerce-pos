@@ -2580,7 +2580,7 @@ def api_place_order():
         total    = sum(item['price'] * item['quantity'] for item in cart_items)
         quantity = sum(item['quantity'] for item in cart_items)
 
-        branch_id    = data.get('branch_id')
+        branch_id    = data.get('branch_id') or _resolve_order_branch_id(cart_items)
         # Never trust the client-sent shipping_fee — recompute it here from
         # the address + each item's product weight, so the amount can't be
         # tampered with via a direct API call (e.g. sending 0 for an
@@ -5925,6 +5925,41 @@ def _check_pos_stock_availability(cart_items, branch_id):
     if shortages:
         return False, 'Insufficient stock — ' + '; '.join(shortages)
     return True, None
+
+
+def _resolve_order_branch_id(cart_items):
+    """Best-effort branch assignment for an online order whose client-sent
+    branch_id came back empty/null (final-defense follow-up, Nov 14 2026).
+    The mobile app resolves its own branch_id from the product card that
+    was tapped, which falls back to "any branch with MORE than critical
+    stock" — when every branch happens to be at/below critical stock for
+    that product at the moment of purchase, that fallback finds nothing and
+    the order goes out with branch_id=None. A null-branch order never shows
+    up under either branch's revenue/order figures even once completed —
+    this is exactly how a chunk of real completed-order revenue went
+    missing from both branch breakdowns on the dashboards. Picks whichever
+    branch can actually cover the most of this cart (full match preferred);
+    returns None only if no branch has any of it in stock at all, same as
+    the status quo for that edge case."""
+    try:
+        branches = supabase.table('branch').select('branch_id').execute().data or []
+    except Exception as e:
+        print(f'_resolve_order_branch_id: could not list branches: {e}')
+        return None
+
+    best_id, best_score = None, -1
+    for b in branches:
+        bid = b['branch_id']
+        ok, _ = _check_pos_stock_availability(cart_items, bid)
+        if ok:
+            return bid  # fully covers the cart — no need to keep scoring
+        score = sum(
+            1 for item in cart_items
+            if _check_pos_stock_availability([item], bid)[0]
+        )
+        if score > best_score:
+            best_score, best_id = score, bid
+    return best_id if best_score > 0 else None
 
 
 @app.route('/api/staff/orders', methods=['POST'])

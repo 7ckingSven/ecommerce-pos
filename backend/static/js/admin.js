@@ -1135,10 +1135,15 @@ async function loadOverview() {
   skTable('lowStockBody',      ['sk-cell-full','sk-cell-md','sk-cell-sm','sk-cell-sm'], 5);
   // ─────────────
   try {
-    const [products, orders, payments, stockRequests, discounts] = await Promise.all([
+    // Was capped at limit=80 while Sales Report fetched up to 500 — on a
+    // store with more than 80 total orders, Overview's own branch cards
+    // (derived from this capped list) silently covered fewer orders than
+    // Sales Report's identically-named figures, on top of the totalSales
+    // mismatch below (final-defense follow-up, Nov 14 2026). Matches Sales
+    // Report's own limit so both pages are looking at the same window.
+    const [products, orders, stockRequests, discounts] = await Promise.all([
       fetch('/api/admin/products').then(r => r.json()),
-      fetch('/api/admin/orders?limit=80').then(r => r.json()),
-      fetch('/api/admin/payments').then(r => r.json()),
+      fetch('/api/admin/orders?limit=500').then(r => r.json()),
       fetch('/api/admin/stock-requests').then(r => r.json()),
       fetch('/api/admin/discounts').then(r => r.json()),
     ]);
@@ -1148,14 +1153,21 @@ async function loadOverview() {
     document.getElementById('statProducts').textContent = activeProducts.length;
     document.getElementById('statOrders').textContent   = orders.length;
 
-    const totalSales = payments.reduce((s, p) => s + Number(p.total || 0), 0);
-
     // ── Branch Sales ────────────────────────────────────
     // Get branch IDs from allBranches
     const tripleEBranch     = allBranches.find(b => b.branch_name.toLowerCase().includes('triple'));
     const fielCollinceBranch = allBranches.find(b => b.branch_name.toLowerCase().includes('fiel') || b.branch_name.toLowerCase().includes('collince'));
 
     const completedOrders = Array.isArray(orders) ? orders.filter(o => o.status === 'completed') : [];
+    // Previously summed EVERY row of /api/admin/payments — a payment row
+    // exists for an order the moment it's placed, not once it's completed,
+    // so this used to include pending/cancelled/returned orders too and
+    // could run well above the real, realized revenue Sales Report shows
+    // for the exact same label ("Total Revenue"/"Total Sales"). Now sums
+    // the same completed-only order list the branch cards below use, so
+    // this page's own numbers are internally consistent and match Sales
+    // Report's definition of the same metric.
+    const totalSales = completedOrders.reduce((s, o) => s + Number(o.total || 0), 0);
     const salesTripleE     = completedOrders
       .filter(o => tripleEBranch && o.branch_id === tripleEBranch.branch_id)
       .reduce((s, o) => s + Number(o.total || 0), 0);
