@@ -1054,6 +1054,7 @@ async function loadBranches() {
     return allBranches;
   } catch (e) {
     console.error('Branches error:', e);
+    showToast('Could not load branches. Check your connection and try again.', 'error');
     return [];
   }
 }
@@ -1306,7 +1307,7 @@ async function loadOverview() {
           </tr>`).join('')
       : '<tr><td colspan="4" class="table-empty">No pending requests ✓</td></tr>';
 
-  } catch (e) { console.error('Overview error:', e); }
+  } catch (e) { console.error('Overview error:', e); showToast('Could not load dashboard overview. Check your connection and try again.', 'error'); }
 }
 
 function renderStockAlert(alertProducts) {
@@ -1425,7 +1426,7 @@ async function loadProducts() {
         Object.entries(branchMap).map(([id, name]) => `<option value="${id}">${name}</option>`).join('');
     }
 
-  } catch (e) { console.error('Products error:', e); }
+  } catch (e) { console.error('Products error:', e); showToast('Could not load products. Check your connection and try again.', 'error'); }
 }
 
 
@@ -3426,7 +3427,7 @@ async function loadInventory() {
     }
 
     renderInventory(allInventory);
-  } catch (e) { console.error('Inventory error:', e); }
+  } catch (e) { console.error('Inventory error:', e); showToast('Could not load inventory. Check your connection and try again.', 'error'); }
 }
 
 // ── Branch Stock Transfers — Admin oversight (read-only) ───────────────
@@ -3465,6 +3466,7 @@ async function loadAdminStockTransfers() {
     `).join('') : '<tr><td colspan="8" class="table-empty">No branch stock transfers yet</td></tr>';
   } catch (e) {
     console.error('Admin stock transfers load error:', e);
+    showToast('Could not load branch stock transfers.', 'error');
   }
 }
 window.loadAdminStockTransfers = loadAdminStockTransfers;
@@ -3565,7 +3567,7 @@ async function filterInventoryType(val, el) {
             </tr>`;
           }).join('')
         : '<tr><td colspan="9" class="table-empty">✅ All products have sufficient stock</td></tr>';
-    } catch (e) { console.error('Stock filter error:', e); }
+    } catch (e) { console.error('Stock filter error:', e); showToast('Could not load the stock filter view.', 'error'); }
     return;
   }
   inventoryTypeFilterVal = val;
@@ -4476,7 +4478,7 @@ async function loadOrders() {
     applyAdminOrderFilters();
     updateAdminOrdersBadge(allOrders);
     renderDeliveriesForToday(allOrders);
-  } catch (e) { console.error('Orders error:', e); }
+  } catch (e) { console.error('Orders error:', e); showToast('Could not load orders. Check your connection and try again.', 'error'); }
 }
 
 // Pending → Processing manual batch action removed (team decision, Oct 26
@@ -4749,7 +4751,7 @@ async function loadRemittanceSummary() {
             </tr>`).join('')
         : '<tr><td colspan="5" class="table-empty">No orders returned/failed today.</td></tr>';
     }
-  } catch (e) { console.error('Remittance summary error:', e); }
+  } catch (e) { console.error('Remittance summary error:', e); showToast('Could not load remittance summary.', 'error'); }
 }
 
 // (toggleAllDeliverySelections / dispatchSelectedOrders and the "To
@@ -6483,7 +6485,7 @@ async function loadSales() {
     filterSalesOrders(allSalesOrders);
     refreshStockMovementTable();
 
-  } catch (e) { console.error('Sales error:', e); }
+  } catch (e) { console.error('Sales error:', e); showToast('Could not load sales reports. Check your connection and try again.', 'error'); }
 }
 
 // ══════════════════════════════════════════════════════
@@ -6507,7 +6509,7 @@ async function loadDiscounts() {
 
     renderDiscounts(allDiscounts);
     loadDiscountedProducts();
-  } catch (e) { console.error('Discounts error:', e); }
+  } catch (e) { console.error('Discounts error:', e); showToast('Could not load discounts. Check your connection and try again.', 'error'); }
 }
 
 
@@ -6975,9 +6977,16 @@ async function submitAssign() {
         body: JSON.stringify({ product_ids: toUnassign }),
       }));
     }
-    await Promise.all(requests);
-    showToast('Discount assignments updated!');
-    closeAssignModal();
+    const responses = await Promise.all(requests);
+    const failed = responses.some(r => !r.ok);
+    if (failed) {
+      showToast('Some discount assignment changes failed to apply. Please check and try again.', 'error');
+    } else {
+      showToast('Discount assignments updated!');
+      closeAssignModal();
+    }
+    // Refresh either way — whatever actually applied should be reflected,
+    // even on a partial failure.
     invalidateSection('discounts'); loadDiscounts();
   } catch (e) { showToast('Error updating assignments.', 'error'); }
   finally { setButtonLoading(btn, false); }
@@ -6994,7 +7003,7 @@ async function loadUsers() {
     const res = await fetch('/api/admin/users');
     allUsers  = await res.json();
     renderUsers(allUsers);
-  } catch (e) { console.error('Users error:', e); }
+  } catch (e) { console.error('Users error:', e); showToast('Could not load users. Check your connection and try again.', 'error'); }
 }
 
 function renderUsers(users) {
@@ -7125,7 +7134,7 @@ async function loadLoginSessions() {
     const res = await fetch('/api/admin/login-sessions');
     allLoginSessions = await res.json();
     applyLoginSessionFilters();
-  } catch (e) { console.error('Login sessions error:', e); }
+  } catch (e) { console.error('Login sessions error:', e); showToast('Could not load login sessions.', 'error'); }
 }
 
 function resolveSessionUserName(s) {
@@ -7724,7 +7733,7 @@ async function loadPurchaseOrders() {
 
     renderStockRequests(applySRStatusFilter(allStockRequests));
     renderPOs(getFilteredPOs());
-  } catch (e) { console.error('PO error:', e); }
+  } catch (e) { console.error('PO error:', e); showToast('Could not load purchase orders. Check your connection and try again.', 'error'); }
 }
 
 // Current stock for one stock_request row: the SPECIFIC variant's quantity

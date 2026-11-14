@@ -1030,7 +1030,7 @@ async function loadBranches() {
     await loadStaffBranch();
 
     populateBranchSelects();
-  } catch (e) { console.error('Branches error:', e); }
+  } catch (e) { console.error('Branches error:', e); showToast('Could not load branches. Check your connection and try again.', 'error'); }
 }
 
 async function loadStaffBranch() {
@@ -1060,6 +1060,7 @@ async function loadStaffBranch() {
     }
   } catch (e) {
     console.error('Staff branch error:', e);
+    showToast('Could not load your branch info. Check your connection and try again.', 'error');
   }
 }
 
@@ -1119,7 +1120,7 @@ async function loadPosProducts() {
     renderPosProducts(posProducts);
     populateCategories(posProducts);
     focusBarcodeInput();
-  } catch (e) { console.error('POS products error:', e); }
+  } catch (e) { console.error('POS products error:', e); showToast('Could not load products. Check your connection and try again.', 'error'); }
 }
 
 async function loadPosDiscounts() {
@@ -1158,7 +1159,7 @@ async function loadPosDiscounts() {
           <span class="pos-discount-badge">${d.percentage}% off</span>
         </div>`).join('');
     }
-  } catch (e) { console.error('POS discounts error:', e); }
+  } catch (e) { console.error('POS discounts error:', e); showToast('Could not load active discounts.', 'error'); }
 }
 
 function toggleDiscountDropdown() {
@@ -1367,6 +1368,23 @@ function searchProducts(q) {
 // low to the cart (checkPosVariantStock / _posConfirmVariantAdd).
 const POS_CRITICAL_STOCK_LEVEL = 5;
 
+// branch_available_qty comes straight from the backend (already the
+// max-across-variants / branch_stock figure for THIS branch); falls back
+// to the old client-side calc for any response that doesn't include it.
+// Shared by the product grid (renderPosProducts) and the Add-to-Order cap
+// (selectPosProduct) — previously only the grid used this branch-scoped
+// figure while the cart cap used p.quantity (the cross-branch total), so
+// a cashier could add up to the SUM of every branch's stock to one cart
+// line (final-defense follow-up, Nov 14 2026).
+function _posBranchStockQty(p) {
+  let stockQty = p.branch_available_qty;
+  if (stockQty === undefined || stockQty === null) {
+    const branchStock = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
+    stockQty = branchStock ? branchStock.quantity : p.quantity || 0;
+  }
+  return stockQty;
+}
+
 function renderPosProducts(products) {
   const wrap = document.getElementById('posProducts');
   if (!products.length) {
@@ -1374,14 +1392,7 @@ function renderPosProducts(products) {
     return;
   }
   wrap.innerHTML = products.map(p => {
-    // branch_available_qty comes straight from the backend (already the
-    // max-across-variants / branch_stock figure); fall back to the old
-    // client-side calc for any response that doesn't include it.
-    let stockQty = p.branch_available_qty;
-    if (stockQty === undefined || stockQty === null) {
-      const branchStock = (p.branch_stock || []).find(b => b.branch_id === staffBranchId);
-      stockQty = branchStock ? branchStock.quantity : p.quantity || 0;
-    }
+    const stockQty   = _posBranchStockQty(p);
     const isOut      = stockQty <= 0;
     const isCritical = !isOut && stockQty <= POS_CRITICAL_STOCK_LEVEL;
     const isDisabled = isOut || isCritical;
@@ -1842,7 +1853,7 @@ function selectPosProduct(productId, presetOptions) {
 
   const groups = p.option_groups || [];
   if (!groups.length) {
-    addToOrder(p.product_id, p.product_name, effectivePrice, p.quantity, {}, {
+    addToOrder(p.product_id, p.product_name, effectivePrice, _posBranchStockQty(p), {}, {
       original_price: disc ? p.price : null,
       discount_name:  disc ? disc.discount_name : null,
       discount_pct:   disc ? disc.percentage    : null,
@@ -3239,7 +3250,7 @@ async function loadInventory() {
     // Restore expanded variant rows after DOM rebuild
     restoreStaffExpandedRows(expandedRows);
 
-  } catch (e) { console.error('Inventory error:', e); }
+  } catch (e) { console.error('Inventory error:', e); showToast('Could not load inventory. Check your connection and try again.', 'error'); }
 }
 
 
@@ -3757,7 +3768,12 @@ async function approveStockTransfer(transferId) {
     if (res.ok) {
       showToast('Transfer approved — stock moved.');
       loadStockTransfers();
+      // Moves real stock out of this branch, so both Inventory AND POS
+      // (which has its own separately-cached product list) need to drop
+      // their stale figures — otherwise POS can keep showing/selling stock
+      // that was just transferred away until something else refreshes it.
       invalidateSection('inventory'); loadInventory();
+      invalidateSection('pos'); loadPosProducts();
     } else {
       showToast(data.error || 'Failed to approve transfer.', 'error');
     }
@@ -3977,281 +3993,6 @@ function staffGoToInvHistory(type) {
 }
 window.staffGoToInvHistory = staffGoToInvHistory;
 
-function updateOrdersBadge(orders) {
-  const badge   = document.getElementById('ordersBadge');
-  if (!badge) return;
-  // Count pending online orders from customers
-  const pending = orders.filter(o =>
-    o.status === 'pending' && o.order_type === 'online'
-  ).length;
-  if (pending > 0) {
-    badge.textContent    = pending > 99 ? '99+' : pending;
-    badge.style.display  = 'inline-block';
-  } else {
-    badge.style.display  = 'none';
-  }
-}
-
-// Orders only move forward one step at a time: pending -> processing -> out_for_delivery.
-// out_for_delivery -> completed is intentionally NOT in this flow map: that
-// transition now only happens through the Deliveries for Today "Delivered"
-// action, which enforces the COD remittance-confirmation step.
-// Completed/cancelled/returned_failed orders are terminal and the dropdown locks.
-const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
-const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned / Failed' };
-
-// Orders list hierarchy — active orders (pending/processing/out for delivery)
-// always float above Completed/Cancelled, and within the same tier the
-// order that's been waiting longest (oldest created_at) shows first (FIFO),
-// so staff/admin naturally work the oldest pending order first.
-const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4, returned_failed: 4 };
-const ORDER_DONE_TIER = 4; // completed/cancelled
-function sortOrdersHierarchy(orders) {
-  return [...orders].sort((a, b) => {
-    const pa = ORDER_STATUS_PRIORITY[a.status] ?? 5;
-    const pb = ORDER_STATUS_PRIORITY[b.status] ?? 5;
-    if (pa !== pb) return pa - pb;
-    const da = new Date(a.created_at || a.date || 0).getTime();
-    const db = new Date(b.created_at || b.date || 0).getTime();
-    // Active tiers (pending/processing/out for delivery): oldest first (FIFO).
-    // Done tier (completed/cancelled): newest first, so the oldest sinks to the very bottom.
-    return pa === ORDER_DONE_TIER ? db - da : da - db;
-  });
-}
-
-// Per the Oct 25 adviser consultation: a free-form status dropdown is "not
-// supposed to be" the way an order moves forward — each step now needs its
-// own explicit trigger action instead. Pending -> Processing is purely
-// system-driven (30-min auto-advance in app.py — the manual "Move to
-// Processing" batch button was removed Oct 26 2026), so it gets no manual
-// button here at all; Processing -> Out for Delivery is the one step this
-// row-level action still drives, as a single contextual button. Everything
-// past that (Delivered, Not Delivered) already goes through the dedicated
-// Deliveries-for-Today actions, not this cell.
-function orderStatusActionHtml(order, updateFnName) {
-  const status = order.status;
-  if (status === 'pending') {
-    // Adviser follow-up (Oct 26 2026): give a manual bypass instead of
-    // only ever waiting out the 30-min auto-advance — same endpoint/cap
-    // enforcement as the auto-advance, just triggered per-order by hand.
-    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>
-      <button class="btn btn-outline-green" style="font-size:11px;padding:4px 9px;white-space:nowrap;" title="Move to Processing now instead of waiting"
-          onclick="${updateFnName}('${order.order_id}', 'processing')">Process Now</button>`;
-  }
-  const next = ORDER_STATUS_FLOW[status];
-  if (!next) return '';
-  return `<button class="btn btn-solid-green" style="font-size:11px;padding:5px 10px;white-space:nowrap;"
-      onclick="${updateFnName}('${order.order_id}', '${next}')">Mark ${ORDER_STATUS_LABELS[next]}</button>`;
-}
-
-// ─── Print Parcel Label ─────────────────────────────────
-// Only ever offered while an order is 'processing' (see renderStaffOrders) —
-// the window between stock being deducted and the order actually leaving,
-// which is when a label needs to go on the parcel. Opens a small print-only
-// window rather than reusing the receipt modal, since this is a shipping
-// label (recipient + items to pack), not a payment receipt.
-function printOrderLabel(order) {
-  const addrParts  = (order.address || '').split('|');
-  const addrString = addrParts.length > 1
-    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
-    : (order.address || '');
-  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const phone    = order.customer?.phone_number || '';
-  const itemsHtml = (order.order_item || []).map(i => {
-    const opts = i.selected_options && Object.keys(i.selected_options).length
-      ? ' (' + Object.entries(i.selected_options).map(([k, v]) => `${k}: ${v}`).join(', ') + ')'
-      : '';
-    return `<tr><td style="padding:4px 0;">${i.product?.product_name || '—'}${opts}</td><td style="padding:4px 0;text-align:right;">x${i.qty}</td></tr>`;
-  }).join('');
-
-  const html = `
-    <html><head><title>Parcel Label — ${shortId(order.order_id)}</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:24px;color:#111;}
-      h2{margin:0 0 4px;font-size:18px;}
-      .muted{color:#666;font-size:12px;}
-      .box{border:2px solid #111;border-radius:8px;padding:16px;margin-top:16px;}
-      table{width:100%;font-size:13px;margin-top:10px;border-top:1px solid #ccc;padding-top:6px;}
-      .label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;}
-    </style></head><body>
-      <h2>TEFC E-Commerce — Parcel Label</h2>
-      <div class="muted">Order #${shortId(order.order_id)} · ${(order.order_type || '').toUpperCase()}</div>
-      <div class="box">
-        <div class="label">Deliver To</div>
-        <div style="font-size:15px;font-weight:bold;margin:2px 0 6px;">${customer}</div>
-        <div>${addrString || 'No address provided'}</div>
-        ${order.address_note ? `<div class="muted">Note: ${order.address_note}</div>` : ''}
-        ${phone ? `<div class="muted">Phone: ${phone}</div>` : ''}
-        <table>${itemsHtml}</table>
-      </div>
-      <script>window.onload = () => { window.print(); };</script>
-    </body></html>`;
-  const win = window.open('', '_blank', 'width=480,height=640');
-  if (!win) { showToast('Allow pop-ups to print the parcel label.', 'error'); return; }
-  win.document.write(html);
-  win.document.close();
-}
-
-function renderStaffOrders(orders) {
-  const paged = paginate(orders, staffOrdersPage);
-  document.getElementById('staffOrdersBody').innerHTML = paged.length
-    ? paged.map(o => `
-        <tr>
-          <td>${o.status === 'processing' ? `<input type="checkbox" class="staff-order-select-cb" value="${o.order_id}"/>` : ''}</td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
-          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td><span class="order-type-cell">${badge(o.order_type)}${offlineSyncTag(o)}</span></td>
-          <td>${(o.order_item || []).reduce((sum, i) => sum + (Number(i.qty) || 0), 0)} item(s)</td>
-          <td>${peso(o.total)}</td>
-          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : (Array.isArray(o.payment) && o.payment[0] ? badge(o.payment[0].payment_method) : '—')}</td>
-          <td>${(() => {
-            const raw = o.created_at || o.date || null;
-            if (!raw) return '—';
-            // Trim microseconds (Supabase returns 6 decimal places; JS only handles 3)
-            const normalized = raw.toString().replace(/(\.\d{3})\d+/, '$1').replace(' ', 'T');
-            const utcStr = normalized.endsWith('Z') || normalized.includes('+') ? normalized : normalized + 'Z';
-            const d = new Date(new Date(utcStr).getTime() + 8 * 60 * 60 * 1000);
-            const months = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
-            const date = `${months[d.getUTCMonth()]} ${d.getUTCDate()}, ${d.getUTCFullYear()}`;
-            const h = d.getUTCHours(), m = d.getUTCMinutes();
-            const time = `${h % 12 || 12}:${String(m).padStart(2,'0')} ${h < 12 ? 'AM' : 'PM'}`;
-            return `<span class="cell-date-main">${date}</span><span class="cell-date-sub">${time}</span>`;
-          })()}</td>
-          <td>${badge(o.status)}</td>
-          <td class="order-actions-cell">
-            ${orderStatusActionHtml(o, 'updateOrderStatus')}
-            <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            </button>
-            ${o.status === 'processing' ? `
-            <button class="btn-icon" onclick="printOrderLabel(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Print Parcel Label">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-            </button>` : ''}
-          </td>
-        </tr>`).join('')
-    : '<tr><td colspan="10" class="table-empty">No orders yet</td></tr>';
-  renderPager('staffOrdersPagination', orders.length, staffOrdersPage, 'changeStaffOrdersPage');
-  const selectAllCb = document.getElementById('staffOrdersSelectAll');
-  if (selectAllCb) selectAllCb.checked = false;
-}
-
-// ─── View Staff Order Items Modal ─────────────────────
-
-// ─── Generic Modal ────────────────────────────────────
-function showGenericModal(html) {
-  const overlay = document.getElementById('genericModalOverlay');
-  const modal   = document.getElementById('genericModal');
-  const cont    = document.getElementById('genericModalContent');
-  if (!overlay || !modal || !cont) return;
-  cont.innerHTML        = html;
-  overlay.style.display = 'block';
-  modal.style.display   = 'block';
-  document.body.style.overflow = 'hidden';
-}
-
-function closeGenericModal() {
-  const overlay = document.getElementById('genericModalOverlay');
-  const modal   = document.getElementById('genericModal');
-  if (overlay) overlay.style.display = 'none';
-  if (modal)   modal.style.display   = 'none';
-  document.body.style.overflow = '';
-  // Closing ANY generic modal (variant picker cancelled, confirm-clear
-  // dismissed or confirmed, etc.) should hand scanning back — staff
-  // shouldn't have to click back into the scan field after dismissing a
-  // popup (adviser follow-up, Nov 11 2026). No-ops automatically if the
-  // POS tab isn't the active section or something else is genuinely being
-  // typed into.
-  if (typeof focusBarcodeInput === 'function') focusBarcodeInput();
-}
-
-function viewStaffOrderItems(order) {
-  const items    = order.order_item || [];
-  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const customerPhone = order.customer?.phone_number || '';
-  const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
-  const branch   = branchObj?.branch_name || order.branch_name || staffBranchName || '—';
-
-  // Parse delivery address
-  const addrParts  = (order.address || '').split('|');
-  const addrString = addrParts.length > 1
-    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
-    : order.address || '';
-  const addrNote   = order.address_note || '';
-
-  const itemsHtml = items.length
-    ? items.map(i => {
-        const opts = i.selected_options && Object.keys(i.selected_options).length > 0
-          ? Object.entries(i.selected_options).map(([k,v]) =>
-              '<span style="background:rgba(22,163,74,0.1);color:#16a34a;border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;">' + k + ': ' + v + '</span>'
-            ).join(' ')
-          : '';
-        // Resolve the variant photo actually charged, falling back to base photo.
-        const imgUrl = resolveVariantPricing(i.product, i.selected_options).image;
-        const imgHtml = imgUrl
-          ? '<img src="' + imgUrl + '" style="width:44px;height:44px;border-radius:8px;object-fit:cover;flex-shrink:0;" alt="' + (i.product?.product_name || '') + '"/>'
-          : '<div style="width:44px;height:44px;border-radius:8px;background:var(--surface-2);flex-shrink:0;display:flex;align-items:center;justify-content:center;"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:18px;height:18px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
-        const optsHtml = opts
-          ? '<div style="margin-top:4px;display:flex;gap:4px;flex-wrap:wrap;">' + opts + '</div>'
-          : '';
-        return '<div style="padding:10px 0;border-bottom:1px solid var(--border);">'
-          + '<div style="display:flex;gap:10px;align-items:flex-start;">'
-          + imgHtml
-          + '<div style="flex:1;">'
-          + '<div style="font-size:13px;font-weight:600;">' + (i.product?.product_name || '—') + '</div>'
-          + optsHtml
-          + '</div>'
-          + '<div style="text-align:right;flex-shrink:0;">'
-          + '<div style="font-size:13px;font-weight:700;">₱' + Number(i.price * i.qty).toFixed(2) + '</div>'
-          + '<div style="font-size:11px;color:var(--text-muted);">x' + i.qty + ' @ ₱' + Number(i.price).toFixed(2) + '</div>'
-          + '</div></div></div>';
-      }).join('')
-    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
-
-  const shippingHtml = order.shipping_fee != null
-    ? '<span style="margin-left:8px;color:var(--text-muted);">· Shipping: ' + (Number(order.shipping_fee) === 0 ? 'FREE' : peso(order.shipping_fee)) + '</span>'
-    : '';
-
-  const addrHtml = (order.order_type === 'online')
-    ? '<div style="background:rgba(59,130,246,0.08);border:1px solid rgba(59,130,246,0.2);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;">'
-      + '<div style="color:var(--text-muted);margin-bottom:2px;">Delivery Address</div>'
-      + '<strong>' + (addrString && addrString.trim() ? addrString : 'No address provided') + '</strong>'
-      + (addrNote ? '<div style="color:var(--text-muted);margin-top:4px;font-size:11px;">📍 ' + addrNote + '</div>' : '')
-      + shippingHtml
-      + '</div>'
-    : '';
-
-  showGenericModal(
-    '<div style="padding:1.5rem;">'
-    + '<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">'
-    + '<div><h3 style="margin:0;font-size:16px;">Order Details</h3>'
-    + '<p style="margin:4px 0 0;font-size:12px;color:var(--text-muted);">#' + shortId(order.order_id) + '</p></div>'
-    + '<button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>'
-    + '</div>'
-    + '<div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:12px;">'
-    + '<div><span style="color:var(--text-muted);">Customer</span><br/><strong>' + customer + '</strong></div>'
-    + '<div><span style="color:var(--text-muted);">Phone Number</span><br/><strong>' + (customerPhone || '—') + '</strong></div>'
-    + '<div><span style="color:var(--text-muted);">Branch</span><br/><strong>' + branch + '</strong></div>'
-    + '<div><span style="color:var(--text-muted);">Served By</span><br/><strong>' + ((() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? s.fname + ' ' + s.lname : '—'; })()) + '</strong></div>'
-    + '<div><span style="color:var(--text-muted);">Type</span><br/>' + badge(order.order_type) + '</div>'
-    + '<div><span style="color:var(--text-muted);">Status</span><br/>' + badge(order.status) + '</div>'
-    + '</div>'
-    + (order.payment && order.payment.payment_method === 'gcash'
-      ? '<div style="background:rgba(59,130,246,0.06);border:1px solid rgba(59,130,246,0.15);border-radius:8px;padding:10px 12px;margin-bottom:1rem;font-size:12px;"><div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;font-weight:600;">GCash Payment Details</div>'
-        + '<div style="margin-bottom:4px;">Status: ' + badge(order.payment.status) + (order.payment.status === 'paid' ? ' <span style="color:#16a34a;font-weight:600;">(Verified with PayMongo)</span>' : '') + '</div>'
-        + (order.payment.ref_no ? '<div style="margin-bottom:4px;">PayMongo Reference: <strong>' + order.payment.ref_no + '</strong></div>' : '')
-        + '</div>'
-      : '')
-    + addrHtml
-    + '<div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>'
-    + itemsHtml
-    + '<div style="margin-top:1rem;padding-top:1rem;border-top:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;">'
-    + '<span style="font-weight:700;">Grand Total</span>'
-    + '<span style="font-weight:700;color:#16a34a;font-size:16px;">₱' + Number(order.total).toFixed(2) + '</span>'
-    + '</div></div>'
-  );
-}
-
-
 async function loadOrders() {
   // ── Skeleton ──
   skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
@@ -4275,7 +4016,7 @@ async function loadOrders() {
     applyStaffOrderFilters();
     updateOrdersBadge(staffOrders);
     renderStaffDeliveriesForToday(staffOrders);
-  } catch (e) { console.error('Orders error:', e); }
+  } catch (e) { console.error('Orders error:', e); showToast('Could not load orders. Check your connection and try again.', 'error'); }
 }
 
 function updateOrdersBadge(orders) {
@@ -4662,7 +4403,15 @@ async function updateOrderStatus(id, status) {
       body: JSON.stringify({ status }),
     });
     const body = await res.json().catch(() => ({}));
-    if (res.ok) { showToast('Order status updated!'); loadOrders(); }
+    if (res.ok) {
+      showToast('Order status updated!');
+      loadOrders();
+      // Some transitions (e.g. -> processing) deduct real stock server-
+      // side, so Inventory/POS's separately-cached product lists need to
+      // drop their stale figures too, not just the orders list.
+      invalidateSection('inventory'); loadInventory();
+      invalidateSection('pos'); loadPosProducts();
+    }
     else showToast(body.error || 'Failed to update status.', 'error');
   } catch (e) { showToast('Error updating status.', 'error'); }
 }
@@ -4909,7 +4658,7 @@ async function loadStaffRemittanceSummary() {
             </tr>`).join('')
         : '<tr><td colspan="4" class="table-empty">No orders returned/failed today.</td></tr>';
     }
-  } catch (e) { console.error('Remittance summary error:', e); }
+  } catch (e) { console.error('Remittance summary error:', e); showToast('Could not load remittance summary.', 'error'); }
 }
 
 // (staffToggleAllDeliverySelections / staffDispatchSelectedOrders and the
@@ -5102,7 +4851,7 @@ async function loadSummary() {
     if (toEl   && !toEl.value)   toEl.value   = today;
 
     renderSummaryForRange(fromEl?.value || today, toEl?.value || today);
-  } catch (e) { console.error('Summary error:', e); }
+  } catch (e) { console.error('Summary error:', e); showToast('Could not load sales summary. Check your connection and try again.', 'error'); }
 }
 
 function renderSummaryForRange(fromStr, toStr) {
@@ -5159,7 +4908,7 @@ async function applyDateRangeFilter() {
     const res = await fetch('/api/staff/orders?limit=1000');
     const raw = await res.json();
     allSummaryOrders = Array.isArray(raw) ? raw : [];
-  } catch (e) { console.error('Summary fetch error:', e); }
+  } catch (e) { console.error('Summary fetch error:', e); showToast('Could not refresh the date range. Check your connection and try again.', 'error'); }
   renderSummaryForRange(fromEl.value, toEl.value);
 }
 
@@ -5203,7 +4952,7 @@ async function loadRequests() {
     _srFilteredCache = data;
     renderRequestsPage();
 
-  } catch (e) { console.error('Requests error:', e); }
+  } catch (e) { console.error('Requests error:', e); showToast('Could not load stock requests. Check your connection and try again.', 'error'); }
 }
 
 function renderRequestsPage() {
@@ -5894,20 +5643,8 @@ document.addEventListener('DOMContentLoaded', async () => {
   const section = hash || saved || 'pos';
   const valid   = Object.keys(pageTitles);
   showSection(valid.includes(section) ? section : 'pos', null);
-
-  // Restore open modal if any
-  const openModal = localStorage.getItem('staff-open-modal');
-  if (openModal) {
-    localStorage.removeItem('staff-open-modal');
-  }
 });
 
-window.addEventListener('beforeunload', function () {
-  if (document.getElementById('stockModal')?.classList.contains('open'))
-    localStorage.setItem('staff-open-modal', 'stock');
-  else
-    localStorage.removeItem('staff-open-modal');
-});
 (function() {
   const style = document.createElement('style');
   style.textContent = '@keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }';

@@ -2269,12 +2269,21 @@ def api_mark_order_received(order_id):
         return jsonify({'error': str(e)}), 500
 
 
-# Customer self-cancel: only while status is still 'pending' and within a 2-hour
-# window from when the order was placed (enforced server-side, not just on the
-# button's visibility on mobile). Reason is optional. Mirrors the stock-return
-# logic used by admin/staff cancellation so branch/variant/product quantities
-# stay accurate either way.
-CUSTOMER_CANCEL_WINDOW_HOURS = 2
+# Customer self-cancel: only while status is still 'pending' and within a
+# window from when the order was placed (enforced server-side, not just on
+# the button's visibility on mobile). Reason is optional. Mirrors the
+# stock-return logic used by admin/staff cancellation so branch/variant/
+# product quantities stay accurate either way.
+#
+# Deliberately the SAME constant as PENDING_AUTO_PROCESS_MINUTES above,
+# not a separate one — this used to be its own `CUSTOMER_CANCEL_WINDOW_
+# HOURS = 2`, left over from before the auto-advance window was shortened
+# from 2 hours to 30 minutes (final-defense follow-up, Nov 14 2026). Once
+# an order auto-advances out of 'pending' it can no longer be cancelled
+# here anyway (the status check below already requires 'pending'), so a
+# cancel window longer than the auto-advance window was pure dead slack —
+# tying them to one constant means they can't drift apart again.
+CUSTOMER_CANCEL_WINDOW_MINUTES = PENDING_AUTO_PROCESS_MINUTES
 
 @app.route('/api/orders/<order_id>/cancel', methods=['POST'])
 def api_cancel_order(order_id):
@@ -2296,7 +2305,7 @@ def api_cancel_order(order_id):
         if order.get('status') != 'pending':
             return jsonify({'error': 'This order can no longer be cancelled.'}), 400
 
-        # Enforce the 2-hour window server-side (the mobile button hiding is UX only)
+        # Enforce the cancel window server-side (the mobile button hiding is UX only)
         created_raw = order.get('created_at')
         if created_raw:
             from datetime import datetime, timezone
@@ -2309,9 +2318,9 @@ def api_cancel_order(order_id):
                 created_dt = datetime.fromisoformat(normalized)
                 if created_dt.tzinfo is None:
                     created_dt = created_dt.replace(tzinfo=timezone.utc)
-                elapsed_hours = (datetime.now(timezone.utc) - created_dt).total_seconds() / 3600
-                if elapsed_hours > CUSTOMER_CANCEL_WINDOW_HOURS:
-                    return jsonify({'error': 'The 2-hour cancellation window has passed.'}), 400
+                elapsed_minutes = (datetime.now(timezone.utc) - created_dt).total_seconds() / 60
+                if elapsed_minutes > CUSTOMER_CANCEL_WINDOW_MINUTES:
+                    return jsonify({'error': f'The {CUSTOMER_CANCEL_WINDOW_MINUTES}-minute cancellation window has passed.'}), 400
             except Exception as parse_err:
                 print(f'Cancel window parse warning: {parse_err}')
 
@@ -3231,6 +3240,18 @@ def admin_update_purchase_order(po_id):
         # received_quantity after applying this batch (see below), instead
         # of being set to 'received' up front like the other statuses.
         if status != 'received':
+            # 'partially_received' isn't listed here on purpose — it's only
+            # ever set by the receiving-action branch below, never written
+            # directly through this path. No whitelist existed here before
+            # (final-defense follow-up, Nov 14 2026): any unexpected or
+            # missing status value — including the field simply being
+            # absent from the request — fell straight through to the DB
+            # write and surfaced as a generic 500 once it tripped
+            # purchase_order's own status CHECK constraint, instead of a
+            # clean 400 here.
+            valid_statuses = ('draft', 'ordered', 'cancelled')
+            if status not in valid_statuses:
+                return jsonify({'error': 'Invalid status.'}), 400
             updates = {'status': status, 'updated_at': 'now()'}
             if data.get('supplier'): updates['supplier'] = data['supplier']
             if data.get('note'):     updates['note']     = data['note']
@@ -4752,9 +4773,19 @@ def admin_update_order(order_id):
     try:
         data       = request.get_json()
         status     = data.get('status')
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'completed', 'cancelled', 'returned_failed']
+        # 'completed' is deliberately NOT in this list — only the dedicated
+        # Remit endpoint (admin_mark_delivered) may complete an order, since
+        # it enforces amount_remitted matching the order's grand total and
+        # stamps completed_at. Going through this generic route instead
+        # would complete an order with neither check, and it would then be
+        # invisible to _remittance_summary() (which keys off completed_at)
+        # — final-defense follow-up, Nov 14 2026. No existing caller sends
+        # 'completed' here (confirmed — only the Remit modal does, via its
+        # own endpoint), so removing it from the whitelist doesn't change
+        # anything that was actually working.
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'cancelled', 'returned_failed']
         if status not in valid_statuses:
-            return jsonify({'error': 'Invalid status.'}), 400
+            return jsonify({'error': 'Invalid status. Use the Remit action to complete an order.'}), 400
 
         # Fetch the order's current state once — needed to decide whether
         # this transition actually takes stock off the shelf (pending ->
@@ -5805,6 +5836,82 @@ def paymongo_gcash_return():
 </body>
 </html>"""
 
+def _resolve_pos_item_price(product, selected_options):
+    """Server-side mirror of admin.js's resolveVariantPricing() + the
+    active per-product discount applied on top — the same 3-layer price
+    resolution (exact variant_overrides combo -> first option_groups
+    choice with its own price/image override -> base product.price) the
+    POS frontend uses to show a price, computed here from the product row
+    itself so a POS sale can't be recorded at whatever price a tampered
+    client sends (final-defense follow-up, Nov 14 2026 — staff_place_order
+    used to take item['price'] straight from the request body)."""
+    base_price = float(product.get('price') or 0)
+    resolved   = base_price
+    if selected_options:
+        overrides = product.get('variant_overrides') or []
+        combo = next((o for o in overrides if isinstance(o, dict)
+                      and o.get('options') == selected_options), None)
+        if combo:
+            cprice   = combo.get('price')
+            resolved = float(cprice) if cprice not in (None, '') else base_price
+        else:
+            for g in (product.get('option_groups') or []):
+                chosen = selected_options.get(g.get('label'))
+                if chosen is None:
+                    continue
+                choice = next((c for c in (g.get('choices') or [])
+                               if isinstance(c, dict) and c.get('value') == chosen), None)
+                if choice:
+                    cprice    = choice.get('price')
+                    has_price = cprice not in (None, '')
+                    has_image = bool(choice.get('image'))
+                    if has_price or has_image:
+                        resolved = float(cprice) if has_price else base_price
+                        break
+    disc = product.get('discount')
+    if isinstance(disc, list):
+        disc = disc[0] if disc else None
+    if disc and disc.get('percentage'):
+        resolved = resolved * (1 - float(disc['percentage']) / 100)
+    return round(resolved, 2)
+
+
+def _check_pos_stock_availability(cart_items, branch_id):
+    """Pre-checkout availability check for the POS walk-in flow, run BEFORE
+    the order is created — mirrors _deduct_order_item_stock's own pass-1
+    (same product/branch_stock/variant_stock lookups). Until now POS had no
+    such gate: it deducted straight through and floored stock at 0,
+    overselling silently with no warning to the cashier (final-defense
+    follow-up, Nov 14 2026 — the online-order path already guarded this via
+    _deduct_order_item_stock; POS never did). Returns (ok, error_or_None)."""
+    shortages = []
+    for item in cart_items:
+        pid  = item.get('product_id')
+        qty  = int(item.get('quantity') or 0)
+        opts = item.get('selected_options') or {}
+        if not pid or not qty:
+            continue
+        available = 0
+        try:
+            if opts and branch_id:
+                all_vs = supabase.table('variant_stock').select('quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                available = match[0]['quantity'] if match else 0
+            elif branch_id:
+                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                available = bs.data[0]['quantity'] if bs.data else 0
+            else:
+                pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                available = pr.data[0]['quantity'] if pr.data else 0
+        except Exception as check_err:
+            print(f'POS stock availability check warning ({pid}): {check_err}')
+        if available < qty:
+            shortages.append(f"{item.get('product_name') or pid[:8]} (need {qty}, have {available})")
+    if shortages:
+        return False, 'Insufficient stock — ' + '; '.join(shortages)
+    return True, None
+
+
 @app.route('/api/staff/orders', methods=['POST'])
 @staff_required
 def staff_place_order():
@@ -5815,8 +5922,6 @@ def staff_place_order():
         ref_no            = data.get('ref_no', '')
         payment_intent_id = data.get('payment_intent_id', '')
         order_type        = data.get('order_type', 'walk_in')
-        quantity          = data.get('quantity', 0)
-        total             = data.get('total', 0)
         branch_id         = data.get('branch_id')  # which branch processed this sale
         is_offline_sync = bool(data.get('is_offline_sync', False))  # True when this sale was made during a connection outage and is only now reaching the server
         # Idempotency key — the same UUID the client generated at the moment
@@ -5863,6 +5968,50 @@ def staff_place_order():
             elif not ref_no:
                 return jsonify({'error': 'GCash reference number is required.'}), 400
 
+        # ── Server-side price + stock verification — never trust the
+        # client for money or for whether stock is actually available
+        # (final-defense follow-up, Nov 14 2026). Every item's unit price
+        # is re-resolved from the product row itself (base price, variant
+        # override, and active per-product discount — same 3-layer
+        # resolution the POS frontend uses), and the whole sale is blocked
+        # up front if any item is short, instead of silently flooring
+        # stock at zero and overselling. ──────────────────────────────
+        product_ids = list({item.get('product_id') for item in cart_items if item.get('product_id')})
+        products_res = supabase.table('product').select(
+            'product_id, price, option_groups, variant_overrides, discount(percentage)'
+        ).in_('product_id', product_ids).execute() if product_ids else None
+        products_by_id = {p['product_id']: p for p in ((products_res.data if products_res else None) or [])}
+
+        resolved_prices = []
+        for item in cart_items:
+            pid = item.get('product_id')
+            if pid not in products_by_id:
+                return jsonify({'error': 'A product in this sale no longer exists or is unavailable.'}), 400
+            resolved_prices.append(_resolve_pos_item_price(products_by_id[pid], item.get('selected_options') or {}))
+
+        ok, stock_err = _check_pos_stock_availability(cart_items, branch_id)
+        if not ok:
+            return jsonify({'error': stock_err}), 400
+
+        quantity = sum(int(item.get('quantity') or 0) for item in cart_items)
+        subtotal = sum(price * int(item.get('quantity') or 0) for price, item in zip(resolved_prices, cart_items))
+
+        # Whole-order discount (PWD/Senior/Teacher's, etc.) — re-validated
+        # against the DB (percentage + active date range) rather than
+        # trusting the client's discount_pct.
+        discount_id  = data.get('discount_id')
+        discount_pct = 0.0
+        if discount_id:
+            d_res = supabase.table('discount').select('percentage, starts_at, ends_at').eq('discount_id', discount_id).execute()
+            if d_res.data:
+                d         = d_res.data[0]
+                now_iso   = datetime.now(timezone.utc).isoformat()
+                is_active = (not d.get('ends_at') or d['ends_at'] >= now_iso) and (not d.get('starts_at') or d['starts_at'] <= now_iso)
+                if is_active:
+                    discount_pct = float(d.get('percentage') or 0)
+
+        total = round(subtotal - (subtotal * discount_pct / 100), 2)
+
         # ── Create order ──────────────────────────────
         order_res = supabase.table('order').insert({
             'staff_id':          session.get('staff_id'),
@@ -5882,9 +6031,9 @@ def staff_place_order():
             'order_id':        order_id,
             'product_id':      item['product_id'],
             'qty':             item['quantity'],
-            'price':           item['price'],
+            'price':           price,
             'selected_options': item.get('selected_options', {}),
-        } for item in cart_items]).execute()
+        } for price, item in zip(resolved_prices, cart_items)]).execute()
 
         # ── Create payment ────────────────────────────
         payment_res = supabase.table('payment').insert({
@@ -5982,9 +6131,12 @@ def staff_update_order(order_id):
     try:
         data       = request.get_json()
         status     = data.get('status')
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'completed', 'cancelled', 'returned_failed']
+        # 'completed' deliberately excluded — see the matching comment in
+        # admin_update_order; only the dedicated Remit endpoint may
+        # complete an order.
+        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'cancelled', 'returned_failed']
         if status not in valid_statuses:
-            return jsonify({'error': 'Invalid status.'}), 400
+            return jsonify({'error': 'Invalid status. Use the Remit action to complete an order.'}), 400
 
         # Fetch the order's current state once — same purpose as the admin
         # route: deciding whether this transition takes stock off the shelf
@@ -5999,6 +6151,17 @@ def staff_update_order(order_id):
         branch_id         = order_row.get('branch_id')
         already_processed = bool(order_row.get('processing_started_at'))
         order_items       = order_row.get('order_item') or []
+
+        # Branch scoping — same guard staff_return_order_items already has
+        # a few routes down; this route and the two below it (mark-
+        # delivered, mark-not-delivered) never had it, so a staff account
+        # could act on another branch's order just by knowing/guessing its
+        # order_id (final-defense follow-up, Nov 14 2026).
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
+        if my_branch and branch_id and branch_id != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
 
         # Same daily processing cap enforced here as admin's route/the batch action.
         if status == 'processing':
@@ -6217,7 +6380,7 @@ def staff_mark_delivered(order_id):
     try:
         data = request.get_json(silent=True) or {}
         order_res = supabase.table('order').select(
-            'order_id, status, total, shipping_fee, payment(payment_method, status)'
+            'order_id, status, branch_id, total, shipping_fee, payment(payment_method, status)'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
@@ -6225,6 +6388,13 @@ def staff_mark_delivered(order_id):
         order_data = order_res.data[0]
         if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
             return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked delivered.'}), 400
+
+        # Branch scoping — see the matching comment in staff_update_order.
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
+        if my_branch and order_data.get('branch_id') and order_data.get('branch_id') != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
 
         ok, err = _validate_remittance(data, order_data)
         if not ok:
@@ -6259,6 +6429,13 @@ def staff_mark_not_delivered(order_id):
         order_data = order_res.data[0]
         if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
             return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked not delivered.'}), 400
+
+        # Branch scoping — see the matching comment in staff_update_order.
+        staff_id  = session.get('staff_id')
+        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
+        if my_branch and order_data.get('branch_id') and order_data.get('branch_id') != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
 
         attempts = int(order_data.get('delivery_attempts') or 0) + 1
         attempted_at = datetime.now(timezone.utc).isoformat()
