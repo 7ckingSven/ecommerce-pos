@@ -5921,7 +5921,7 @@ function renderSalesData(completed, allOrders) {
       },
       options: { responsive:true, maintainAspectRatio:false,
         cutout: '68%',
-        plugins:{ legend:{ position:'bottom', labels:{ boxWidth:13, padding:14, font:{ size:12 } } } } }
+        plugins:{ legend:{ display:true, position:'bottom', labels:{ boxWidth:12, font:{ size:11 } } } } }
     });
   }
 
