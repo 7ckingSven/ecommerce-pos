@@ -26,8 +26,9 @@ import NetworkBanner from '../components/NetworkBanner';
 const ProductCard = React.memo(function ProductCard({ product, onPress, onAddToCart, onBuyNow }) {
   const { colors: COLORS } = useTheme();
   const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
-  const inStock    = (product._branchQty || product.quantity || 0) > 0;
-  const branchName = product._branchName || null;
+  // No per-branch tag anymore (revision, Nov 2026) — one card per product,
+  // backed by the single warehouse pool's quantity.
+  const inStock = (product.quantity || 0) > 0;
 
   // Calculate discounted price if discount exists
   const discountedPrice = product.discount
@@ -64,11 +65,6 @@ const ProductCard = React.memo(function ProductCard({ product, onPress, onAddToC
         <Text style={styles.productName} numberOfLines={2}>{product.product_name}</Text>
         {product.brand ? <Text style={styles.productBrand}>{product.brand}</Text> : null}
         <Text style={styles.productCat}>{product.category}</Text>
-{branchName ? (
-          <View style={styles.branchTag}>
-            <Text style={styles.branchTagText}>🏪 {branchName}</Text>
-          </View>
-        ) : null}
 
         {/* Sold Count */}
         <Text style={styles.soldCount}>
@@ -117,12 +113,9 @@ const ProductCard = React.memo(function ProductCard({ product, onPress, onAddToC
   );
 });
 
-// Same critical-stock reserve threshold now used backend-side (app.py's
-// CRITICAL_STOCK_LEVEL) and in the POS screen — a product/branch at or
-// below this many units is treated as unavailable here too, not just
-// literal zero, so the shop keeps a small buffer instead of selling a
-// branch all the way down to its last unit.
-const CRITICAL_STOCK_LEVEL = 5;
+// Critical-stock reserve hiding is now done entirely server-side against
+// the warehouse pool (app.py's CRITICAL_STOCK_LEVEL, /api/products) — this
+// screen no longer needs its own copy of the threshold (revision, Nov 2026).
 
 // ─── Sort Options (M4) ────────────────────────────────
 const SORT_OPTIONS = [
@@ -152,12 +145,11 @@ export default function HomeScreen({ navigation }) {
   const [brands,      setBrands]      = useState([]);
   const [selectedCat,   setSelectedCat]   = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
-  // Branch filter bar (user request, Oct 29 2026) — '' = "All Branch" (both
-  // branches combined, the pre-existing default). branchList is built from
-  // the live product data itself (branch_stock[].branch), not hardcoded, so
-  // it stays correct if branch names ever change — see loadProducts below.
-  const [selectedBranch, setSelectedBranch] = useState('');
-  const [branchList,     setBranchList]     = useState([]); // [{branch_id, branch_name}]
+  // Branch filter bar removed (revision, Nov 2026) — the customer no longer
+  // picks a branch at all; product availability now comes from the single
+  // warehouse_stock pool, so there's nothing branch-specific left to filter
+  // by on this screen. selectedBranch/branchList and the whole filter row
+  // that used them are gone.
   const [search,      setSearch]      = useState('');
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
@@ -247,10 +239,10 @@ export default function HomeScreen({ navigation }) {
   // tabPress listener below, which may be holding an older closure — always
   // reads the LATEST filter/sort values instead of whatever existed when
   // that listener was created.
-  const liveFiltersRef = useRef({ cat: '', brand: '', search: '', sort: 'relevance', branch: '' });
+  const liveFiltersRef = useRef({ cat: '', brand: '', search: '', sort: 'relevance' });
   useEffect(() => {
-    liveFiltersRef.current = { cat: selectedCat, brand: selectedBrand, search, sort: selectedSort, branch: selectedBranch };
-  }, [selectedCat, selectedBrand, search, selectedSort, selectedBranch]);
+    liveFiltersRef.current = { cat: selectedCat, brand: selectedBrand, search, sort: selectedSort };
+  }, [selectedCat, selectedBrand, search, selectedSort]);
 
   // Load once whenever the Home screen gains focus — no background polling
   // (matches the web dashboards: data loads on view, refresh is on-demand).
@@ -305,30 +297,16 @@ export default function HomeScreen({ navigation }) {
   async function loadProducts(overrides) {
     try {
       setError(false);
-      // Always fetch ALL products — filter client-side to preserve chip list
+      // Always fetch ALL products — filter client-side to preserve chip list.
+      // One card per product now (revision, Nov 2026) — the backend already
+      // hides a product entirely when the warehouse pool is at/below the
+      // critical reserve level (same /api/products route, no branch_id
+      // sent from this screen anymore), so nothing left to expand here.
       const data = await getProducts('');
-      // Expand products by branch — one card per branch with stock above
-      // the critical reserve level. A branch at or below that level is
-      // skipped entirely (no card at all), not just shown as "Out of
-      // Stock" — if a product has no qualifying branch, it doesn't appear
-      // in the list at all.
-      const expanded = [];
-      data.forEach(p => {
-        const branches = (p.branch_stock || []).filter(bs => bs.quantity > CRITICAL_STOCK_LEVEL);
-        branches.forEach(bs => {
-          expanded.push({
-            ...p,
-            _branchId:   bs.branch_id,
-            _branchName: bs.branch?.branch_name || null,
-            _branchQty:  bs.quantity,
-            quantity:    bs.quantity,
-          });
-        });
-      });
-      setAllProducts(expanded);
+      setAllProducts(data);
       {
-        const { cat, brand, search: q, sort, branch } = overrides || liveFiltersRef.current;
-        applyFilters(cat, brand, q, expanded, sort, branch);
+        const { cat, brand, search: q, sort } = overrides || liveFiltersRef.current;
+        applyFilters(cat, brand, q, data, sort);
       }
 
       // Build category and brand lists from full dataset
@@ -336,19 +314,6 @@ export default function HomeScreen({ navigation }) {
       const brnds  = [...new Set(data.map(p => p.brand?.trim()).filter(Boolean))].sort();
       setCategories(cats);
       setBrands(brnds);
-
-      // Build the branch filter bar's options from the live data (not
-      // hardcoded "Triple E"/"Fiel Collince") — one entry per distinct
-      // branch_id actually carrying stock right now.
-      const branchMap = new Map();
-      data.forEach(p => {
-        (p.branch_stock || []).forEach(bs => {
-          if (bs.branch_id && bs.branch?.branch_name && !branchMap.has(bs.branch_id)) {
-            branchMap.set(bs.branch_id, bs.branch.branch_name);
-          }
-        });
-      });
-      setBranchList([...branchMap.entries()].map(([branch_id, branch_name]) => ({ branch_id, branch_name })));
     } catch (e) {
       console.error('Load products error:', e);
       setError(true);
@@ -364,49 +329,21 @@ export default function HomeScreen({ navigation }) {
     try {
       const res  = await api.get('/products');
       const data = res.data || [];
-      const expanded = [];
-      data.forEach(p => {
-        const branches = (p.branch_stock || []).filter(bs => bs.quantity > CRITICAL_STOCK_LEVEL);
-        branches.forEach(bs => {
-          expanded.push({
-            ...p,
-            _branchId:   bs.branch_id,
-            _branchName: bs.branch?.branch_name || null,
-            _branchQty:  bs.quantity,
-            quantity:    bs.quantity,
-          });
-        });
-      });
-      setAllProducts(expanded);
-
-      const branchMap = new Map();
-      data.forEach(p => {
-        (p.branch_stock || []).forEach(bs => {
-          if (bs.branch_id && bs.branch?.branch_name && !branchMap.has(bs.branch_id)) {
-            branchMap.set(bs.branch_id, bs.branch.branch_name);
-          }
-        });
-      });
-      setBranchList([...branchMap.entries()].map(([branch_id, branch_name]) => ({ branch_id, branch_name })));
+      setAllProducts(data);
 
       // Re-apply current filters silently — read from the ref (always live),
       // not the closed-over state vars, which may be stale inside this timer.
-      const { cat, brand, search: q, sort, branch } = liveFiltersRef.current;
-      applyFilters(cat, brand, q, expanded, sort, branch);
+      const { cat, brand, search: q, sort } = liveFiltersRef.current;
+      applyFilters(cat, brand, q, data, sort);
     } catch (e) {
       // Silent fail - don't disrupt user
     }
   }
 
-  function applyFilters(cat, brand, q, sourceProducts, sort, branch) {
-    let filtered = sourceProducts || allProducts; // already expanded by branch
+  function applyFilters(cat, brand, q, sourceProducts, sort) {
+    let filtered = sourceProducts || allProducts;
     if (cat)   filtered = filtered.filter(p => p.category?.trim() === cat);
     if (brand) filtered = filtered.filter(p => p.brand?.trim() === brand);
-    // Branch filter bar — '' (All Branch) leaves both branches' cards in;
-    // otherwise keep only the card whose own _branchId matches (products
-    // are already expanded one card per branch, see loadProducts above).
-    const branchFilter = branch !== undefined ? branch : selectedBranch;
-    if (branchFilter) filtered = filtered.filter(p => p._branchId === branchFilter);
     if (q)     filtered = filtered.filter(p =>
       p.product_name?.toLowerCase().includes(q.toLowerCase()) ||
       p.brand?.toLowerCase().includes(q.toLowerCase()) ||
@@ -414,12 +351,6 @@ export default function HomeScreen({ navigation }) {
     );
     filtered = sortProducts(filtered, sort !== undefined ? sort : selectedSort);
     setProducts(filtered);
-  }
-
-  // Branch filter bar tap handler (user request, Oct 29 2026).
-  function handleBranchFilter(branchId) {
-    setSelectedBranch(branchId);
-    applyFilters(selectedCat, selectedBrand, search, null, selectedSort, branchId);
   }
 
   function updateSuggestions(q, page = 1) {
@@ -509,15 +440,12 @@ export default function HomeScreen({ navigation }) {
   function handleSuggestionTap(prod) {
     saveSearchTerm(prod.product_name);
     Keyboard.dismiss();
-    // Keep searchFocused=true so back button returns to search
-    // Same branch-mismatch fix as handleAddToCart/handleBuyNow above —
-    // suggestions are drawn from the same branch-expanded allProducts list
-    // (see loadProducts), so prod._branchId is this exact suggestion
-    // card's own branch and must win over re-scanning branch_stock.
+    // Keep searchFocused=true so back button returns to search.
+    // No branchId anymore (revision, Nov 2026) — the customer never picks
+    // a branch; stock comes from the single warehouse pool.
     navigation.navigate('ProductDetail', {
-      product: prod,
-      branchId:       prod._branchId || (prod.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null,
-      fromSearch:     true,
+      product:    prod,
+      fromSearch: true,
     });
   }
 
@@ -535,35 +463,23 @@ export default function HomeScreen({ navigation }) {
 
   // ─── Add to Cart (requires login) ────────────────────
   async function handleAddToCart(product) {
-    // Bug fix (Nov 13 2026): this used to ignore product._branchId and just
-    // scan branch_stock for the FIRST branch with qualifying stock — fine
-    // for a product only stocked at one branch, but silently wrong for one
-    // stocked at both, where Home shows a separate card per branch (see
-    // loadProducts' expansion below). Tapping "Add to Cart" on, say, the
-    // Triple E card could resolve to Fiel Collince instead, just because
-    // that branch happened to come first in branch_stock — the wrong
-    // branch then rode all the way through ProductDetail, Checkout, and
-    // the placed order. _branchId (stamped on this exact card) is the
-    // branch that was actually shown/tapped, so it must win first — same
-    // fallback order handleProductPress below already uses correctly.
-    const branchId = product._branchId || (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
-    // Pass the full product (not just its id) + branchId so LoginScreen can
-    // resume straight into ProductDetail for this exact product after login.
-    const ok = await requireLogin('addToCart', { product, branchId });
+    // No branchId anymore (revision, Nov 2026) — the customer never picks
+    // a branch; stock comes from the single warehouse pool, and admin
+    // assigns the fulfilling branch after the order is placed.
+    // Pass the full product (not just its id) so LoginScreen can resume
+    // straight into ProductDetail for this exact product after login.
+    const ok = await requireLogin('addToCart', { product });
     if (!ok) return;
     // Go to ProductDetail so customer can select option groups first
-    navigation.navigate('ProductDetail', { product, branchId });
+    navigation.navigate('ProductDetail', { product });
   }
 
   // ─── Buy Now (requires login → ProductDetail) ────────
   async function handleBuyNow(product) {
-    // Same branch-mismatch fix as handleAddToCart above — prefer the exact
-    // card's own branch over re-scanning branch_stock from scratch.
-    const branchId = product._branchId || (product.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null;
-    const ok = await requireLogin('buyNow', { product, branchId });
+    const ok = await requireLogin('buyNow', { product });
     if (!ok) return;
     // Navigate to ProductDetail — customer selects options then buys
-    navigation.navigate('ProductDetail', { product, branchId });
+    navigation.navigate('ProductDetail', { product });
   }
 
   function onRefresh() {
@@ -575,16 +491,11 @@ export default function HomeScreen({ navigation }) {
     // Explicit overrides, not just the state setters above — liveFiltersRef
     // only catches up to these resets after the next render/effect, which
     // hasn't happened yet by the time loadProducts runs synchronously here.
-    // selectedBranch is intentionally kept (pull-to-refresh clears search/
-    // category/brand/sort, not which branch you're shopping).
-    loadProducts({ cat: '', brand: '', search: '', sort: 'relevance', branch: selectedBranch });
+    loadProducts({ cat: '', brand: '', search: '', sort: 'relevance' });
   }
 
   function handleProductPress(p) {
-    navigation.navigate('ProductDetail', {
-      product:  p,
-      branchId: p._branchId || (p.branch_stock || []).find(b => b.quantity > CRITICAL_STOCK_LEVEL)?.branch_id || null
-    });
+    navigation.navigate('ProductDetail', { product: p });
   }
 
   // Stable function identities so the memoized ProductCard doesn't re-render
@@ -628,7 +539,7 @@ export default function HomeScreen({ navigation }) {
               // which the function signature ignored entirely and which
               // silently reset to the full both-branch list) — keep every
               // other active filter, just clear the search term.
-              loadProducts({ cat: selectedCat, brand: selectedBrand, search: '', sort: selectedSort, branch: selectedBranch });
+              loadProducts({ cat: selectedCat, brand: selectedBrand, search: '', sort: selectedSort });
             }} style={{ padding: 4, marginRight: 4 }}>
               <Feather name="arrow-left" size={20} color="#fff"/>
             </TouchableOpacity>
@@ -656,7 +567,7 @@ export default function HomeScreen({ navigation }) {
                 setSearch('');
                 setSuggestions([]);
                 // Same explicit-overrides fix as the back arrow above.
-                loadProducts({ cat: selectedCat, brand: selectedBrand, search: '', sort: selectedSort, branch: selectedBranch });
+                loadProducts({ cat: selectedCat, brand: selectedBrand, search: '', sort: selectedSort });
               }}>
                 <Feather name="x" size={14} color={COLORS.textMuted}/>
               </TouchableOpacity>
@@ -675,38 +586,16 @@ export default function HomeScreen({ navigation }) {
         </View>
       </View>
 
-      {/* Branch Filter Bar (user request, Oct 29 2026) — "All Branch" shows
-          both branches' stock combined (the original/default behavior);
-          picking a branch narrows the list to just its cards. Options are
-          built from live branch data (branchList), not hardcoded names. */}
-      {branchList.length > 0 && (
-        <View style={styles.branchFilterRow}>
-          <TouchableOpacity
-            style={[styles.branchChip, !selectedBranch && styles.branchChipActive]}
-            onPress={() => handleBranchFilter('')}
-          >
-            <Text style={[styles.branchChipText, !selectedBranch && styles.branchChipTextActive]}>All Branch</Text>
-          </TouchableOpacity>
-          {branchList.map(b => (
-            <TouchableOpacity
-              key={b.branch_id}
-              style={[styles.branchChip, selectedBranch === b.branch_id && styles.branchChipActive]}
-              onPress={() => handleBranchFilter(b.branch_id)}
-            >
-              <Text style={[styles.branchChipText, selectedBranch === b.branch_id && styles.branchChipTextActive]} numberOfLines={1}>
-                {b.branch_name}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
-      )}
+      {/* Branch Filter Bar removed (revision, Nov 2026) — the customer no
+          longer picks a branch; one product card now shows the warehouse
+          pool's availability instead of a per-branch breakdown. */}
 
       {/* Search Overlay — Bug fix: top dynamically uses measured header height */}
       {searchFocused && (
         <View style={[styles.searchOverlay, { top: headerHeight }]}>
           <FlatList
             data={suggestions}
-            keyExtractor={item => `${item.product_id}_${item._branchId || 'none'}`}
+            keyExtractor={item => item.product_id}
             keyboardShouldPersistTaps="handled"
             numColumns={2}
             columnWrapperStyle={{ gap: SPACING.sm, paddingHorizontal: SPACING.md }}
@@ -853,7 +742,7 @@ export default function HomeScreen({ navigation }) {
           // React's ability to diff/recycle rows correctly in the
           // VirtualizedList — this was the real cause behind the "large
           // list that is slow to update" warning, not raw list size.
-          keyExtractor={item => `${item.product_id}_${item._branchId || 'none'}`}
+          keyExtractor={item => item.product_id}
           numColumns={2}
           columnWrapperStyle={styles.productRow}
           // Extra bottom padding so the last row can scroll clear of the
@@ -1052,14 +941,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   activeFiltersRow:       { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', paddingHorizontal: SPACING.md, paddingVertical: 6, gap: 6, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
   activeTag:              { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.full, paddingHorizontal: 10, paddingVertical: 4, borderWidth: 1, borderColor: COLORS.primaryBorder },
   activeTagText:          { fontSize: 11, color: COLORS.primary, fontWeight: '600' },
-  // Branch Filter Bar (user request, Oct 29 2026) — equal-width segmented
-  // buttons (All Branch / each branch), not a scrollable chip row, since
-  // there are only ever a couple of branches to show at once.
-  branchFilterRow:        { flexDirection: 'row', paddingHorizontal: SPACING.md, paddingVertical: 8, gap: 8, backgroundColor: COLORS.surface, borderBottomWidth: 1, borderBottomColor: COLORS.grayBorder },
-  branchChip:             { flex: 1, alignItems: 'center', paddingVertical: 8, borderRadius: RADIUS.full, borderWidth: 1.3, borderColor: COLORS.grayBorder, backgroundColor: COLORS.surface },
-  branchChipActive:       { borderColor: COLORS.primary, backgroundColor: COLORS.primaryBg },
-  branchChipText:         { fontSize: 12.5, color: COLORS.textSecondary, fontWeight: '600' },
-  branchChipTextActive:   { color: COLORS.primary, fontWeight: '700' },
+  // Branch Filter Bar styles removed (revision, Nov 2026) — no branch
+  // picking left on this screen.
   filterOverlay:          { flex: 1, backgroundColor: 'rgba(0,0,0,0.4)' },
   // Shopee-style filter panel: clean bottom sheet, uppercase section
   // labels, and chip grids in place of the old boxed dropdown lists.
@@ -1117,13 +1000,8 @@ const makeStyles = (COLORS) => StyleSheet.create({
   productName:            { fontSize: 12, fontWeight: '600', color: COLORS.dark, marginBottom: 2 },
   productBrand:           { fontSize: 10, color: COLORS.textMuted, marginBottom: 1 },
   productCat:             { fontSize: 10, color: COLORS.textMuted, marginBottom: 4 },
-  // branchTag/branchTagText were referenced above (the 🏪 branch-name tag
-  // on each card) but never actually defined anywhere in this stylesheet —
-  // a pre-existing bug. An undefined style falls back to RN's default text
-  // color (plain black), which happened to be unnoticeable on a white card
-  // in light mode but is stark black-on-dark-card now that dark mode exists.
-  branchTag:              { alignSelf: 'flex-start', backgroundColor: COLORS.primaryBg, borderRadius: RADIUS.sm, paddingHorizontal: 6, paddingVertical: 2, marginBottom: 4 },
-  branchTagText:          { fontSize: 10, color: COLORS.primary, fontWeight: '600' },
+  // branchTag/branchTagText removed (revision, Nov 2026) — no per-branch
+  // tag on cards anymore, one card per product.
 
   // Price
   productPrice:           { fontSize: 13, fontWeight: '700', color: COLORS.primary, marginBottom: 6 },

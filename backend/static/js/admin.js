@@ -299,6 +299,9 @@ var pageTitles = {
   products:        ['Products',          'Manage product catalog and details'],
   inventory:       ['Inventory',         'Manage stock levels and movements'],
   orders:          ['Orders',            'Manage online customer orders'],
+  warehouse:       ['Warehouse',         'Online fulfillment stock, unassigned orders, and pullout history'],
+  feedback:        ['Feedback & Inquiries', 'Review and respond to customer feedback and inquiries'],
+  returns:         ['Returns & Refunds',  'Review and resolve customer return requests'],
   purchase_orders: ['Purchase Orders',   'Manage purchase orders & stock requests'],
   sales:           ['Sales Reports',     'View analytics and generate sales reports'],
   discounts:       ['Discounts',         'Manage product discounts'],
@@ -486,9 +489,14 @@ document.addEventListener('visibilitychange', () => {
 // seconds is less instant but costs nothing — each call is a fast,
 // stateless request, same as any other API call.
 const SSE_TABLE_SECTIONS = {
-  order:     ['orders', 'overview', 'sales'],
-  inventory: ['inventory', 'overview', 'sales', 'purchase_orders'],
-  product:   ['products', 'inventory'],
+  order:               ['orders', 'overview', 'sales', 'warehouse'],
+  inventory:           ['inventory', 'overview', 'sales', 'purchase_orders'],
+  product:             ['products', 'inventory'],
+  warehouse_stock:         ['warehouse'],
+  warehouse_variant_stock: ['warehouse'],
+  warehouse_pullout:       ['warehouse'],
+  feedback:                ['feedback'],
+  return_request:          ['returns'],
 };
 const LIVE_UPDATES_POLL_MS = 8000;
 let _liveUpdatesCursor = 0;
@@ -1031,6 +1039,9 @@ var loaders = {
   products:  loadProducts,
   inventory: loadInventory,
   orders:    loadOrders,
+  warehouse: loadWarehouse,
+  feedback:  loadFeedback,
+  returns:   loadReturns,
   sales:     loadSales,
   discounts: loadDiscounts,
   users:          function() { loadUsers(); loadLoginSessions(); },
@@ -1083,10 +1094,13 @@ function populateBranchSelects(...selectIds) {
 // contained and low-risk to add.
 async function refreshNavBadges() {
   try {
-    const [products, orders, stockRequests] = await Promise.all([
+    const [products, orders, stockRequests, unassignedOrders, feedbackRows, pendingReturns] = await Promise.all([
       fetch('/api/admin/products').then(r => r.json()),
       fetch('/api/admin/orders?limit=80').then(r => r.json()),
       fetch('/api/admin/stock-requests').then(r => r.json()),
+      fetch('/api/admin/orders/unassigned').then(r => r.json()),
+      fetch('/api/admin/feedback?status=open').then(r => r.json()),
+      fetch('/api/staff/returns?status=pending').then(r => r.json()),
     ]);
 
     const activeProducts = (Array.isArray(products) ? products : []).filter(p => p.status === 'active');
@@ -1117,6 +1131,31 @@ async function refreshNavBadges() {
     if (poBadge) {
       poBadge.textContent   = pendingReqs.length;
       poBadge.style.display = pendingReqs.length > 0 ? 'inline' : 'none';
+    }
+
+    // Warehouse nav badge — unassigned online orders waiting for admin to
+    // route them to a branch (revision, Nov 2026).
+    const unassignedCount = Array.isArray(unassignedOrders) ? unassignedOrders.length : 0;
+    const whBadge = document.getElementById('warehouseUnassignedBadge');
+    if (whBadge) {
+      whBadge.textContent   = unassignedCount > 99 ? '99+' : unassignedCount;
+      whBadge.style.display = unassignedCount > 0 ? 'inline-block' : 'none';
+    }
+
+    // Feedback nav badge — open (unanswered) feedback/inquiries.
+    const openFeedbackCount = Array.isArray(feedbackRows) ? feedbackRows.length : 0;
+    const fbBadge = document.getElementById('feedbackOpenBadge');
+    if (fbBadge) {
+      fbBadge.textContent   = openFeedbackCount > 99 ? '99+' : openFeedbackCount;
+      fbBadge.style.display = openFeedbackCount > 0 ? 'inline-block' : 'none';
+    }
+
+    // Returns nav badge — pending customer return requests awaiting review.
+    const pendingReturnsCount = Array.isArray(pendingReturns) ? pendingReturns.length : 0;
+    const retBadge = document.getElementById('returnsPendingBadge');
+    if (retBadge) {
+      retBadge.textContent   = pendingReturnsCount > 99 ? '99+' : pendingReturnsCount;
+      retBadge.style.display = pendingReturnsCount > 0 ? 'inline-block' : 'none';
     }
   } catch (e) { console.error('Nav badges error:', e); }
 }
@@ -5024,6 +5063,623 @@ function closeModal() {
   if (modal)   modal.style.display   = 'none';
   document.body.style.overflow = '';
 }
+
+// ══════════════════════════════════════════════════════
+// WAREHOUSE (revision, Nov 2026) — the single online-fulfillment
+// stock pool, the Unassigned Orders branch-assignment queue, and the
+// Item Pullout history. Admin-only; staff never see any of this (see
+// staff.js's Orders section + the branch-guard fix in app.py's
+// staff_mark_delivered).
+// ══════════════════════════════════════════════════════
+let _warehouseUnassigned   = [];
+let _warehouseStockData    = { stock: [], variant_stock: [] };
+let _warehousePullout      = [];
+let _warehouseActiveTab    = 'unassigned';
+let _assignBranchInFlight  = new Set();
+
+async function loadWarehouse() {
+  skTable('warehouseUnassignedBody', [], 7);
+  skTable('warehouseStockBody', [], 5);
+  skTable('warehousePulloutBody', [], 7);
+  if (!allBranches.length) await loadBranches();
+  try {
+    const [unassignedRes, stockRes, pulloutRes] = await Promise.all([
+      fetch('/api/admin/orders/unassigned'),
+      fetch('/api/admin/warehouse-stock'),
+      fetch('/api/admin/warehouse-pullout?limit=200'),
+    ]);
+    _warehouseUnassigned = unassignedRes.ok ? await unassignedRes.json() : [];
+    _warehouseStockData  = stockRes.ok ? await stockRes.json() : { stock: [], variant_stock: [] };
+    _warehousePullout    = pulloutRes.ok ? await pulloutRes.json() : [];
+  } catch (e) {
+    console.error('Warehouse load error:', e);
+    showToast('Failed to load warehouse data.', 'error');
+  }
+  updateWarehouseUnassignedBadge();
+  renderWarehouseUnassigned();
+  renderWarehouseStock();
+  renderWarehousePullout();
+  switchWarehouseTab(_warehouseActiveTab);
+}
+window.loadWarehouse = loadWarehouse;
+
+function updateWarehouseUnassignedBadge() {
+  const badge = document.getElementById('warehouseUnassignedBadge');
+  if (!badge) return;
+  const count = _warehouseUnassigned.length;
+  badge.textContent   = count > 99 ? '99+' : count;
+  badge.style.display = count > 0 ? 'inline-block' : 'none';
+}
+
+function switchWarehouseTab(tab) {
+  _warehouseActiveTab = tab;
+  const panels = {
+    unassigned: ['warehouseTabUnassignedBtn', 'warehouseUnassignedPanel'],
+    stock:      ['warehouseTabStockBtn', 'warehouseStockPanel'],
+    pullout:    ['warehouseTabPulloutBtn', 'warehousePulloutPanel'],
+  };
+  Object.entries(panels).forEach(([t, [btnId, panelId]]) => {
+    const btn   = document.getElementById(btnId);
+    const panel = document.getElementById(panelId);
+    if (btn)   btn.classList.toggle('active', t === tab);
+    if (panel) panel.style.display = t === tab ? '' : 'none';
+  });
+}
+window.switchWarehouseTab = switchWarehouseTab;
+
+function renderWarehouseUnassigned() {
+  const tbody = document.getElementById('warehouseUnassignedBody');
+  if (!tbody) return;
+  if (!_warehouseUnassigned.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No unassigned orders — the queue is clear.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _warehouseUnassigned.map(o => {
+    const cust      = Array.isArray(o.customer) ? o.customer[0] : o.customer;
+    const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+    const itemCount = (o.order_item || []).length;
+    const placed    = o.created_at ? new Date(o.created_at).toLocaleString() : '—';
+    return `<tr>
+      <td>${o.order_id.slice(0,8).toUpperCase()}</td>
+      <td>${custName || '—'}</td>
+      <td>${itemCount} item(s)</td>
+      <td>₱${Number(o.total || 0).toFixed(2)}</td>
+      <td>${o.fulfillment_type === 'pickup' ? 'Pickup' : 'Delivery'}</td>
+      <td>${placed}</td>
+      <td><button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openAssignBranchModal('${o.order_id}')">Assign Branch</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function openAssignBranchModal(orderId) {
+  const order = _warehouseUnassigned.find(o => o.order_id === orderId);
+  if (!order) return;
+  const cust      = Array.isArray(order.customer) ? order.customer[0] : order.customer;
+  const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+  const addrParts  = (order.address || '').split('|');
+  const addrString = addrParts.length > 1
+    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
+    : order.address || '—';
+  const itemsHtml = (order.order_item || []).length
+    ? order.order_item.map(i => {
+        const prod = Array.isArray(i.product) ? i.product[0] : i.product;
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+          <span>${prod?.product_name || '—'}</span><span style="color:var(--text-muted);">x${i.qty}</span>
+        </div>`;
+      }).join('')
+    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
+  const branchOptions = allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+
+  showModal(`
+    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:17px;">Assign to Branch</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${order.order_id.slice(0,8).toUpperCase()} — ${custName}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;">
+        <span style="color:var(--text-muted);">${order.fulfillment_type === 'pickup' ? 'Pickup order' : 'Delivery Address'}</span><br/>
+        <strong>${order.fulfillment_type === 'pickup' ? 'Customer will pick up at the assigned branch' : (addrString || 'No address provided')}</strong>
+      </div>
+
+      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS</div>
+      ${itemsHtml}
+
+      <div style="margin-top:1rem;">
+        <label class="form-label" style="font-size:12px;">Fulfilling Branch</label>
+        <select id="assignBranchSelect" class="form-input" style="width:100%;">
+          <option value="">Select branch</option>
+          ${branchOptions}
+        </select>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1.5rem;">
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-solid-green" onclick="confirmAssignBranch('${order.order_id}')">Assign</button>
+      </div>
+    </div>
+  `, '480px', true);
+}
+window.openAssignBranchModal = openAssignBranchModal;
+
+async function confirmAssignBranch(orderId) {
+  if (_assignBranchInFlight.has(orderId)) return;
+  const select   = document.getElementById('assignBranchSelect');
+  const branchId = select ? select.value : '';
+  if (!branchId) { showToast('Please select a branch.', 'error'); return; }
+  _assignBranchInFlight.add(orderId);
+  try {
+    const res = await fetch(`/api/admin/orders/${orderId}/assign-branch`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ branch_id: branchId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to assign branch.', 'error'); return; }
+    showToast('Order assigned to branch.');
+    closeModal();
+    invalidateSection('warehouse');
+    invalidateSection('orders');
+    loadWarehouse();
+  } catch (e) {
+    console.error('Assign branch error:', e);
+    showToast('Failed to assign branch.', 'error');
+  } finally {
+    _assignBranchInFlight.delete(orderId);
+  }
+}
+window.confirmAssignBranch = confirmAssignBranch;
+
+function renderWarehouseStock() {
+  const tbody = document.getElementById('warehouseStockBody');
+  if (!tbody) return;
+  const rows = _warehouseStockData.stock || [];
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No warehouse stock recorded yet.</td></tr>';
+    return;
+  }
+  const variantsByProduct = {};
+  (_warehouseStockData.variant_stock || []).forEach(v => {
+    (variantsByProduct[v.product_id] = variantsByProduct[v.product_id] || []).push(v);
+  });
+  tbody.innerHTML = rows.map(r => {
+    const prod     = Array.isArray(r.product) ? r.product[0] : r.product;
+    const variants = variantsByProduct[r.product_id] || [];
+    const variantsLabel = variants.length
+      ? variants.map(v => `${Object.values(v.options || {}).join('/')}: ${v.quantity}`).join(', ')
+      : '—';
+    const updated = r.updated_at ? new Date(r.updated_at).toLocaleString() : '—';
+    return `<tr>
+      <td>${prod?.product_name || '—'}</td>
+      <td>${prod?.category || '—'}</td>
+      <td>${r.quantity}</td>
+      <td style="font-size:11px;">${variantsLabel}</td>
+      <td>${updated}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openWarehouseAdjustModal() {
+  const products = (_warehouseStockData.stock || []).map(r => {
+    const prod = Array.isArray(r.product) ? r.product[0] : r.product;
+    return { product_id: r.product_id, name: prod?.product_name || '—' };
+  });
+  const productOptions = products.map(p => `<option value="${p.product_id}">${p.name}</option>`).join('');
+  showModal(`
+    <div style="padding:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <h3 style="margin:0;font-size:17px;">Adjust Warehouse Stock</h3>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+      <label class="form-label" style="font-size:12px;">Product</label>
+      <select id="whAdjustProduct" class="form-input" style="width:100%;margin-bottom:12px;">
+        <option value="">Select product</option>
+        ${productOptions}
+      </select>
+      <label class="form-label" style="font-size:12px;">Quantity Change (negative to deduct)</label>
+      <input type="number" id="whAdjustQty" class="form-input" style="width:100%;margin-bottom:12px;" placeholder="e.g. 50 or -10"/>
+      <label class="form-label" style="font-size:12px;">Note (optional)</label>
+      <input type="text" id="whAdjustNote" class="form-input" style="width:100%;margin-bottom:12px;" placeholder="e.g. Restock from supplier"/>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-solid-green" onclick="confirmWarehouseAdjust()">Save</button>
+      </div>
+    </div>
+  `, '480px', true);
+}
+window.openWarehouseAdjustModal = openWarehouseAdjustModal;
+
+async function confirmWarehouseAdjust() {
+  const productId = document.getElementById('whAdjustProduct')?.value;
+  const qtyRaw     = document.getElementById('whAdjustQty')?.value;
+  const note       = document.getElementById('whAdjustNote')?.value || '';
+  const qty = parseInt(qtyRaw, 10);
+  if (!productId)      { showToast('Please select a product.', 'error'); return; }
+  if (!qty || isNaN(qty)) { showToast('Please enter a non-zero quantity.', 'error'); return; }
+  try {
+    const res = await fetch('/api/admin/warehouse-stock/adjust', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: productId, quantity: qty, note }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to adjust stock.', 'error'); return; }
+    showToast('Warehouse stock updated.');
+    closeModal();
+    invalidateSection('warehouse');
+    invalidateSection('inventory');
+    loadWarehouse();
+  } catch (e) {
+    console.error('Warehouse adjust error:', e);
+    showToast('Failed to adjust stock.', 'error');
+  }
+}
+window.confirmWarehouseAdjust = confirmWarehouseAdjust;
+
+function renderWarehousePullout() {
+  const tbody = document.getElementById('warehousePulloutBody');
+  if (!tbody) return;
+  if (!_warehousePullout.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No pullouts recorded yet.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _warehousePullout.map(p => {
+    const prod      = Array.isArray(p.product) ? p.product[0] : p.product;
+    const staff     = Array.isArray(p.staff) ? p.staff[0] : p.staff;
+    const order     = Array.isArray(p.order) ? p.order[0] : p.order;
+    const branchObj = order && (Array.isArray(order.branch) ? order.branch[0] : order.branch);
+    const variantLabel = p.variant_options && Object.keys(p.variant_options).length
+      ? Object.entries(p.variant_options).map(([k,v]) => `${k}: ${v}`).join(', ')
+      : '—';
+    const pulledAt  = p.pulled_at ? new Date(p.pulled_at).toLocaleString() : '—';
+    const staffName = staff ? `${staff.fname || ''} ${staff.lname || ''}`.trim() : 'System';
+    return `<tr>
+      <td>${pulledAt}</td>
+      <td>${p.order_id ? p.order_id.slice(0,8).toUpperCase() : '—'}${branchObj ? ' → ' + branchObj.branch_name : ''}</td>
+      <td>${prod?.product_name || '—'}</td>
+      <td style="font-size:11px;">${variantLabel}</td>
+      <td>${p.quantity}</td>
+      <td>${staffName || '—'}</td>
+      <td style="font-size:11px;color:var(--text-muted);">${p.note || ''}</td>
+    </tr>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════
+// FEEDBACK & INQUIRIES (CRM, revision Nov 2026) — customer-submitted
+// feedback/inquiries from the mobile app (Profile → Feedback &
+// Inquiries). Admin reviews here and replies; the reply shows back to
+// the customer in their own History tab.
+// ══════════════════════════════════════════════════════
+let _feedbackRows      = [];
+let _feedbackActiveTab = 'open';
+
+async function loadFeedback() {
+  skTable('feedbackBody', [], 6);
+  try {
+    const url = _feedbackActiveTab === 'all' ? '/api/admin/feedback' : `/api/admin/feedback?status=${_feedbackActiveTab}`;
+    const res = await fetch(url);
+    _feedbackRows = res.ok ? await res.json() : [];
+  } catch (e) {
+    console.error('Feedback load error:', e);
+    showToast('Failed to load feedback.', 'error');
+    _feedbackRows = [];
+  }
+  renderFeedback();
+}
+window.loadFeedback = loadFeedback;
+
+function switchFeedbackTab(tab) {
+  _feedbackActiveTab = tab;
+  ['open', 'responded', 'closed', 'all'].forEach(t => {
+    const btn = document.getElementById(`feedbackTab${t.charAt(0).toUpperCase()}${t.slice(1)}Btn`);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  loadFeedback();
+}
+window.switchFeedbackTab = switchFeedbackTab;
+
+function renderFeedback() {
+  const tbody = document.getElementById('feedbackBody');
+  if (!tbody) return;
+  if (!_feedbackRows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">Nothing here.</td></tr>';
+    return;
+  }
+  const statusColors = { open: '#f59e0b', responded: '#16a34a', closed: '#6b7280' };
+  tbody.innerHTML = _feedbackRows.map(f => {
+    const cust     = Array.isArray(f.customer) ? f.customer[0] : f.customer;
+    const custName = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+    const created  = f.created_at ? new Date(f.created_at).toLocaleString() : '—';
+    const preview  = (f.subject ? `<strong>${f.subject}</strong><br/>` : '') +
+      `<span style="color:var(--text-muted);">${(f.message || '').slice(0, 80)}${(f.message || '').length > 80 ? '…' : ''}</span>`;
+    const color = statusColors[f.status] || '#6b7280';
+    return `<tr>
+      <td>${created}</td>
+      <td>${custName || '—'}${cust?.email ? `<br/><span style="font-size:11px;color:var(--text-muted);">${cust.email}</span>` : ''}</td>
+      <td>${f.type === 'inquiry' ? 'Inquiry' : 'Feedback'}</td>
+      <td style="font-size:12px;max-width:320px;">${preview}</td>
+      <td><span style="background:${color}1a;color:${color};border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;text-transform:capitalize;">${f.status}</span></td>
+      <td><button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openFeedbackModal('${f.id}')">${f.status === 'open' ? 'Respond' : 'View'}</button></td>
+    </tr>`;
+  }).join('');
+}
+
+function openFeedbackModal(feedbackId) {
+  const f = _feedbackRows.find(r => String(r.id) === String(feedbackId));
+  if (!f) return;
+  const cust      = Array.isArray(f.customer) ? f.customer[0] : f.customer;
+  const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+  const created   = f.created_at ? new Date(f.created_at).toLocaleString() : '—';
+  const alreadyResponded = f.status !== 'open';
+
+  showModal(`
+    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:17px;">${f.type === 'inquiry' ? 'Inquiry' : 'Feedback'}${f.subject ? ' — ' + f.subject : ''}</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">${custName}${cust?.email ? ' · ' + cust.email : ''} · ${created}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;white-space:pre-wrap;">${f.message}</div>
+
+      ${alreadyResponded ? `
+        <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">OUR REPLY${f.responded_at ? ' — ' + new Date(f.responded_at).toLocaleString() : ''}</div>
+        <div style="background:rgba(22,163,74,0.08);border-left:3px solid #16a34a;border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;white-space:pre-wrap;">${f.admin_response || ''}</div>
+      ` : `
+        <label class="form-label" style="font-size:12px;">Your Reply</label>
+        <textarea id="feedbackReplyText" class="form-input" style="width:100%;min-height:100px;margin-bottom:12px;" placeholder="Type your response to the customer..."></textarea>
+      `}
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:0.5rem;">
+        <button class="btn btn-cancel" onclick="closeModal()">Close</button>
+        ${f.status === 'open'
+          ? `<button class="btn btn-solid-green" onclick="confirmFeedbackRespond('${f.id}')">Send Reply</button>`
+          : f.status === 'responded'
+            ? `<button class="btn btn-solid-green" onclick="confirmFeedbackClose('${f.id}')">Mark Closed</button>`
+            : ''}
+      </div>
+    </div>
+  `, '520px', true);
+}
+window.openFeedbackModal = openFeedbackModal;
+
+async function confirmFeedbackRespond(feedbackId) {
+  const text = document.getElementById('feedbackReplyText')?.value?.trim();
+  if (!text) { showToast('Please enter a reply.', 'error'); return; }
+  try {
+    const res = await fetch(`/api/admin/feedback/${feedbackId}/respond`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ admin_response: text }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to send reply.', 'error'); return; }
+    showToast('Reply sent.');
+    closeModal();
+    invalidateSection('feedback');
+    loadFeedback();
+  } catch (e) {
+    console.error('Feedback respond error:', e);
+    showToast('Failed to send reply.', 'error');
+  }
+}
+window.confirmFeedbackRespond = confirmFeedbackRespond;
+
+async function confirmFeedbackClose(feedbackId) {
+  try {
+    const res = await fetch(`/api/admin/feedback/${feedbackId}/close`, { method: 'PUT' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to close.', 'error'); return; }
+    showToast('Marked closed.');
+    closeModal();
+    invalidateSection('feedback');
+    loadFeedback();
+  } catch (e) {
+    console.error('Feedback close error:', e);
+    showToast('Failed to close.', 'error');
+  }
+}
+window.confirmFeedbackClose = confirmFeedbackClose;
+
+// ══════════════════════════════════════════════════════
+// RETURNS & REFUNDS (revision, Nov 2026) — unscoped, all-branches view.
+// Same /api/staff/returns endpoints as the staff dashboard (staff_required
+// allows admin too); admin just sees every branch's requests instead of
+// one branch's.
+// ══════════════════════════════════════════════════════
+let _returnsRows      = [];
+let _returnsActiveTab = 'pending';
+
+async function loadReturns() {
+  skTable('returnsBody', [], 8);
+  try {
+    const res = await fetch(`/api/staff/returns?status=${_returnsActiveTab}`);
+    _returnsRows = res.ok ? await res.json() : [];
+  } catch (e) {
+    console.error('Returns load error:', e);
+    showToast('Failed to load returns.', 'error');
+    _returnsRows = [];
+  }
+  if (_returnsActiveTab === 'pending') {
+    const badge = document.getElementById('returnsPendingBadge');
+    if (badge) {
+      const count = _returnsRows.length;
+      badge.textContent   = count > 99 ? '99+' : count;
+      badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+  }
+  renderReturns();
+}
+window.loadReturns = loadReturns;
+
+function switchReturnsTab(tab) {
+  _returnsActiveTab = tab;
+  ['pending', 'approved', 'rejected', 'refunded'].forEach(t => {
+    const btn = document.getElementById(`returnsTab${t.charAt(0).toUpperCase()}${t.slice(1)}Btn`);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  loadReturns();
+}
+window.switchReturnsTab = switchReturnsTab;
+
+function renderReturns() {
+  const tbody = document.getElementById('returnsBody');
+  if (!tbody) return;
+  if (!_returnsRows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Nothing here.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _returnsRows.map(r => {
+    const order     = Array.isArray(r.order) ? r.order[0] : r.order;
+    const cust      = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
+    const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+    const branchObj = order && (Array.isArray(order.branch) ? order.branch[0] : order.branch);
+    const requested = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
+    const itemCount = (r.return_request_item || []).length;
+    const action = r.status === 'pending'
+      ? `<button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openReturnReviewModal('${r.id}')">Review</button>`
+      : r.status === 'approved' && r.refund_method === 'cash'
+        ? `<button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="confirmReturnMarkRefunded('${r.id}')">Mark Refunded</button>`
+        : `<button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="openReturnReviewModal('${r.id}')">View</button>`;
+    return `<tr>
+      <td>${requested}</td>
+      <td>#${(r.order_id || '').slice(0,8).toUpperCase()}</td>
+      <td>${custName || '—'}</td>
+      <td>${branchObj?.branch_name || '—'}</td>
+      <td>${itemCount} item(s)</td>
+      <td style="text-transform:uppercase;font-size:11px;">${r.refund_method || '—'}</td>
+      <td style="text-transform:capitalize;">${r.status}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openReturnReviewModal(returnId) {
+  const r = _returnsRows.find(x => String(x.id) === String(returnId));
+  if (!r) return;
+  const order     = Array.isArray(r.order) ? r.order[0] : r.order;
+  const cust      = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
+  const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+  const branchObj = order && (Array.isArray(order.branch) ? order.branch[0] : order.branch);
+  const requested = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
+  const itemsHtml = (r.return_request_item || []).map(rri => {
+    const oi   = rri.order_item || {};
+    const prod = Array.isArray(oi.product) ? oi.product[0] : oi.product;
+    const opts = oi.selected_options && Object.keys(oi.selected_options).length
+      ? Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(', ')
+      : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+      <span>${prod?.product_name || '—'}${opts ? ` <span style="color:var(--text-muted);">(${opts})</span>` : ''}</span>
+      <span style="color:var(--text-muted);">x${rri.qty_returned}</span>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-muted);text-align:center;">No items</p>';
+
+  const canAct = r.status === 'pending';
+
+  showModal(`
+    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:17px;">Return Request</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${(r.order_id || '').slice(0,8).toUpperCase()} — ${custName}${branchObj ? ' — ' + branchObj.branch_name : ''} — ${requested}</p>
+        </div>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;">
+        <span style="color:var(--text-muted);">Reason</span><br/>${r.reason || '—'}
+      </div>
+
+      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS TO RETURN</div>
+      ${itemsHtml}
+
+      <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
+        Refund method: <strong style="text-transform:uppercase;">${r.refund_method || '—'}</strong>
+        ${r.refund_method === 'gcash' ? ' — reversed automatically through PayMongo on approval.' : ' — the branch hands back cash, then confirms with "Mark Refunded".'}
+      </div>
+
+      ${r.status === 'rejected' && r.rejection_reason
+        ? `<div style="background:rgba(239,68,68,0.08);border-left:3px solid #ef4444;border-radius:8px;padding:10px;margin-top:10px;font-size:12px;">Rejected: ${r.rejection_reason}</div>`
+        : ''}
+
+      ${canAct ? `
+        <label class="form-label" style="font-size:12px;margin-top:12px;">Rejection Reason (only needed if rejecting)</label>
+        <textarea id="returnRejectReason" class="form-input" style="width:100%;min-height:70px;margin-bottom:12px;" placeholder="Why is this return being rejected?"></textarea>
+      ` : ''}
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:0.5rem;">
+        <button class="btn btn-cancel" onclick="closeModal()">Close</button>
+        ${canAct ? `
+          <button class="btn btn-cancel" style="border-color:#ef4444;color:#ef4444;" onclick="confirmReturnReject('${r.id}')">Reject</button>
+          <button class="btn btn-solid-green" onclick="confirmReturnApprove('${r.id}')">Approve</button>
+        ` : ''}
+      </div>
+    </div>
+  `, '520px', true);
+}
+window.openReturnReviewModal = openReturnReviewModal;
+
+async function confirmReturnApprove(returnId) {
+  try {
+    const res  = await fetch(`/api/staff/returns/${returnId}/approve`, { method: 'PUT' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to approve return.', 'error'); return; }
+    showToast(data.warning ? data.warning : 'Return approved.', data.warning ? 'error' : 'success');
+    closeModal();
+    invalidateSection('returns');
+    invalidateSection('warehouse');
+    invalidateSection('inventory');
+    loadReturns();
+  } catch (e) {
+    console.error('Approve return error:', e);
+    showToast('Failed to approve return.', 'error');
+  }
+}
+window.confirmReturnApprove = confirmReturnApprove;
+
+async function confirmReturnReject(returnId) {
+  const reason = document.getElementById('returnRejectReason')?.value?.trim();
+  if (!reason) { showToast('Please enter a rejection reason — the customer will see it.', 'error'); return; }
+  try {
+    const res = await fetch(`/api/staff/returns/${returnId}/reject`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rejection_reason: reason }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to reject return.', 'error'); return; }
+    showToast('Return rejected.');
+    closeModal();
+    invalidateSection('returns');
+    loadReturns();
+  } catch (e) {
+    console.error('Reject return error:', e);
+    showToast('Failed to reject return.', 'error');
+  }
+}
+window.confirmReturnReject = confirmReturnReject;
+
+async function confirmReturnMarkRefunded(returnId) {
+  try {
+    const res  = await fetch(`/api/staff/returns/${returnId}/mark-refunded`, { method: 'PUT' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to mark refunded.', 'error'); return; }
+    showToast('Marked refunded.');
+    closeModal();
+    invalidateSection('returns');
+    loadReturns();
+  } catch (e) {
+    console.error('Mark refunded error:', e);
+    showToast('Failed to mark refunded.', 'error');
+  }
+}
+window.confirmReturnMarkRefunded = confirmReturnMarkRefunded;
 
 function viewOrderItems(order) {
   const items    = order.order_item || [];

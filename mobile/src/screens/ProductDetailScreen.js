@@ -25,13 +25,13 @@ const CRITICAL_STOCK_LEVEL = 5;
 export default function ProductDetailScreen({ route, navigation }) {
   const { colors: COLORS, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
-  const { product, branchId, fromSearch } = route.params;
-  // Get branch-specific stock
-  const branchStock = branchId
-    ? (product.branch_stock || []).find(b => b.branch_id === branchId)
-    : (product.branch_stock || [])[0];
-  const branchQty  = branchStock?.quantity ?? product._branchQty ?? product.quantity ?? 0;
-  const branchName = branchStock?.branch?.branch_name || product._branchName || null;
+  const { product, fromSearch } = route.params;
+  // Stock now comes from the single warehouse pool, not a branch (revision,
+  // Nov 2026) — branch_available_qty is the best-available reading (max
+  // across variant combos when the product has variants, else the whole-
+  // product quantity), same shape the backend already computes for the
+  // mobile product list/detail routes.
+  const branchQty  = product.branch_available_qty ?? product.quantity ?? 0;
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
   const insets = useSafeAreaInsets();
 
@@ -166,7 +166,7 @@ export default function ProductDetailScreen({ route, navigation }) {
     }
     setLoadingCart(true);
     try {
-      await addToCart(product.product_id, quantity, branchId || null, selectedOptions);
+      await addToCart(product.product_id, quantity, selectedOptions);
       showAlert({ type: 'success', title: 'Added to Cart!', message: `${product.product_name} (x${quantity}) added to your cart.`, buttons: [ { text: 'Continue Shopping', onPress: () => navigation.goBack() }, { text: 'View Cart', style: 'primary', onPress: () => navigation.navigate('Cart') } ] });
     } catch (e) {
       console.error('Add to cart error:', e);
@@ -224,7 +224,6 @@ export default function ProductDetailScreen({ route, navigation }) {
       cartItems: buyNowItem,
       total:     buyNowTotal,
       isBuyNow:  true,
-      branchId:  branchId || null,
     });
   }
 
@@ -239,7 +238,6 @@ export default function ProductDetailScreen({ route, navigation }) {
     try {
       const res = await api.post('/variant-stock/check', {
         product_id: product.product_id,
-        branch_id:  branchId || null,
         options,
       });
       setVariantStock(res.data.quantity ?? 0);
@@ -352,18 +350,9 @@ export default function ProductDetailScreen({ route, navigation }) {
               ? <View style={styles.tag}><Text style={styles.tagText}>{product.brand}</Text></View>
               : null
             }
-            {/* Bug fix (Nov 13 2026): this used to re-derive the branch by
-                scanning branch_stock for the FIRST branch with qualifying
-                stock, ignoring branchId entirely — so this tag could show
-                e.g. Fiel Collince even when the Triple E card was the one
-                tapped (same anti-pattern already fixed in HomeScreen.js's
-                tap handlers). branchName (computed above from branchId) is
-                the branch that was actually shown/tapped, so reuse it. */}
-            {branchName ? (
-              <View style={[styles.tag, { backgroundColor: 'rgba(22,163,74,0.1)', borderColor: 'rgba(22,163,74,0.3)' }]}>
-                <Text style={styles.tagText}>{branchName}</Text>
-              </View>
-            ) : null}
+          {/* No branch tag anymore (revision, Nov 2026) — online products
+              are no longer tied to a branch; admin assigns fulfillment
+              after the order is placed. */}
           {hasDiscount && (
               <View style={styles.discountTag}>
                 <Feather name="tag" size={10} color={COLORS.white} style={{ marginRight: 3 }}/>

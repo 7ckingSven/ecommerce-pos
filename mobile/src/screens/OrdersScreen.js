@@ -18,6 +18,7 @@ import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
 import { resolveVariantPricing } from '../utils/variantPricing';
+import { submitReturn, getMyReturns } from '../services/returnService';
 
 // ─── Delivery Estimate Helper ────────────────────────
 function getDeliveryEstimate(order) {
@@ -128,21 +129,33 @@ export default function OrdersScreen({ navigation }) {
   const [buyingAgainId, setBuyingAgainId] = useState(null); // order_item_id currently being re-fetched for Buy Again
   const [buyAgainPickerOrder, setBuyAgainPickerOrder] = useState(null); // order whose items are shown in the Buy Again picker (multi-item orders only)
 
+  // ─── Returns & Refunds (revision, Nov 2026) ───────────────────────
+  // myReturns holds every return_request this customer has ever filed
+  // (any status) — used both to render a status badge on the order card
+  // and to hide "Request Return" once one already exists for that order.
+  const [myReturns,        setMyReturns]        = useState([]);
+  const [returnModalOrder, setReturnModalOrder] = useState(null); // order currently being filed a return for
+  const [returnSelections, setReturnSelections] = useState({});   // { [order_item_id]: qty }
+  const [returnReason,     setReturnReason]      = useState('');
+  const [returnSubmitting, setReturnSubmitting]  = useState(false);
+
   // "Buy Again" (completed orders only) — the order_item's own nested
   // product is a slim snapshot (just name/images/price/option_groups, taken
   // from the orders API's select — see api_get_orders in app.py) good enough
   // to redisplay the order, but missing fields ProductDetailScreen needs
-  // (branch_stock, discount, description, current price). So this re-fetches
-  // the CURRENT product by id instead of forwarding that stale snapshot —
-  // which also means Buy Again correctly shows today's price/stock, not
-  // what was paid last time.
-  async function handleBuyAgain(orderItem, branchId) {
+  // (warehouse_stock, discount, description, current price). So this
+  // re-fetches the CURRENT product by id instead of forwarding that stale
+  // snapshot — which also means Buy Again correctly shows today's
+  // price/stock, not what was paid last time. No branch involved — Buy
+  // Again is a new online purchase, sourced from the single warehouse pool
+  // like any other online order (revision, Nov 2026).
+  async function handleBuyAgain(orderItem) {
     if (!orderItem?.product_id) return;
     setBuyingAgainId(orderItem.order_item_id || orderItem.product_id);
     try {
       const res = await api.get(`/products/${orderItem.product_id}`);
       setSelectedOrder(null);
-      navigation.navigate('ProductDetail', { product: res.data, branchId: branchId || null });
+      navigation.navigate('ProductDetail', { product: res.data });
     } catch (e) {
       showAlert({ type: 'error', title: 'Unavailable', message: 'This product could not be loaded — it may have been removed.' });
     } finally {
@@ -239,7 +252,80 @@ export default function OrdersScreen({ navigation }) {
     } finally {
       setLoading(false);
     }
+    // Best-effort — a returns-load failure shouldn't block the orders list.
+    try {
+      const rets = await getMyReturns();
+      setMyReturns(rets || []);
+    } catch (e) {
+      console.log('Load returns error:', e);
+    }
   }
+
+  const RETURN_WINDOW_HOURS = 12;
+
+  function getReturnForOrder(orderId) {
+    return myReturns.find(r => r.order_id === orderId) || null;
+  }
+
+  // Mirrors the server's own eligibility check (app.py's RETURN_WINDOW_HOURS
+  // / api_submit_return) — this just decides whether to show the button;
+  // the server is still the real gate.
+  function isReturnWindowOpen(order) {
+    if (!order || order.status !== 'completed' || !order.completed_at) return false;
+    const completedAt = new Date(order.completed_at).getTime();
+    return Date.now() <= completedAt + RETURN_WINDOW_HOURS * 60 * 60 * 1000;
+  }
+
+  function returnEligibleItems(order) {
+    return (order?.order_item || []).filter(oi => (Number(oi.qty || 0) - Number(oi.returned_qty || 0)) > 0);
+  }
+
+  function openReturnModal(order) {
+    setReturnModalOrder(order);
+    setReturnReason('');
+    setReturnSelections({});
+  }
+
+  function closeReturnModal() {
+    setReturnModalOrder(null);
+    setReturnReason('');
+    setReturnSelections({});
+  }
+
+  function setReturnQty(orderItemId, qty, maxQty) {
+    const clamped = Math.max(0, Math.min(qty, maxQty));
+    setReturnSelections(prev => ({ ...prev, [orderItemId]: clamped }));
+  }
+
+  async function handleSubmitReturn() {
+    const items = Object.entries(returnSelections)
+      .filter(([, qty]) => qty > 0)
+      .map(([order_item_id, qty_returned]) => ({ order_item_id, qty_returned }));
+
+    if (!returnReason.trim()) {
+      showAlert({ type: 'error', title: 'Reason Required', message: 'Please tell us why you\'re returning this.' });
+      return;
+    }
+    if (items.length === 0) {
+      showAlert({ type: 'error', title: 'No Items Selected', message: 'Select at least one item and quantity to return.' });
+      return;
+    }
+    setReturnSubmitting(true);
+    try {
+      await submitReturn(returnModalOrder.order_id, returnReason.trim(), items);
+      closeReturnModal();
+      showAlert({ type: 'success', title: 'Return Requested', message: 'We received your request — you\'ll be notified once it\'s reviewed.' });
+      await loadOrders();
+    } catch (e) {
+      const msg = e.response?.data?.error || 'Failed to submit return request.';
+      showAlert({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setReturnSubmitting(false);
+    }
+  }
+
+  const RETURN_STATUS_LABEL = { pending: 'Return Pending', approved: 'Return Approved', rejected: 'Return Rejected', refunded: 'Refunded' };
+  const RETURN_STATUS_COLOR = { pending: '#f59e0b', approved: '#16a34a', rejected: '#ef4444', refunded: '#16a34a' };
 
   // Tick every 30s so the "cancel window" countdown and button visibility stay accurate
   useEffect(() => {
@@ -470,7 +556,7 @@ export default function OrdersScreen({ navigation }) {
                         style={[styles.buyAgainBtn, { alignSelf: 'flex-end' }, busy && { opacity: 0.6 }]}
                         activeOpacity={0.8}
                         disabled={busy}
-                        onPress={() => single ? handleBuyAgain(eligible[0], item.branch_id) : setBuyAgainPickerOrder(item)}
+                        onPress={() => single ? handleBuyAgain(eligible[0]) : setBuyAgainPickerOrder(item)}
                       >
                         {busy
                           ? <ActivityIndicator size="small" color={COLORS.primary} />
@@ -479,8 +565,50 @@ export default function OrdersScreen({ navigation }) {
                       </TouchableOpacity>
                     );
                   })()}
+                  {/* Returns & Refunds (revision, Nov 2026) — a status
+                      badge once a return exists for this order (any
+                      status), otherwise a "Request Return" button while
+                      still inside the 12-hour post-completion window and
+                      there's at least one not-fully-returned item. */}
+                  {(() => {
+                    const existingReturn = getReturnForOrder(item.order_id);
+                    if (existingReturn) {
+                      return (
+                        <View style={[styles.returnStatusBadge, { borderColor: RETURN_STATUS_COLOR[existingReturn.status] || COLORS.textMuted }, { alignSelf: 'flex-end' }]}>
+                          <Text style={[styles.returnStatusBadgeText, { color: RETURN_STATUS_COLOR[existingReturn.status] || COLORS.textMuted }]}>
+                            {RETURN_STATUS_LABEL[existingReturn.status] || existingReturn.status}
+                          </Text>
+                        </View>
+                      );
+                    }
+                    if (isReturnWindowOpen(item) && returnEligibleItems(item).length > 0) {
+                      return (
+                        <TouchableOpacity
+                          style={[styles.returnRequestBtn, { alignSelf: 'flex-end' }]}
+                          activeOpacity={0.8}
+                          onPress={() => openReturnModal(item)}
+                        >
+                          <Feather name="rotate-ccw" size={12} color="#dc2626"/>
+                          <Text style={styles.returnRequestBtnText}>Request Return</Text>
+                        </TouchableOpacity>
+                      );
+                    }
+                    return null;
+                  })()}
                 </View>
               </View>
+              {/* Return rejection reason — the customer must see why, per
+                  the user's decision (both a status change and a stated
+                  reason), not just a bare "Rejected" badge. */}
+              {(() => {
+                const existingReturn = getReturnForOrder(item.order_id);
+                return existingReturn?.status === 'rejected' && existingReturn.rejection_reason ? (
+                  <View style={styles.returnRejectedRow}>
+                    <Feather name="info" size={12} color="#ef4444"/>
+                    <Text style={styles.returnRejectedText}>Return rejected: {existingReturn.rejection_reason}</Text>
+                  </View>
+                ) : null;
+              })()}
               {/* Delivery Estimate */}
               {item.status !== 'completed' && item.status !== 'cancelled' && (
                 <View style={styles.deliveryRow}>
@@ -840,9 +968,8 @@ export default function OrdersScreen({ navigation }) {
                     activeOpacity={0.8}
                     disabled={busy}
                     onPress={() => {
-                      const branchId = buyAgainPickerOrder.branch_id;
                       setBuyAgainPickerOrder(null);
-                      handleBuyAgain(oi, branchId);
+                      handleBuyAgain(oi);
                     }}
                   >
                     {itemImage
@@ -867,6 +994,87 @@ export default function OrdersScreen({ navigation }) {
             </ScrollView>
           </View>
         </View>
+      </Modal>
+
+      {/* ─── Request Return Modal (revision, Nov 2026) ───
+          Pick which item(s)/qty to return, state a reason, submit. Refund
+          method isn't asked here — the server derives it from how the
+          order was originally paid (GCash reverses automatically through
+          PayMongo; cash is handed back physically). */}
+      <Modal
+        visible={!!returnModalOrder}
+        animationType="slide"
+        transparent
+        onRequestClose={() => !returnSubmitting && closeReturnModal()}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalCard}>
+            <View style={styles.modalHeader}>
+              <View>
+                <Text style={styles.modalTitle}>Request Return</Text>
+                <Text style={styles.modalOrderId}>Order #{returnModalOrder?.order_id?.slice(0,8).toUpperCase()}</Text>
+              </View>
+              <TouchableOpacity onPress={closeReturnModal} disabled={returnSubmitting}>
+                <Feather name="x" size={20} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+            <ScrollView showsVerticalScrollIndicator={false}>
+              <Text style={styles.detailSectionTitle}>Select Item(s) to Return</Text>
+              {returnEligibleItems(returnModalOrder || {}).map((oi, idx) => {
+                const maxQty = Number(oi.qty || 0) - Number(oi.returned_qty || 0);
+                const qty    = returnSelections[oi.order_item_id] || 0;
+                const itemImage = resolveVariantPricing(oi.product, oi.selected_options || {}).image;
+                return (
+                  <View key={idx} style={styles.returnPickRow}>
+                    {itemImage
+                      ? <Image source={{ uri: itemImage }} style={styles.buyAgainPickImg}/>
+                      : <View style={styles.buyAgainPickImgPlaceholder}><Feather name="image" size={16} color={COLORS.textMuted}/></View>
+                    }
+                    <View style={{ flex:1 }}>
+                      <Text style={styles.buyAgainPickName} numberOfLines={1}>{oi.product?.product_name || '—'}</Text>
+                      <Text style={styles.buyAgainPickOptions}>Up to {maxQty} eligible</Text>
+                    </View>
+                    <View style={styles.returnQtyStepper}>
+                      <TouchableOpacity style={styles.returnQtyBtn} onPress={() => setReturnQty(oi.order_item_id, qty - 1, maxQty)} disabled={qty <= 0}>
+                        <Feather name="minus" size={14} color={qty <= 0 ? COLORS.textMuted : COLORS.primary}/>
+                      </TouchableOpacity>
+                      <Text style={styles.returnQtyValue}>{qty}</Text>
+                      <TouchableOpacity style={styles.returnQtyBtn} onPress={() => setReturnQty(oi.order_item_id, qty + 1, maxQty)} disabled={qty >= maxQty}>
+                        <Feather name="plus" size={14} color={qty >= maxQty ? COLORS.textMuted : COLORS.primary}/>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              })}
+
+              <Text style={[styles.detailSectionTitle, { marginTop: SPACING.sm }]}>Reason *</Text>
+              <TextInput
+                style={styles.cancelReasonInput}
+                placeholder="What went wrong with this order?"
+                placeholderTextColor={COLORS.textMuted}
+                multiline
+                numberOfLines={3}
+                value={returnReason}
+                onChangeText={setReturnReason}
+                editable={!returnSubmitting}
+              />
+
+              <TouchableOpacity
+                style={[styles.returnSubmitBtn, returnSubmitting && { opacity: 0.7 }]}
+                onPress={handleSubmitReturn}
+                disabled={returnSubmitting}
+              >
+                {returnSubmitting
+                  ? <ActivityIndicator color={COLORS.white} size="small"/>
+                  : <Text style={styles.returnSubmitBtnText}>Submit Return Request</Text>
+                }
+              </TouchableOpacity>
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
       </Modal>
 
       <CustomAlert config={alertConfig} onHide={hideAlert}/>
@@ -988,4 +1196,18 @@ const makeStyles = (COLORS) => StyleSheet.create({
   cancelModalBtnGhostText: { color: COLORS.textSecondary, fontWeight:'700', fontSize:13 },
   cancelModalBtnSolid:     { backgroundColor:'#ef4444' },
   cancelModalBtnSolidText: { color: COLORS.white, fontWeight:'700', fontSize:13 },
+
+  // Returns & Refunds (revision, Nov 2026)
+  returnRequestBtn:       { flexDirection:'row', alignItems:'center', gap:5, borderWidth:1.5, borderColor:'#dc2626', borderRadius: RADIUS.full, paddingVertical:5, paddingHorizontal:12, marginTop:8 },
+  returnRequestBtnText:   { fontSize:11, color:'#dc2626', fontWeight:'700' },
+  returnStatusBadge:      { borderWidth:1.5, borderRadius: RADIUS.full, paddingVertical:5, paddingHorizontal:12, marginTop:8 },
+  returnStatusBadgeText:  { fontSize:11, fontWeight:'700' },
+  returnRejectedRow:      { flexDirection:'row', alignItems:'flex-start', gap:6, marginTop:4 },
+  returnRejectedText:     { fontSize:11, color:'#ef4444', flex:1, lineHeight:15 },
+  returnPickRow:          { flexDirection:'row', alignItems:'center', gap:12, paddingVertical:10, borderBottomWidth:1, borderBottomColor: COLORS.grayBorder },
+  returnQtyStepper:       { flexDirection:'row', alignItems:'center', gap:10 },
+  returnQtyBtn:           { width:26, height:26, borderRadius:13, borderWidth:1.5, borderColor: COLORS.grayBorder, alignItems:'center', justifyContent:'center' },
+  returnQtyValue:         { fontSize:14, fontWeight:'700', color: COLORS.dark, minWidth:16, textAlign:'center' },
+  returnSubmitBtn:        { backgroundColor:'#dc2626', borderRadius: RADIUS.sm, padding:14, alignItems:'center', marginTop: SPACING.md, marginBottom: SPACING.sm },
+  returnSubmitBtnText:    { color: COLORS.white, fontWeight:'700', fontSize:14 },
 });

@@ -169,6 +169,7 @@ const pageTitles = {
   pos:       ['Point of Sale',    'Process walk-in customer orders'],
   inventory: ['Inventory',        'View branch stock levels'],
   orders:    ['Orders',           'Manage online customer orders'],
+  returns:   ['Returns & Refunds','Review and resolve customer return requests for your branch'],
   requests:  ['Stock Requests',   'Request stock from admin'],
   summary:   ['Sales Summary',    'View sales performance'],
   profile:   ['My Profile',       'View and update your account information'],
@@ -335,9 +336,10 @@ document.addEventListener('visibilitychange', () => {
 // seconds is less instant but costs nothing — each call is a fast,
 // stateless request, same as any other API call.
 const SSE_TABLE_SECTIONS = {
-  order:     ['orders', 'summary', 'pos'],
-  inventory: ['inventory', 'pos', 'summary'],
-  product:   ['pos', 'inventory'],
+  order:          ['orders', 'summary', 'pos'],
+  inventory:      ['inventory', 'pos', 'summary'],
+  product:        ['pos', 'inventory'],
+  return_request: ['returns'],
 };
 const LIVE_UPDATES_POLL_MS = 8000;
 let _liveUpdatesCursor = 0;
@@ -537,6 +539,7 @@ var loaders = {
   pos:       loadPosProducts,
   inventory: loadInventory,
   orders:    loadOrders,
+  returns:   loadReturns,
   summary:   loadSummary,
   requests:  loadRequests,
   profile:   loadProfile,
@@ -3147,10 +3150,11 @@ function renderInvHistory(data) {
 // contained and low-risk to add.
 async function refreshStaffNavBadges() {
   try {
-    const [productsRaw, orders, requestsRaw] = await Promise.all([
+    const [productsRaw, orders, requestsRaw, pendingReturns] = await Promise.all([
       fetch('/api/products').then(r => r.json()),
       fetch('/api/staff/orders?limit=50').then(r => r.json()),
       fetch('/api/staff/stock-requests').then(r => r.json()),
+      fetch('/api/staff/returns?status=pending').then(r => r.json()),
     ]);
 
     const allProducts = Array.isArray(productsRaw) ? productsRaw : [];
@@ -3177,6 +3181,13 @@ async function refreshStaffNavBadges() {
     if (reqBadge) {
       reqBadge.textContent   = pending;
       reqBadge.style.display = pending > 0 ? 'inline' : 'none';
+    }
+
+    const pendingReturnsCount = Array.isArray(pendingReturns) ? pendingReturns.length : 0;
+    const returnsBadge = document.getElementById('returnsPendingBadge');
+    if (returnsBadge) {
+      returnsBadge.textContent   = pendingReturnsCount > 99 ? '99+' : pendingReturnsCount;
+      returnsBadge.style.display = pendingReturnsCount > 0 ? 'inline-block' : 'none';
     }
   } catch (e) { console.error('Nav badges error:', e); }
 }
@@ -4251,6 +4262,203 @@ function closeGenericModal() {
   // typed into.
   if (typeof focusBarcodeInput === 'function') focusBarcodeInput();
 }
+
+// ══════════════════════════════════════════════════════
+// RETURNS & REFUNDS (revision, Nov 2026) — customer-submitted return
+// requests for this branch's orders. Server-scoped by branch; this view
+// just renders whatever GET /api/staff/returns gives back (admin's own
+// dashboard uses the same endpoint, unscoped). Uses showGenericModal/
+// closeGenericModal + showToast, the same shared helpers as the rest of
+// this dashboard.
+// ══════════════════════════════════════════════════════
+let _returnsRows      = [];
+let _returnsActiveTab = 'pending';
+
+async function loadReturns() {
+  skTable('returnsBody', [], 7);
+  try {
+    const res = await fetch(`/api/staff/returns?status=${_returnsActiveTab}`);
+    _returnsRows = res.ok ? await res.json() : [];
+  } catch (e) {
+    console.error('Returns load error:', e);
+    showToast('Failed to load returns.', 'error');
+    _returnsRows = [];
+  }
+  // The nav badge itself is refreshed centrally by refreshStaffNavBadges()
+  // (called after every approve/reject/mark-refunded below); viewing the
+  // Pending tab can cheaply keep it in sync with what's already in hand.
+  if (_returnsActiveTab === 'pending') {
+    const badge = document.getElementById('returnsPendingBadge');
+    if (badge) {
+      const count = _returnsRows.length;
+      badge.textContent   = count > 99 ? '99+' : count;
+      badge.style.display = count > 0 ? 'inline-block' : 'none';
+    }
+  }
+  renderReturns();
+}
+window.loadReturns = loadReturns;
+
+function switchReturnsTab(tab) {
+  _returnsActiveTab = tab;
+  ['pending', 'approved', 'rejected', 'refunded'].forEach(t => {
+    const btn = document.getElementById(`returnsTab${t.charAt(0).toUpperCase()}${t.slice(1)}Btn`);
+    if (btn) btn.classList.toggle('active', t === tab);
+  });
+  loadReturns();
+}
+window.switchReturnsTab = switchReturnsTab;
+
+function renderReturns() {
+  const tbody = document.getElementById('returnsBody');
+  if (!tbody) return;
+  if (!_returnsRows.length) {
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Nothing here.</td></tr>';
+    return;
+  }
+  tbody.innerHTML = _returnsRows.map(r => {
+    const order    = Array.isArray(r.order) ? r.order[0] : r.order;
+    const cust     = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
+    const custName = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+    const requested = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
+    const itemCount = (r.return_request_item || []).length;
+    const action = r.status === 'pending'
+      ? `<button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openReturnReviewModal('${r.id}')">Review</button>`
+      : r.status === 'approved' && r.refund_method === 'cash'
+        ? `<button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="confirmReturnMarkRefunded('${r.id}')">Mark Refunded</button>`
+        : `<button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="openReturnReviewModal('${r.id}')">View</button>`;
+    return `<tr>
+      <td>${requested}</td>
+      <td>#${(r.order_id || '').slice(0,8).toUpperCase()}</td>
+      <td>${custName || '—'}</td>
+      <td>${itemCount} item(s)</td>
+      <td style="text-transform:uppercase;font-size:11px;">${r.refund_method || '—'}</td>
+      <td style="text-transform:capitalize;">${r.status}</td>
+      <td>${action}</td>
+    </tr>`;
+  }).join('');
+}
+
+function openReturnReviewModal(returnId) {
+  const r = _returnsRows.find(x => String(x.id) === String(returnId));
+  if (!r) return;
+  const order    = Array.isArray(r.order) ? r.order[0] : r.order;
+  const cust     = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
+  const custName = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
+  const requested = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
+  const itemsHtml = (r.return_request_item || []).map(rri => {
+    const oi   = rri.order_item || {};
+    const prod = Array.isArray(oi.product) ? oi.product[0] : oi.product;
+    const opts = oi.selected_options && Object.keys(oi.selected_options).length
+      ? Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(', ')
+      : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
+      <span>${prod?.product_name || '—'}${opts ? ` <span style="color:var(--text-muted);">(${opts})</span>` : ''}</span>
+      <span style="color:var(--text-muted);">x${rri.qty_returned}</span>
+    </div>`;
+  }).join('') || '<p style="color:var(--text-muted);text-align:center;">No items</p>';
+
+  const canAct = r.status === 'pending';
+
+  showGenericModal(`
+    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <div>
+          <h3 style="margin:0;font-size:17px;">Return Request</h3>
+          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${(r.order_id || '').slice(0,8).toUpperCase()} — ${custName} — ${requested}</p>
+        </div>
+        <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+
+      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;">
+        <span style="color:var(--text-muted);">Reason</span><br/>${r.reason || '—'}
+      </div>
+
+      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS TO RETURN</div>
+      ${itemsHtml}
+
+      <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
+        Refund method: <strong style="text-transform:uppercase;">${r.refund_method || '—'}</strong>
+        ${r.refund_method === 'gcash' ? ' — reversed automatically through PayMongo on approval.' : ' — hand back cash, then confirm with "Mark Refunded".'}
+      </div>
+
+      ${r.status === 'rejected' && r.rejection_reason
+        ? `<div style="background:rgba(239,68,68,0.08);border-left:3px solid #ef4444;border-radius:8px;padding:10px;margin-top:10px;font-size:12px;">Rejected: ${r.rejection_reason}</div>`
+        : ''}
+
+      ${canAct ? `
+        <label class="form-label" style="font-size:12px;margin-top:12px;">Rejection Reason (only needed if rejecting)</label>
+        <textarea id="returnRejectReason" class="form-input" style="width:100%;min-height:70px;margin-bottom:12px;" placeholder="Why is this return being rejected?"></textarea>
+      ` : ''}
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:0.5rem;">
+        <button class="btn btn-cancel" onclick="closeGenericModal()">Close</button>
+        ${canAct ? `
+          <button class="btn btn-cancel" style="border-color:#ef4444;color:#ef4444;" onclick="confirmReturnReject('${r.id}')">Reject</button>
+          <button class="btn btn-solid-green" onclick="confirmReturnApprove('${r.id}')">Approve</button>
+        ` : ''}
+      </div>
+    </div>
+  `);
+}
+window.openReturnReviewModal = openReturnReviewModal;
+
+async function confirmReturnApprove(returnId) {
+  try {
+    const res  = await fetch(`/api/staff/returns/${returnId}/approve`, { method: 'PUT' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to approve return.', 'error'); return; }
+    showToast(data.warning ? data.warning : 'Return approved.', data.warning ? 'error' : 'success');
+    closeGenericModal();
+    invalidateSection('returns');
+    invalidateSection('inventory');
+    loadReturns();
+    refreshStaffNavBadges();
+  } catch (e) {
+    console.error('Approve return error:', e);
+    showToast('Failed to approve return.', 'error');
+  }
+}
+window.confirmReturnApprove = confirmReturnApprove;
+
+async function confirmReturnReject(returnId) {
+  const reason = document.getElementById('returnRejectReason')?.value?.trim();
+  if (!reason) { showToast('Please enter a rejection reason — the customer will see it.', 'error'); return; }
+  try {
+    const res = await fetch(`/api/staff/returns/${returnId}/reject`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rejection_reason: reason }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to reject return.', 'error'); return; }
+    showToast('Return rejected.');
+    closeGenericModal();
+    invalidateSection('returns');
+    loadReturns();
+    refreshStaffNavBadges();
+  } catch (e) {
+    console.error('Reject return error:', e);
+    showToast('Failed to reject return.', 'error');
+  }
+}
+window.confirmReturnReject = confirmReturnReject;
+
+async function confirmReturnMarkRefunded(returnId) {
+  try {
+    const res  = await fetch(`/api/staff/returns/${returnId}/mark-refunded`, { method: 'PUT' });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to mark refunded.', 'error'); return; }
+    showToast('Marked refunded.');
+    closeGenericModal();
+    invalidateSection('returns');
+    loadReturns();
+  } catch (e) {
+    console.error('Mark refunded error:', e);
+    showToast('Failed to mark refunded.', 'error');
+  }
+}
+window.confirmReturnMarkRefunded = confirmReturnMarkRefunded;
 
 function viewStaffOrderItems(order) {
   const items    = order.order_item || [];

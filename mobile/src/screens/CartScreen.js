@@ -30,27 +30,23 @@ function persistSelected(sel) {
 // backend's /api/cart select never actually returned a `quantity` field on
 // the nested product — so this was always undefined and `quantity >=
 // undefined` is always false, meaning the + button never disabled for ANY
-// item no matter how much stock it had. Now that the cart query includes
-// branch_stock/variant_stock, resolve the real cap here: prefer the specific
-// selected variant's stock when the item has one and we can match it,
-// otherwise fall back to the branch-level stock total.
-function getCartItemMaxQty(product, branchId, selectedOptions) {
+// item no matter how much stock it had. The cart query now includes
+// warehouse_stock/warehouse_variant_stock (revision, Nov 2026 — online
+// stock is a single pool, not per-branch): prefer the specific selected
+// variant's stock when the item has one and we can match it, otherwise
+// fall back to the whole-product warehouse total.
+function getCartItemMaxQty(product, selectedOptions) {
   if (!product) return null;
-  const variantStockList = Array.isArray(product.variant_stock) ? product.variant_stock : [];
+  const variantStockList = Array.isArray(product.warehouse_variant_stock) ? product.warehouse_variant_stock : [];
   if (selectedOptions && Object.keys(selectedOptions).length > 0 && variantStockList.length > 0) {
-    const match = variantStockList.find(v => {
-      if (branchId != null && v.branch_id !== branchId) return false;
-      return JSON.stringify(v.options || {}) === JSON.stringify(selectedOptions || {});
-    });
+    const match = variantStockList.find(v =>
+      JSON.stringify(v.options || {}) === JSON.stringify(selectedOptions || {})
+    );
     if (match) return Number(match.quantity ?? 0);
   }
-  const branchStockList = Array.isArray(product.branch_stock) ? product.branch_stock : [];
-  if (branchId != null) {
-    const bMatch = branchStockList.find(b => b.branch_id === branchId);
-    if (bMatch) return Number(bMatch.quantity ?? 0);
-  }
-  if (branchStockList.length > 0) {
-    return branchStockList.reduce((s, b) => s + Number(b.quantity || 0), 0);
+  const whStockList = Array.isArray(product.warehouse_stock) ? product.warehouse_stock : [];
+  if (whStockList.length > 0) {
+    return whStockList.reduce((s, w) => s + Number(w.quantity || 0), 0);
   }
   return null;
 }
@@ -119,7 +115,6 @@ export default function CartScreen({ navigation }) {
       try {
         const res = await api.post('/variant-stock/check', {
           product_id: item.product_id,
-          branch_id:  item.branch_id || null,
           options:    opts,
         });
         // Keyed by cart_id — matches how cart items are keyed everywhere
@@ -284,11 +279,9 @@ export default function CartScreen({ navigation }) {
   // ─── Checkout ─────────────────────────────────────────
   function handleCheckout() {
     if (!someChecked) return;
-    const branchId = selectedItems[0]?.branch_id || null;
     navigation.navigate('Checkout', {
       cartItems: selectedItems,
       total,
-      branchId,
     });
   }
 
@@ -413,7 +406,7 @@ export default function CartScreen({ navigation }) {
               const disc       = Array.isArray(product?.discount) ? product.discount[0] : product?.discount;
               const finalPrice = discountedVariantPrice !== null ? discountedVariantPrice : variantPrice;
               const finalSub   = finalPrice * item.quantity;
-              const maxQty     = getCartItemMaxQty(product, item.branch_id, item.selected_options);
+              const maxQty     = getCartItemMaxQty(product, item.selected_options);
 
               return (
                 <View style={[styles.cartItem, isSelected && styles.cartItemSelected]}>

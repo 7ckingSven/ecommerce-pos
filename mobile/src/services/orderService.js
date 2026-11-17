@@ -16,11 +16,15 @@ export async function getOrders() {
 // reference number, so placeOrder() just forwards the payment_intent_id —
 // the server independently re-verifies it with PayMongo before accepting
 // the order. Cash on Delivery orders are unaffected and pass no intent id.
-export async function placeOrder(cartItems, paymentMethod, paymentIntentId = '', branchId = null, shippingFee = 0, address = '') {
+// branchId removed (revision, Nov 2026): the server always places the
+// order unassigned (branch_id = NULL) now — admin assigns it afterward.
+// fulfillmentType ('delivery' | 'pickup') replaces it — Koronadal
+// customers can choose in-store pickup instead of courier delivery.
+export async function placeOrder(cartItems, paymentMethod, paymentIntentId = '', shippingFee = 0, address = '', fulfillmentType = 'delivery') {
   const customerId = await getCustomerId();
 
   const res = await api.post('/orders',
-    { cart_items: cartItems, payment_method: paymentMethod, payment_intent_id: paymentIntentId, branch_id: branchId, shipping_fee: shippingFee, address: address },
+    { cart_items: cartItems, payment_method: paymentMethod, payment_intent_id: paymentIntentId, shipping_fee: shippingFee, address: address, fulfillment_type: fulfillmentType },
     { headers: headers(customerId) }
   );
   return res.data;

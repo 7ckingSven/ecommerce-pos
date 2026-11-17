@@ -66,8 +66,7 @@ export default function LoginScreen({ navigation, route }) {
         params: {
           screen: 'ProductDetail',
           params: {
-            product:  redirectParams.product,
-            branchId: redirectParams.branchId || null,
+            product: redirectParams.product,
           },
         },
       });

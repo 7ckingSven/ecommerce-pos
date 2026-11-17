@@ -40,6 +40,12 @@
         <span id="ordersBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
         <span class="nav-refresh-btn" onclick="event.stopPropagation();forceRefreshSection(this)" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
       </a>
+      <a href="#" class="nav-item" onclick="showSection('returns', this)" data-tooltip="Returns">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
+        <span>Returns</span>
+        <span id="returnsPendingBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
+        <span class="nav-refresh-btn" onclick="event.stopPropagation();forceRefreshSection(this)" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
+      </a>
       <a href="#" class="nav-item" onclick="showSection('requests', this)" data-tooltip="Stock Requests">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
         <span>Stock Requests</span>
@@ -713,6 +719,38 @@
                 <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Amount (not collected)</th></tr>
               </thead>
               <tbody id="staffDeliveriesReturnedBody"><tr><td colspan="4" class="table-empty">Loading...</td></tr></tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ─── RETURNS & REFUNDS SECTION (revision, Nov 2026) ───
+         Both admin and staff (at the fulfilling branch) can review a
+         return request — this view is scoped server-side to this staff
+         account's own branch; admin sees every branch from their own
+         dashboard's equivalent section. -->
+    <section class="section" id="section-returns">
+      <div class="card">
+        <div class="deliv-card-head">
+          <h3 class="card-title" style="margin:0;">Returns & Refunds</h3>
+          <div class="deliv-tabs">
+            <button id="returnsTabPendingBtn" class="deliv-tab active" onclick="switchReturnsTab('pending')">Pending</button>
+            <button id="returnsTabApprovedBtn" class="deliv-tab" onclick="switchReturnsTab('approved')">Approved</button>
+            <button id="returnsTabRejectedBtn" class="deliv-tab" onclick="switchReturnsTab('rejected')">Rejected</button>
+            <button id="returnsTabRefundedBtn" class="deliv-tab" onclick="switchReturnsTab('refunded')">Refunded</button>
+          </div>
+        </div>
+        <div style="padding:1rem;">
+          <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">
+            Customer-submitted returns for your branch's orders — filed within 12 hours of the order being marked received. Approving restores the item(s) to warehouse stock and either refunds the customer's GCash payment automatically or marks the refund for a manual cash handback.
+          </p>
+          <div class="table-wrap">
+            <table class="data-table">
+              <thead>
+                <tr><th>Requested</th><th>Order</th><th>Customer</th><th>Items</th><th>Refund</th><th>Status</th><th>Actions</th></tr>
+              </thead>
+              <tbody id="returnsBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>

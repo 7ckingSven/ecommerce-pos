@@ -49,13 +49,19 @@ function getAvailablePaymentMethods(addr) {
 export default function CheckoutScreen({ route, navigation }) {
   const { colors: COLORS, isDark } = useTheme();
   const styles = useMemo(() => makeStyles(COLORS), [COLORS]);
-  const { cartItems, total, branchId } = route.params;
+  const { cartItems, total } = route.params;
 
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
   const insets = useSafeAreaInsets();
 
   const [payment,       setPayment]       = useState('cash_on_delivery');
   const [loading,       setLoading]       = useState(false);
+  // Delivery vs. in-store pickup (revision, Nov 2026) — pickup is only
+  // offered to customers whose delivery address is within Koronadal City;
+  // everyone else always ships. Pickup orders skip the courier entirely
+  // and are marked "Ready for Pickup at <branch>" once admin assigns and
+  // fulfills them, same assignment flow as a delivery order otherwise.
+  const [fulfillmentType, setFulfillmentType] = useState('delivery');
 
   // ─── GCash (PayMongo) payment modal ───────────────────
   // 'idle' | 'loading' | 'webview' | 'confirmed' | 'placing' | 'error'
@@ -200,6 +206,22 @@ export default function CheckoutScreen({ route, navigation }) {
     }
   }, [address, profileLoading]);
 
+  // Pickup only makes sense within Koronadal — if the address changes to
+  // somewhere outside it while Pickup is selected, fall back to Delivery
+  // automatically so the selection never goes stale (same pattern as the
+  // COD-fallback effect above).
+  useEffect(() => {
+    if (!profileLoading && fulfillmentType === 'pickup' && !isWithinKoronadal(address)) {
+      setFulfillmentType('delivery');
+    }
+  }, [address, profileLoading]);
+
+  // Effective shipping fee shown to the customer — pickup orders never
+  // ship, so the fee is always 0 regardless of what calculateShipping
+  // worked out for the address (mirrors the backend's own override in
+  // api_place_order, which recomputes and forces this server-side too).
+  const effectiveShippingFee = fulfillmentType === 'pickup' ? 0 : shippingFee;
+
   async function loadProfile() {
     try {
       // Step 1 — Load instantly from AsyncStorage (cached on login)
@@ -321,9 +343,9 @@ export default function CheckoutScreen({ route, navigation }) {
         items,
         payment,
         paymentIntentId || '',
-        branchId || cartItems[0]?.branch_id || null,
-        shippingFee,
-        address + (addressNote ? ' | ' + addressNote : '')
+        effectiveShippingFee,
+        address + (addressNote ? ' | ' + addressNote : ''),
+        fulfillmentType
       );
       showAlert({ type: 'success', title: 'Order Placed!',
         message: `Your order has been placed!\nOrder ID: ${res.order_id?.slice(0, 8).toUpperCase()}\n\nThank you for shopping!`,
@@ -354,7 +376,7 @@ export default function CheckoutScreen({ route, navigation }) {
     }
 
     showAlert({ type: 'confirm', title: 'Confirm Order',
-      message: `Subtotal: ₱${total.toFixed(2)}\nShipping: ${shippingFee === 0 ? 'FREE' : '₱' + shippingFee.toFixed(2)}\nTotal: ₱${(total + shippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}`,
+      message: `Subtotal: ₱${total.toFixed(2)}\nShipping: ${effectiveShippingFee === 0 ? 'FREE' : '₱' + effectiveShippingFee.toFixed(2)}\nTotal: ₱${(total + effectiveShippingFee).toFixed(2)}\nPayment: ${payment.replace(/_/g, ' ')}`,
       buttons: [
         { text: 'Cancel', onPress: () => { setOrderLoading(false); isSubmitting.current = false; } },
         { text: 'Confirm', style: 'primary', onPress: () => submitOrder('') },
@@ -382,7 +404,7 @@ export default function CheckoutScreen({ route, navigation }) {
     setGcashModalVisible(true);
     setGcashStep('loading');
     try {
-      const amount = total + shippingFee;
+      const amount = total + effectiveShippingFee;
       const { payment_intent_id, redirect_url } = await createGcashIntent(amount);
       setGcashPaymentIntentId(payment_intent_id);
       setGcashRedirectUrl(redirect_url);
@@ -535,21 +557,54 @@ export default function CheckoutScreen({ route, navigation }) {
           </View>
           <View style={[styles.totalRow, { marginTop: 6 }]}>
             <Text style={styles.totalLabel}>Shipping Fee</Text>
-            <Text style={[styles.totalVal, { color: shippingFee === 0 ? COLORS.primary : COLORS.dark }]}>
-              {shippingFee === 0 ? 'FREE' : `₱${shippingFee.toFixed(2)}`}
+            <Text style={[styles.totalVal, { color: effectiveShippingFee === 0 ? COLORS.primary : COLORS.dark }]}>
+              {effectiveShippingFee === 0 ? 'FREE' : `₱${effectiveShippingFee.toFixed(2)}`}
             </Text>
           </View>
           <View style={styles.divider}/>
           <View style={styles.totalRow}>
             <Text style={[styles.totalLabel, { fontWeight: '700', fontSize: 15 }]}>Total</Text>
             <Text style={[styles.totalVal, { color: COLORS.primary, fontSize: 16 }]}>
-              ₱{(total + shippingFee).toFixed(2)}
+              ₱{(total + effectiveShippingFee).toFixed(2)}
             </Text>
           </View>
         </View>
 
+        {/* ─── Delivery vs. Pickup (Koronadal only) ───
+             Only shown when the resolved address is within Koronadal —
+             everywhere else always ships, so there's nothing to choose. */}
+        {address && isWithinKoronadal(address) && (
+          <View style={styles.card}>
+            <View style={styles.cardTitleRow}>
+              <Feather name="package" size={16} color={COLORS.primary}/>
+              <Text style={styles.cardTitle}>Delivery or Pickup</Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: SPACING.sm }}>
+              <TouchableOpacity
+                style={[styles.fulfillOption, fulfillmentType === 'delivery' && styles.fulfillOptionActive]}
+                onPress={() => setFulfillmentType('delivery')}
+              >
+                <Feather name="truck" size={18} color={fulfillmentType === 'delivery' ? COLORS.white : COLORS.textMuted}/>
+                <Text style={[styles.fulfillOptionText, fulfillmentType === 'delivery' && styles.fulfillOptionTextActive]}>Delivery</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.fulfillOption, fulfillmentType === 'pickup' && styles.fulfillOptionActive]}
+                onPress={() => setFulfillmentType('pickup')}
+              >
+                <Feather name="shopping-bag" size={18} color={fulfillmentType === 'pickup' ? COLORS.white : COLORS.textMuted}/>
+                <Text style={[styles.fulfillOptionText, fulfillmentType === 'pickup' && styles.fulfillOptionTextActive]}>Pick Up In-Store</Text>
+              </TouchableOpacity>
+            </View>
+            {fulfillmentType === 'pickup' && (
+              <Text style={styles.pickupNote}>
+                We'll notify you once your order is ready for pickup at the branch handling it — no shipping fee.
+              </Text>
+            )}
+          </View>
+        )}
+
         {/* ─── Delivery Estimate ─── */}
-        {address ? (() => {
+        {address && fulfillmentType === 'delivery' ? (() => {
           const est = getDeliveryEstimate(address);
           return (
             <View style={[styles.card, { borderLeftWidth:3, borderLeftColor: COLORS.primary }]}>
@@ -683,7 +738,7 @@ export default function CheckoutScreen({ route, navigation }) {
                 <Feather name="check-circle" size={48} color={COLORS.primary}/>
                 <Text style={[styles.gcashModalText, { fontWeight:'700', fontSize:16, marginTop:10 }]}>Payment Confirmed!</Text>
                 <Text style={styles.gcashModalText}>
-                  Total: ₱{(total + shippingFee).toFixed(2)}
+                  Total: ₱{(total + effectiveShippingFee).toFixed(2)}
                 </Text>
                 <TouchableOpacity style={styles.gcashModalConfirmBtn} onPress={confirmGcashOrder}>
                   <Feather name="check-circle" size={18} color={COLORS.white}/>
@@ -824,6 +879,13 @@ const makeStyles = (COLORS) => StyleSheet.create({
   totalRow:           { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   totalLabel:         { fontSize: 14, fontWeight: '600', color: COLORS.textSecondary },
   totalVal:           { fontSize: 18, fontWeight: '700', color: COLORS.dark },
+
+  // Delivery vs. Pickup
+  fulfillOption:       { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, padding: SPACING.sm, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.grayBorder, backgroundColor: COLORS.grayBg },
+  fulfillOptionActive: { borderColor: COLORS.primary, backgroundColor: COLORS.primary },
+  fulfillOptionText:       { fontSize: 13, fontWeight: '600', color: COLORS.textMuted },
+  fulfillOptionTextActive: { color: COLORS.white },
+  pickupNote:          { fontSize: 12, color: COLORS.textSecondary, lineHeight: 17, marginTop: 4 },
 
   // Payment
   payMethod:          { flexDirection: 'row', alignItems: 'center', gap: SPACING.sm, padding: SPACING.sm, borderRadius: RADIUS.sm, borderWidth: 1.5, borderColor: COLORS.grayBorder, backgroundColor: COLORS.grayBg },

@@ -11,10 +11,12 @@ export async function getCart() {
   return res.data;
 }
 
-export async function addToCart(productId, quantity = 1, branchId = null, selectedOptions = {}) {
+// branchId param removed (revision, Nov 2026): customers no longer pick a
+// branch — cart.branch_id is deprecated and no longer sent.
+export async function addToCart(productId, quantity = 1, selectedOptions = {}) {
   const customerId = await getCustomerId();
   const res = await api.post('/cart',
-    { product_id: productId, quantity, branch_id: branchId, selected_options: selectedOptions },
+    { product_id: productId, quantity, selected_options: selectedOptions },
     { headers: headers(customerId) }
   );
   return res.data;

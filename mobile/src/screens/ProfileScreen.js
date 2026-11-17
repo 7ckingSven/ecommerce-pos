@@ -16,6 +16,7 @@ import CustomAlert, { useCustomAlert } from '../components/CustomAlert';
 import PSGCAddressPicker, { psgcToAddressString, addressStringToParts } from '../components/PSGCAddressPicker';
 import SkeletonLoader from '../components/SkeletonLoader';
 import NetworkBanner from '../components/NetworkBanner';
+import { submitFeedback, getMyFeedback } from '../services/feedbackService';
 
 function InfoRow({ icon, label, value }) {
   const { colors: COLORS } = useTheme();
@@ -69,6 +70,16 @@ export default function ProfileScreen({ navigation }) {
   const [showConfirmPass,setShowConfirmPass]= useState(false);
   const [legalModal,     setLegalModal]     = useState(null);
   const { alertConfig, showAlert, hideAlert } = useCustomAlert();
+
+  // ─── Feedback & Inquiries Modal State (CRM, revision Nov 2026) ───────
+  const [feedbackModal,    setFeedbackModal]    = useState(false);
+  const [feedbackTab,      setFeedbackTab]      = useState('new'); // 'new' | 'history'
+  const [fbType,           setFbType]           = useState('feedback'); // 'feedback' | 'inquiry'
+  const [fbSubject,        setFbSubject]        = useState('');
+  const [fbMessage,        setFbMessage]        = useState('');
+  const [fbSubmitting,     setFbSubmitting]     = useState(false);
+  const [fbHistory,        setFbHistory]        = useState([]);
+  const [fbHistoryLoading, setFbHistoryLoading] = useState(false);
 
   // Load once whenever the Profile screen gains focus — no background
   // polling (matches the web dashboards: data loads on view, refresh is
@@ -187,6 +198,57 @@ export default function ProfileScreen({ navigation }) {
 
   function updateField(key, val) {
     setEditForm(prev => ({ ...prev, [key]: val }));
+  }
+
+  // ─── Feedback & Inquiries (CRM, revision Nov 2026) ───────────────────
+  function openFeedback() {
+    setFeedbackTab('new');
+    setFbType('feedback');
+    setFbSubject('');
+    setFbMessage('');
+    setFeedbackModal(true);
+  }
+
+  function closeFeedback() {
+    setFeedbackModal(false);
+  }
+
+  async function loadFeedbackHistory() {
+    setFbHistoryLoading(true);
+    try {
+      const data = await getMyFeedback();
+      setFbHistory(data || []);
+    } catch (err) {
+      console.log('Load feedback history error:', err);
+    } finally {
+      setFbHistoryLoading(false);
+    }
+  }
+
+  function switchFeedbackTab(tab) {
+    setFeedbackTab(tab);
+    if (tab === 'history') loadFeedbackHistory();
+  }
+
+  async function handleSubmitFeedback() {
+    if (!fbMessage.trim()) {
+      showAlert({ type: 'error', title: 'Missing Message', message: 'Please enter your message.' });
+      return;
+    }
+    setFbSubmitting(true);
+    try {
+      await submitFeedback(fbType, fbSubject.trim(), fbMessage.trim());
+      showAlert({ type: 'success', title: 'Sent', message: 'Thanks! We received your ' + (fbType === 'inquiry' ? 'inquiry' : 'feedback') + '.' });
+      setFbSubject('');
+      setFbMessage('');
+      setFeedbackTab('history');
+      loadFeedbackHistory();
+    } catch (err) {
+      const msg = err.response?.data?.error || 'Failed to send. Please try again.';
+      showAlert({ type: 'error', title: 'Error', message: msg });
+    } finally {
+      setFbSubmitting(false);
+    }
   }
 
   // ─── Save Changes ─────────────────────────────────────
@@ -522,6 +584,23 @@ export default function ProfileScreen({ navigation }) {
           </View>
         </View>
 
+        {/* Feedback & Inquiries (CRM, revision Nov 2026) */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Help & Support</Text>
+          <TouchableOpacity style={styles.actionRow} onPress={openFeedback}>
+            <View style={styles.actionLeft}>
+              <View style={[styles.actionIcon, { backgroundColor:'#dbeafe' }]}>
+                <Feather name="message-square" size={18} color="#2563eb"/>
+              </View>
+              <View>
+                <Text style={styles.actionLabel}>Feedback & Inquiries</Text>
+                <Text style={styles.actionSub}>Send us a message or check past replies</Text>
+              </View>
+            </View>
+            <Feather name="chevron-right" size={18} color={COLORS.textMuted}/>
+          </TouchableOpacity>
+        </View>
+
         {/* Legal */}
         <View style={{ backgroundColor: COLORS.surface, borderRadius: 12, marginBottom: 16, overflow:'hidden' }}>
           <Text style={{ fontSize:11, fontWeight:'700', color: COLORS.textMuted, textTransform:'uppercase', letterSpacing:1, padding:12, paddingBottom:4 }}>Legal</Text>
@@ -775,6 +854,148 @@ export default function ProfileScreen({ navigation }) {
         </KeyboardAvoidingView>
       </Modal>
 
+      {/* ─── FEEDBACK & INQUIRIES MODAL (CRM, revision Nov 2026) ───
+          Two tabs: "New" (submission form) and "History" (past
+          submissions + any admin reply). Kept as an in-screen Modal
+          rather than a pushed screen — ProfileScreen is a direct
+          Tab.Screen with no Stack of its own (unlike Home/Cart/Orders),
+          and this matches the existing Legal/Edit modal pattern already
+          used here instead of restructuring navigation for one screen. */}
+      <Modal visible={feedbackModal} transparent animationType="slide" onRequestClose={closeFeedback}>
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalOverlay}
+        >
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>Feedback & Inquiries</Text>
+              <TouchableOpacity onPress={closeFeedback}>
+                <Feather name="x" size={20} color={COLORS.textMuted}/>
+              </TouchableOpacity>
+            </View>
+
+            {/* Tabs */}
+            <View style={styles.fbTabRow}>
+              <TouchableOpacity
+                style={[styles.fbTabBtn, feedbackTab==='new' && styles.fbTabBtnActive]}
+                onPress={() => setFeedbackTab('new')}
+              >
+                <Text style={[styles.fbTabText, feedbackTab==='new' && styles.fbTabTextActive]}>New</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.fbTabBtn, feedbackTab==='history' && styles.fbTabBtnActive]}
+                onPress={() => switchFeedbackTab('history')}
+              >
+                <Text style={[styles.fbTabText, feedbackTab==='history' && styles.fbTabTextActive]}>History</Text>
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false}>
+              {feedbackTab === 'new' ? (
+                <View style={styles.modalBody}>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Type</Text>
+                    <View style={styles.genderRow}>
+                      {['feedback', 'inquiry'].map(t => (
+                        <TouchableOpacity
+                          key={t}
+                          style={[styles.genderBtn, fbType===t && styles.genderBtnActive]}
+                          onPress={() => setFbType(t)}
+                        >
+                          <Text style={[styles.genderBtnText, fbType===t && styles.genderBtnTextActive]}>
+                            {t === 'feedback' ? 'Feedback' : 'Inquiry'}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Subject <Text style={{ color: COLORS.textMuted, fontWeight:'400' }}>(Optional)</Text></Text>
+                    <TextInput
+                      style={styles.fieldInput}
+                      value={fbSubject}
+                      onChangeText={setFbSubject}
+                      placeholder="e.g. Delivery was late"
+                      placeholderTextColor={COLORS.textMuted}
+                    />
+                  </View>
+                  <View style={styles.fieldWrap}>
+                    <Text style={styles.fieldLabel}>Message *</Text>
+                    <TextInput
+                      style={[styles.fieldInput, { minHeight: 100, textAlignVertical: 'top' }]}
+                      value={fbMessage}
+                      onChangeText={setFbMessage}
+                      placeholder={fbType === 'inquiry' ? 'What would you like to ask?' : 'Tell us what you think...'}
+                      placeholderTextColor={COLORS.textMuted}
+                      multiline
+                      numberOfLines={5}
+                    />
+                  </View>
+
+                  <View style={styles.modalFooter}>
+                    <TouchableOpacity style={styles.cancelBtn} onPress={closeFeedback}>
+                      <Text style={styles.cancelBtnText}>Cancel</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity
+                      style={[styles.saveBtn, fbSubmitting && styles.saveBtnDisabled]}
+                      onPress={handleSubmitFeedback}
+                      disabled={fbSubmitting}
+                    >
+                      {fbSubmitting
+                        ? <ActivityIndicator color={COLORS.white} size="small"/>
+                        : <Text style={styles.saveBtnText}>Send</Text>
+                      }
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ) : (
+                <View style={styles.modalBody}>
+                  {fbHistoryLoading ? (
+                    <ActivityIndicator color={COLORS.primary} style={{ marginTop: 24 }}/>
+                  ) : fbHistory.length === 0 ? (
+                    <Text style={{ textAlign:'center', color: COLORS.textMuted, marginTop: 24, fontSize: 13 }}>
+                      No submissions yet.
+                    </Text>
+                  ) : (
+                    fbHistory.map(item => (
+                      <View key={item.id} style={styles.fbHistoryCard}>
+                        <View style={{ flexDirection:'row', justifyContent:'space-between', alignItems:'flex-start' }}>
+                          <Text style={styles.fbHistoryType}>
+                            {item.type === 'inquiry' ? 'Inquiry' : 'Feedback'}{item.subject ? ' — ' + item.subject : ''}
+                          </Text>
+                          <View style={[
+                            styles.fbStatusBadge,
+                            item.status === 'open'       && { backgroundColor: '#fef3c7' },
+                            item.status === 'responded'  && { backgroundColor: '#dcfce7' },
+                            item.status === 'closed'     && { backgroundColor: '#e5e7eb' },
+                          ]}>
+                            <Text style={[
+                              styles.fbStatusBadgeText,
+                              item.status === 'open'      && { color: '#92400e' },
+                              item.status === 'responded' && { color: '#166534' },
+                              item.status === 'closed'    && { color: '#4b5563' },
+                            ]}>
+                              {item.status === 'open' ? 'Open' : item.status === 'responded' ? 'Responded' : 'Closed'}
+                            </Text>
+                          </View>
+                        </View>
+                        <Text style={styles.fbHistoryMessage}>{item.message}</Text>
+                        {item.admin_response ? (
+                          <View style={styles.fbReplyBox}>
+                            <Text style={styles.fbReplyLabel}>Our reply:</Text>
+                            <Text style={styles.fbReplyText}>{item.admin_response}</Text>
+                          </View>
+                        ) : null}
+                      </View>
+                    ))
+                  )}
+                </View>
+              )}
+            </ScrollView>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
       <CustomAlert config={alertConfig} onHide={hideAlert}/>
     </View>
   );
@@ -865,4 +1086,19 @@ const makeStyles = (COLORS) => StyleSheet.create({
   saveBtn:            { flex:2, padding:12, borderRadius: RADIUS.sm, backgroundColor: COLORS.primary, alignItems:'center' },
   saveBtnDisabled:    { backgroundColor: COLORS.grayLight },
   saveBtnText:        { fontSize:14, fontWeight:'700', color: COLORS.white },
+
+  // Feedback & Inquiries (CRM, revision Nov 2026)
+  fbTabRow:           { flexDirection:'row', gap: SPACING.sm, paddingHorizontal: SPACING.md, paddingTop: SPACING.sm, paddingBottom: SPACING.xs },
+  fbTabBtn:           { flex:1, paddingVertical:8, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg, alignItems:'center' },
+  fbTabBtnActive:     { backgroundColor: COLORS.primary },
+  fbTabText:          { fontSize:13, fontWeight:'600', color: COLORS.textSecondary },
+  fbTabTextActive:    { color: COLORS.white },
+  fbHistoryCard:       { borderWidth:1, borderColor: COLORS.grayBorder, borderRadius: RADIUS.sm, padding:12, marginBottom: SPACING.sm },
+  fbHistoryType:       { fontSize:13, fontWeight:'700', color: COLORS.dark, flex:1, marginRight:8 },
+  fbHistoryMessage:    { fontSize:13, color: COLORS.textSecondary, marginTop:6, lineHeight:18 },
+  fbStatusBadge:       { borderRadius:999, paddingHorizontal:8, paddingVertical:3 },
+  fbStatusBadgeText:   { fontSize:11, fontWeight:'700' },
+  fbReplyBox:          { marginTop:8, padding:10, borderRadius: RADIUS.sm, backgroundColor: COLORS.grayBg, borderLeftWidth:3, borderLeftColor: COLORS.primary },
+  fbReplyLabel:        { fontSize:11, fontWeight:'700', color: COLORS.primary, marginBottom:2 },
+  fbReplyText:         { fontSize:13, color: COLORS.dark, lineHeight:18 },
 });

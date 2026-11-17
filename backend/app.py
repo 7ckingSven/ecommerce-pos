@@ -193,6 +193,37 @@ def paymongo_get_intent_status(payment_intent_id):
     res = _paymongo_request('GET', f'/payment_intents/{payment_intent_id}')
     return res['data']['attributes']['status']
 
+def paymongo_get_payment_id_from_intent(payment_intent_id):
+    """The Refunds API needs the actual Payment resource id, not the
+    Payment Intent id we store on `payment.ref_no` — a succeeded intent
+    carries the Payment(s) it charged under attributes.payments[]. Used by
+    the Return & Refund module (revision, Nov 2026) to reverse a GCash
+    order automatically."""
+    res = _paymongo_request('GET', f'/payment_intents/{payment_intent_id}')
+    payments = (res.get('data', {}).get('attributes', {}) or {}).get('payments') or []
+    if not payments:
+        raise PayMongoError('No completed GCash payment found under this order to refund.')
+    return payments[0]['id']
+
+def paymongo_create_refund(payment_id, amount_pesos, reason='requested_by_customer', notes=''):
+    """Issues a refund against a PayMongo Payment (amount may be less than
+    the original charge — PayMongo supports partial refunds natively).
+    Returns (refund_id, status) — status is usually 'pending' immediately
+    after creation; PayMongo settles it on their side afterward."""
+    amount_centavos = int(round(float(amount_pesos) * 100))
+    body = {
+        'data': {
+            'attributes': {
+                'amount':     amount_centavos,
+                'payment_id': payment_id,
+                'reason':     reason,
+                'notes':      notes or 'Return/refund approved via TEFC admin',
+            }
+        }
+    }
+    res = _paymongo_request('POST', '/refunds', body)
+    return res['data']['id'], res['data']['attributes'].get('status')
+
 # ══════════════════════════════════════════════════════
 # HELPER FUNCTIONS
 # ══════════════════════════════════════════════════════
@@ -1043,7 +1074,7 @@ def _auto_advance_pending_orders():
         for o in due_orders:
             if len(moved_ids) >= remaining:
                 break
-            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [])
+            ok, err = _deduct_order_item_stock(o['order_id'], o.get('branch_id'), o.get('order_item') or [], order_type='online')
             if ok:
                 moved_ids.append(o['order_id'])
             else:
@@ -2022,7 +2053,8 @@ def api_products():
         # entirely behavior.
         include_low_stock = request.args.get('include_low_stock', '').lower() in ('1', 'true', 'yes')
         query    = supabase.table('product').select(
-            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), option_groups, net_weight'
+            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), variant_stock(branch_id, quantity, options), '
+            'warehouse_stock(quantity), warehouse_variant_stock(quantity, options), option_groups, net_weight'
         ).eq('status', 'active')
         if category:
             query = query.eq('category', category)
@@ -2056,23 +2088,11 @@ def api_products():
         for p in res.data:
             entry = dict(p)
             entry['total_sold'] = sold_map.get(p['product_id'], 0)
-            # Keep total quantity as sum of all branch stocks — guard against a
-            # null quantity on any branch_stock row (was crashing sum() with a
-            # TypeError, which this route's except then masked as a generic
-            # 500 "Failed to fetch products." with no indication of why).
             branch_stocks = p.get('branch_stock') or []
-            entry['quantity'] = sum(int(bs.get('quantity') or 0) for bs in branch_stocks)
 
-            # Hide a product from the branch's shelf once it's down to its
-            # critical reserve level — keeps a buffer instead of selling all
-            # the way to zero. Only applied when a specific branch_id was
-            # requested (the customer's selected branch, or the POS screen's
-            # own branch) — a caller that didn't scope to a branch (e.g. the
-            # admin/staff Inventory dashboard, which hits a different
-            # endpoint anyway, or any store-wide listing) sees everything,
-            # critical or not, since that view exists precisely to show low
-            # stock so staff know to restock it.
             if branch_id:
+                # Staff POS path — unchanged (per-branch branch_stock/variant_stock).
+                entry['quantity'] = sum(int(bs.get('quantity') or 0) for bs in branch_stocks)
                 bs_here = next((bs for bs in branch_stocks if str(bs.get('branch_id')) == str(branch_id)), None)
                 base_qty = int(bs_here.get('quantity') or 0) if bs_here else 0
                 variant_stocks = [v for v in (p.get('variant_stock') or []) if str(v.get('branch_id')) == str(branch_id)]
@@ -2089,6 +2109,23 @@ def api_products():
                 entry['branch_available_qty'] = best_available
                 if best_available <= CRITICAL_STOCK_LEVEL and not include_low_stock:
                     continue  # skip — critical or out of stock at this branch
+            else:
+                # Mobile/online path (revision, Nov 2026) — no branch_id means
+                # this is the customer-facing catalog, which now reads from
+                # the single warehouse_stock pool, not a sum of branches'
+                # branch_stock. Same critical-reserve hiding rule applied
+                # against the warehouse quantity instead of a branch's.
+                wh_rows      = p.get('warehouse_stock') or []
+                wh_qty       = sum(int(w.get('quantity') or 0) for w in wh_rows)
+                wh_variants  = p.get('warehouse_variant_stock') or []
+                if wh_variants:
+                    best_available = max(int(v.get('quantity') or 0) for v in wh_variants)
+                else:
+                    best_available = wh_qty
+                entry['quantity']            = wh_qty
+                entry['branch_available_qty'] = best_available
+                if best_available <= CRITICAL_STOCK_LEVEL and not include_low_stock:
+                    continue  # skip — critical or out of stock in the warehouse
 
             result.append(entry)
 
@@ -2107,12 +2144,19 @@ def api_product_detail(product_id):
         except ValueError:
             return jsonify({'error': 'Invalid product ID.'}), 404
         _auto_end_expired_discounts()
+        # Mobile-only route (Buy Again / product detail re-fetch) — reads
+        # the single warehouse pool, not branch_stock (revision, Nov 2026).
         res = supabase.table('product').select(
-            '*, discount(discount_name, percentage), branch_stock(branch_id, quantity, branch(branch_name)), option_groups, net_weight, net_weight_unit'
+            '*, discount(discount_name, percentage), warehouse_stock(quantity), warehouse_variant_stock(quantity, options), option_groups, net_weight, net_weight_unit'
         ).eq('product_id', product_id).execute()
         if not res.data:
             return jsonify({'error': 'Product not found.'}), 404
-        return jsonify(res.data[0]), 200
+        p = res.data[0]
+        wh_rows     = p.get('warehouse_stock') or []
+        wh_variants = p.get('warehouse_variant_stock') or []
+        p['quantity']             = sum(int(w.get('quantity') or 0) for w in wh_rows)
+        p['branch_available_qty'] = max((int(v.get('quantity') or 0) for v in wh_variants), default=p['quantity'])
+        return jsonify(p), 200
     except Exception as e:
         print(f"API product detail error: {e}")
         return jsonify({'error': 'Failed to fetch product.'}), 500
@@ -2142,13 +2186,13 @@ def api_get_cart():
     if not customer_id:
         return jsonify({'error': 'Unauthorized'}), 401
     try:
-        # branch_stock/variant_stock are included so the app can enforce the
-        # real stock cap on the quantity stepper — without them, every
-        # product's stock limit silently reads as undefined and the +
-        # button never disables no matter how high the quantity goes
-        # (branch-level AND per-variant).
+        # warehouse_stock/warehouse_variant_stock are included so the app can
+        # enforce the real stock cap on the quantity stepper — cart items are
+        # always online/warehouse-sourced now (revision, Nov 2026: customers
+        # no longer pick a branch), so branch_stock/variant_stock no longer
+        # apply here.
         res = supabase_retry(lambda: supabase.table('cart').select(
-            '*, branch_id, product(product_id, product_name, price, image_url, image_urls, brand, category, net_weight, net_weight_unit, option_groups, variant_overrides, discount(discount_name, percentage), branch_stock(branch_id, quantity), variant_stock(branch_id, quantity, options))'
+            '*, branch_id, product(product_id, product_name, price, image_url, image_urls, brand, category, net_weight, net_weight_unit, option_groups, variant_overrides, discount(discount_name, percentage), warehouse_stock(quantity), warehouse_variant_stock(quantity, options))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -2164,8 +2208,10 @@ def api_add_to_cart():
     data             = request.get_json()
     product_id       = data.get('product_id')
     quantity         = data.get('quantity', 1)
-    branch_id        = data.get('branch_id')
     selected_options = data.get('selected_options', {})
+    # branch_id is no longer collected from the mobile app (revision, Nov
+    # 2026: customers don't pick a branch) — cart.branch_id is deprecated
+    # and stays NULL on every new/updated row.
 
     if not product_id:
         return jsonify({'error': 'Product ID is required.'}), 400
@@ -2183,14 +2229,12 @@ def api_add_to_cart():
             new_quantity = matched['quantity'] + quantity
             res = supabase.table('cart').update({
                 'quantity':  new_quantity,
-                'branch_id': branch_id,
             }).eq('cart_id', matched['cart_id']).execute()
         else:
             res = supabase.table('cart').insert({
                 'customer_id':      customer_id,
                 'product_id':       product_id,
                 'quantity':         quantity,
-                'branch_id':        branch_id,
                 'selected_options': selected_options,
                 'status':           'active'
             }).execute()
@@ -2239,7 +2283,7 @@ def api_get_orders():
         return jsonify({'error': 'Unauthorized'}), 401
     try:
         res = supabase_retry(lambda: supabase.table('order').select(
-            '*, order_item(order_item_id, product_id, qty, price, selected_options, product(product_name, image_url, image_urls, price, option_groups, variant_overrides)), payment(*), branch(branch_name)'
+            '*, order_item(order_item_id, product_id, qty, returned_qty, price, selected_options, product(product_name, image_url, image_urls, price, option_groups, variant_overrides)), payment(*), branch(branch_name)'
         ).eq('customer_id', customer_id).order('created_at', desc=True).execute())
         return jsonify(res.data), 200
     except Exception as e:
@@ -2263,7 +2307,15 @@ def api_mark_order_received(order_id):
         if order.get('status') != 'out_for_delivery':
             return jsonify({'error': 'Order is not out for delivery.'}), 400
 
-        supabase.table('order').update({'status': 'completed'}).eq('order_id', order_id).execute()
+        # completed_at was missing here (bug found while wiring the return
+        # policy, Nov 2026) — staff_mark_delivered/admin_mark_delivered both
+        # set it, but this customer self-confirm path didn't, which would
+        # have silently broken the new 12-hour return window (computed from
+        # completed_at) for any order the customer marks received themselves.
+        supabase.table('order').update({
+            'status':       'completed',
+            'completed_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('order_id', order_id).execute()
         return jsonify({'message': 'Order marked as received!'}), 200
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -2417,7 +2469,11 @@ def set_variant_stock():
 
 @app.route('/api/variant-stock/check', methods=['POST'])
 def check_variant_stock():
-    """Check stock for a specific variant combo (mobile)"""
+    """Check stock for a specific variant combo.
+    branch_id present -> staff POS path, checks that branch's variant_stock.
+    branch_id absent  -> mobile/online path (revision, Nov 2026), checks the
+    single warehouse_variant_stock pool instead.
+    """
     try:
         data       = request.get_json()
         product_id = data.get('product_id')
@@ -2427,10 +2483,11 @@ def check_variant_stock():
         if not product_id or not options:
             return jsonify({'quantity': 0}), 200
 
-        query = supabase.table('variant_stock').select('quantity, options').eq('product_id', product_id)
         if branch_id:
-            query = query.eq('branch_id', branch_id)
-        res = query.execute()
+            query = supabase.table('variant_stock').select('quantity, options').eq('product_id', product_id).eq('branch_id', branch_id)
+            res = query.execute()
+        else:
+            res = supabase.table('warehouse_variant_stock').select('quantity, options').eq('product_id', product_id).execute()
         total = sum(v['quantity'] for v in (res.data or []) if v.get('options') == options)
         return jsonify({'quantity': total}), 200
     except Exception as e:
@@ -2580,24 +2637,35 @@ def api_place_order():
         total    = sum(item['price'] * item['quantity'] for item in cart_items)
         quantity = sum(item['quantity'] for item in cart_items)
 
-        branch_id    = data.get('branch_id') or _resolve_order_branch_id(cart_items)
+        # branch_id stays unassigned at placement (revision, Nov 2026) — the
+        # customer never picks a branch anymore, and admin assigns one later
+        # from the Unassigned Orders queue. Any branch_id the client sends
+        # is ignored; online orders are always created with no branch.
+        branch_id = None
+
+        fulfillment_type = data.get('fulfillment_type', 'delivery')
+        if fulfillment_type not in ('delivery', 'pickup'):
+            return jsonify({'error': 'Invalid fulfillment_type. Use delivery or pickup.'}), 400
+
         # Never trust the client-sent shipping_fee — recompute it here from
         # the address + each item's product weight, so the amount can't be
         # tampered with via a direct API call (e.g. sending 0 for an
-        # out-of-South-Cotabato address to dodge the fee).
-        shipping_fee = _compute_shipping_fee(address, cart_items)
+        # out-of-South-Cotabato address to dodge the fee). Pickup orders
+        # never ship, so there's no fee to compute.
+        shipping_fee = 0 if fulfillment_type == 'pickup' else _compute_shipping_fee(address, cart_items)
         address_note = data.get('address_note', '')
         order_res = supabase.table('order').insert({
-            'customer_id':  customer_id,
-            'order_type':   'online',
-            'quantity':     quantity,
-            'total':        total,
-            'status':       'pending',
-            'branch_id':    branch_id,
-            'shipping_fee': shipping_fee,
-            'address':      address,
-            'address_note': address_note,
-            'date':         'now()',
+            'customer_id':      customer_id,
+            'order_type':       'online',
+            'quantity':         quantity,
+            'total':            total,
+            'status':           'pending',
+            'branch_id':        branch_id,
+            'fulfillment_type': fulfillment_type,
+            'shipping_fee':     shipping_fee,
+            'address':          address,
+            'address_note':     address_note,
+            'date':             'now()',
         }).execute()
 
         order_id    = order_res.data[0]['order_id']
@@ -2824,6 +2892,181 @@ def api_change_password():
         print(f'Change password error: {e}')
         return jsonify({'error': 'Failed to change password.'}), 500
 
+
+# ─── CRM: FEEDBACK & INQUIRIES (revision, Nov 2026) ──────
+# Customer-facing submit + history. Uses the `feedback` table created in
+# task1_db_cleanup.sql (type: feedback|inquiry, status: open|responded|closed).
+@app.route('/api/feedback', methods=['POST'])
+def api_submit_feedback():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data     = request.get_json()
+        fb_type  = data.get('type', 'feedback')
+        subject  = (data.get('subject') or '').strip()
+        message  = (data.get('message') or '').strip()
+        order_id = data.get('order_id') or None
+
+        if fb_type not in ('feedback', 'inquiry'):
+            return jsonify({'error': "Type must be 'feedback' or 'inquiry'."}), 400
+        if not message:
+            return jsonify({'error': 'Message is required.'}), 400
+
+        if order_id:
+            order_res = supabase.table('order').select('order_id, customer_id').eq('order_id', order_id).execute()
+            if not order_res.data or str(order_res.data[0].get('customer_id')) != str(customer_id):
+                return jsonify({'error': 'Order not found.'}), 404
+
+        ins = supabase.table('feedback').insert({
+            'customer_id': customer_id,
+            'order_id':    order_id,
+            'type':        fb_type,
+            'subject':     subject or None,
+            'message':     message,
+            'status':      'open',
+        }).execute()
+
+        return jsonify(ins.data[0] if ins.data else {'message': 'Submitted.'}), 201
+    except Exception as e:
+        print(f'Submit feedback error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/feedback', methods=['GET'])
+def api_get_my_feedback():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        res = supabase.table('feedback').select(
+            'id, order_id, type, subject, message, status, admin_response, created_at, responded_at'
+        ).eq('customer_id', customer_id).order('created_at', desc=True).execute()
+        return jsonify(res.data or []), 200
+    except Exception as e:
+        print(f'Get feedback error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+# ─── RETURNS & REFUNDS (revision, Nov 2026) ──────────────
+# Panel-required post-delivery return policy, decided with the user:
+# 12-hour window after the order is marked completed (received/picked up),
+# refund method tracks how the order was originally paid (GCash → reversed
+# automatically through PayMongo; COD/cash → handed back as on-hand cash,
+# confirmed manually by staff/admin), both admin and staff at the
+# fulfilling branch can approve. Uses the return_request/return_request_item
+# tables from task1_db_cleanup.sql. order_item.returned_qty (already used
+# by the existing admin manual-return endpoint) tracks how much of each
+# line item has been returned so far, shared across both paths.
+RETURN_WINDOW_HOURS = 12
+
+@app.route('/api/returns', methods=['POST'])
+def api_submit_return():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        data     = request.get_json()
+        order_id = data.get('order_id')
+        reason   = (data.get('reason') or '').strip()
+        items    = data.get('items') or []  # [{order_item_id, qty_returned}]
+
+        if not order_id or not reason:
+            return jsonify({'error': 'Order and reason are required.'}), 400
+        if not items:
+            return jsonify({'error': 'Select at least one item to return.'}), 400
+
+        order_res = supabase.table('order').select(
+            'order_id, customer_id, status, completed_at, '
+            'order_item(order_item_id, qty, returned_qty), payment(payment_method)'
+        ).eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+        order = order_res.data[0]
+        if str(order.get('customer_id')) != str(customer_id):
+            return jsonify({'error': 'Order not found.'}), 404
+        if order.get('status') != 'completed':
+            return jsonify({'error': 'Only completed (received) orders can be returned.'}), 400
+
+        completed_at = order.get('completed_at')
+        if not completed_at:
+            return jsonify({'error': 'This order has no completion time on record — contact support.'}), 400
+        completed_dt = datetime.fromisoformat(completed_at.replace('Z', '+00:00'))
+        if datetime.now(timezone.utc) > completed_dt + timedelta(hours=RETURN_WINDOW_HOURS):
+            return jsonify({'error': f'The {RETURN_WINDOW_HOURS}-hour return window for this order has expired.'}), 400
+
+        existing = supabase.table('return_request').select('id').eq('order_id', order_id) \
+            .in_('status', ['pending', 'approved', 'refunded']).execute()
+        if existing.data:
+            return jsonify({'error': 'A return request already exists for this order.'}), 409
+
+        item_map = {i['order_item_id']: i for i in (order.get('order_item') or [])}
+        validated = []
+        for req_item in items:
+            oi_id = req_item.get('order_item_id')
+            try:
+                qty = int(req_item.get('qty_returned', 0))
+            except (TypeError, ValueError):
+                qty = 0
+            oi = item_map.get(oi_id)
+            if not oi or qty <= 0:
+                return jsonify({'error': 'Invalid item or quantity.'}), 400
+            remaining = int(oi['qty']) - int(oi.get('returned_qty') or 0)
+            if qty > remaining:
+                return jsonify({'error': f'Only {remaining} unit(s) of that item are eligible for return.'}), 400
+            validated.append((oi_id, qty))
+
+        # Refund method tracks the original payment method — not a customer
+        # choice — so there's never a GCash "refund" attempted on a cash
+        # order (nothing to reverse) or vice versa.
+        payment = order.get('payment')
+        if isinstance(payment, list):
+            payment = payment[0] if payment else None
+        refund_method = 'gcash' if (payment or {}).get('payment_method') == 'gcash' else 'cash'
+
+        now = datetime.now(timezone.utc)
+        ins = supabase.table('return_request').insert({
+            'order_id':          order_id,
+            'requested_at':      now.isoformat(),
+            'window_expires_at': (now + timedelta(hours=RETURN_WINDOW_HOURS)).isoformat(),
+            'reason':            reason,
+            'status':            'pending',
+            'refund_method':     refund_method,
+        }).execute()
+        if not ins.data:
+            return jsonify({'error': 'Failed to submit return request.'}), 500
+        return_id = ins.data[0]['id']
+
+        supabase.table('return_request_item').insert([
+            {'return_request_id': return_id, 'order_item_id': oi_id, 'qty_returned': qty}
+            for oi_id, qty in validated
+        ]).execute()
+
+        return jsonify({'message': 'Return request submitted.', 'id': return_id, 'refund_method': refund_method}), 201
+    except Exception as e:
+        print(f'Submit return error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/returns', methods=['GET'])
+def api_get_my_returns():
+    customer_id = request.headers.get('X-Customer-ID')
+    if not customer_id:
+        return jsonify({'error': 'Unauthorized'}), 401
+    try:
+        orders_res = supabase.table('order').select('order_id').eq('customer_id', customer_id).execute()
+        order_ids = [o['order_id'] for o in (orders_res.data or [])]
+        if not order_ids:
+            return jsonify([]), 200
+
+        res = supabase.table('return_request').select(
+            'id, order_id, requested_at, reason, status, rejection_reason, refund_method, refunded_at, '
+            'return_request_item(qty_returned, order_item(product_id, selected_options, product(product_name, image_url)))'
+        ).in_('order_id', order_ids).order('requested_at', desc=True).execute()
+        return jsonify(res.data or []), 200
+    except Exception as e:
+        print(f'Get my returns error: {e}')
+        return jsonify({'error': str(e)}), 500
 
 
 # ══════════════════════════════════════════════════════
@@ -4758,6 +5001,455 @@ def admin_get_orders():
         print(f'Admin orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
+# Unassigned Orders queue + branch-assignment action (revision, Nov 2026).
+# Every online order is created with branch_id=NULL now (see api_place_order
+# — the customer never picks a branch anymore). This is where admin reviews
+# that queue and decides which branch fulfills each order; staff never see
+# an order in their own dashboard until it's been assigned here.
+@app.route('/api/admin/orders/unassigned', methods=['GET'])
+@admin_required
+def admin_get_unassigned_orders():
+    try:
+        res = supabase.table('order').select(
+            'order_id, total, status, fulfillment_type, date, created_at, address, shipping_fee, '
+            'customer(fname, lname, email, phone_number), '
+            'order_item(order_item_id, product_id, qty, selected_options, product(product_name, image_url))'
+        ).eq('order_type', 'online').is_('branch_id', 'null').order('created_at', desc=False).execute()
+        return jsonify(res.data or []), 200
+    except Exception as e:
+        print(f'Unassigned orders error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/orders/<order_id>/assign-branch', methods=['PUT'])
+@admin_required
+def admin_assign_order_branch(order_id):
+    try:
+        data      = request.get_json()
+        branch_id = data.get('branch_id')
+        if not branch_id:
+            return jsonify({'error': 'branch_id is required.'}), 400
+
+        branch_res = supabase.table('branch').select('branch_id').eq('branch_id', branch_id).execute()
+        if not branch_res.data:
+            return jsonify({'error': 'Branch not found.'}), 404
+
+        order_res = supabase.table('order').select('order_id, order_type, branch_id').eq('order_id', order_id).execute()
+        if not order_res.data:
+            return jsonify({'error': 'Order not found.'}), 404
+        order_row = order_res.data[0]
+        if order_row.get('order_type') != 'online':
+            return jsonify({'error': 'Only online orders can be assigned to a branch here.'}), 400
+        if order_row.get('branch_id'):
+            return jsonify({'error': 'Order already has an assigned branch.'}), 400
+
+        supabase.table('order').update({
+            'branch_id':   branch_id,
+            'assigned_at': datetime.now(timezone.utc).isoformat(),
+            'assigned_by': session.get('staff_id'),
+        }).eq('order_id', order_id).execute()
+
+        return jsonify({'message': 'Order assigned to branch.', 'order_id': order_id, 'branch_id': branch_id}), 200
+    except Exception as e:
+        print(f'Assign order branch error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+# ─── WAREHOUSE (single online-fulfillment stock pool, revision Nov 2026) ───
+# Owned entirely by admin — mirrors the branch_stock Inventory section's
+# shape (restock/adjustment pattern from admin_add_inventory above) but with
+# no branch_id, since the warehouse is one pool shared by every branch.
+
+@app.route('/api/admin/warehouse-stock', methods=['GET'])
+@admin_required
+def admin_get_warehouse_stock():
+    try:
+        res = supabase.table('warehouse_stock').select(
+            'id, product_id, quantity, updated_at, product(product_name, category, image_url, status)'
+        ).order('updated_at', desc=True).execute()
+        variant_res = supabase.table('warehouse_variant_stock').select(
+            'id, product_id, options, quantity, updated_at'
+        ).execute()
+        return jsonify({
+            'stock':         res.data or [],
+            'variant_stock': variant_res.data or [],
+        }), 200
+    except Exception as e:
+        print(f'Warehouse stock fetch error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/warehouse-stock/adjust', methods=['POST'])
+@admin_required
+def admin_adjust_warehouse_stock():
+    """Restock or adjust the warehouse pool for one product (optionally one
+    variant combo). Same qty_change-delta shape as admin_add_inventory's
+    restock/adjustment branch, just with no branch_id involved — logged to
+    the same `inventory` table (to_branch_id left NULL) so this shows up
+    alongside branch restocks in the existing Movement History view."""
+    try:
+        data       = request.get_json()
+        product_id = data.get('product_id')
+        qty_change, qty_err = _require_int_qty(data.get('quantity', 0), 'Quantity')
+        if qty_err: return qty_err
+        note             = data.get('note', '')
+        variant_options  = data.get('variant_options') or None
+
+        if not product_id or qty_change == 0:
+            return jsonify({'error': 'Product and quantity are required.'}), 400
+
+        if variant_options:
+            all_vs = supabase.table('warehouse_variant_stock').select('id, quantity, options').eq('product_id', product_id).execute()
+            match  = [v for v in (all_vs.data or []) if v.get('options') == variant_options]
+            qty_before = match[0]['quantity'] if match else 0
+            qty_after  = qty_before + qty_change
+            if qty_after < 0:
+                return jsonify({'error': f'Insufficient warehouse stock. Only {qty_before} unit(s) available.'}), 400
+            if match:
+                supabase.table('warehouse_variant_stock').update({
+                    'quantity': qty_after, 'updated_at': 'now()'
+                }).eq('id', match[0]['id']).execute()
+            else:
+                supabase.table('warehouse_variant_stock').insert({
+                    'product_id': product_id, 'options': variant_options, 'quantity': qty_after,
+                }).execute()
+        else:
+            dst = supabase.table('warehouse_stock').select('quantity').eq('product_id', product_id).execute()
+            qty_before = dst.data[0]['quantity'] if dst.data else 0
+            qty_after  = qty_before + qty_change
+            if qty_after < 0:
+                return jsonify({'error': f'Insufficient warehouse stock. Only {qty_before} unit(s) available.'}), 400
+            if dst.data:
+                supabase.table('warehouse_stock').update({
+                    'quantity': qty_after, 'updated_at': 'now()'
+                }).eq('product_id', product_id).execute()
+            else:
+                supabase.table('warehouse_stock').insert({
+                    'product_id': product_id, 'quantity': qty_after,
+                }).execute()
+
+        # Logged into the shared `inventory` audit table — to_branch_id is
+        # left NULL (there's no branch here), which is also how this
+        # revision's own warehouse-pullout deductions are logged elsewhere
+        # (see _deduct_order_item_stock), so the two show up consistently.
+        supabase.table('inventory').insert({
+            'product_id':      product_id,
+            'staff_id':        session.get('staff_id'),
+            'quantity_added':  qty_change,
+            'quantity_before': qty_before,
+            'quantity_after':  qty_after,
+            'to_branch_id':    None,
+            'note':            note or 'Warehouse stock adjustment',
+            'variant_options': variant_options,
+        }).execute()
+
+        return jsonify({'message': 'Warehouse stock updated.'}), 201
+    except Exception as e:
+        print(f'Warehouse stock adjust error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/warehouse-pullout', methods=['GET'])
+@admin_required
+def admin_get_warehouse_pullout():
+    """Item Pullout System log — every unit pulled from the warehouse to
+    fulfill an online order (written by _deduct_order_item_stock whenever
+    an order enters processing). Read-only history, newest first."""
+    try:
+        limit = request.args.get('limit', default=200, type=int)
+        if limit <= 0 or limit > 1000:
+            limit = 200
+        res = supabase.table('warehouse_pullout').select(
+            'id, order_id, product_id, variant_options, quantity, pulled_by, pulled_at, note, '
+            'product(product_name, image_url), staff(fname, lname), order(status, fulfillment_type, branch_id, branch(branch_name))'
+        ).order('pulled_at', desc=True).limit(limit).execute()
+        return jsonify(res.data or []), 200
+    except Exception as e:
+        print(f'Warehouse pullout fetch error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+# ─── CRM: FEEDBACK & INQUIRIES — admin inbox (revision, Nov 2026) ──────
+@app.route('/api/admin/feedback', methods=['GET'])
+@admin_required
+def admin_get_feedback():
+    try:
+        status_filter = request.args.get('status')
+        type_filter   = request.args.get('type')
+        q = supabase.table('feedback').select(
+            'id, customer_id, order_id, type, subject, message, status, admin_response, '
+            'responded_by, created_at, responded_at, '
+            'customer(fname, lname, email, phone_number), staff(fname, lname)'
+        )
+        if status_filter in ('open', 'responded', 'closed'):
+            q = q.eq('status', status_filter)
+        if type_filter in ('feedback', 'inquiry'):
+            q = q.eq('type', type_filter)
+        res = q.order('created_at', desc=True).execute()
+        return jsonify(res.data or []), 200
+    except Exception as e:
+        print(f'Admin feedback fetch error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/feedback/<feedback_id>/respond', methods=['PUT'])
+@admin_required
+def admin_respond_feedback(feedback_id):
+    try:
+        data     = request.get_json()
+        response = (data.get('admin_response') or '').strip()
+        if not response:
+            return jsonify({'error': 'A response message is required.'}), 400
+
+        fb_res = supabase.table('feedback').select('id').eq('id', feedback_id).execute()
+        if not fb_res.data:
+            return jsonify({'error': 'Feedback entry not found.'}), 404
+
+        supabase.table('feedback').update({
+            'admin_response': response,
+            'status':         'responded',
+            'responded_by':   session.get('staff_id'),
+            'responded_at':   datetime.now(timezone.utc).isoformat(),
+        }).eq('id', feedback_id).execute()
+
+        return jsonify({'message': 'Response sent.'}), 200
+    except Exception as e:
+        print(f'Admin respond feedback error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/admin/feedback/<feedback_id>/close', methods=['PUT'])
+@admin_required
+def admin_close_feedback(feedback_id):
+    try:
+        fb_res = supabase.table('feedback').select('id').eq('id', feedback_id).execute()
+        if not fb_res.data:
+            return jsonify({'error': 'Feedback entry not found.'}), 404
+        supabase.table('feedback').update({'status': 'closed'}).eq('id', feedback_id).execute()
+        return jsonify({'message': 'Marked closed.'}), 200
+    except Exception as e:
+        print(f'Admin close feedback error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+# ─── RETURNS & REFUNDS — staff/admin review (revision, Nov 2026) ──────
+# @staff_required (not @admin_required): both admin and staff at the
+# fulfilling branch can review a return per the user's decision — staff
+# are scoped to their own branch's orders below, admin sees every branch.
+def _return_my_branch():
+    """None for admin (unrestricted) or a staff account with no branch
+    assigned; otherwise that staff's branch_id, used to scope the list/
+    approve/reject/mark-refunded routes below."""
+    if session.get('role') != 'staff':
+        return None
+    staff_id  = session.get('staff_id')
+    staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
+    return staff_res.data[0]['branch_id'] if staff_res.data else None
+
+def _return_order_of(row):
+    o = row.get('order')
+    return (o[0] if o else {}) if isinstance(o, list) else (o or {})
+
+@app.route('/api/staff/returns', methods=['GET'])
+@staff_required
+def staff_list_returns():
+    try:
+        status_filter = request.args.get('status')
+        q = supabase.table('return_request').select(
+            'id, order_id, requested_at, window_expires_at, reason, status, reviewed_by, reviewed_at, '
+            'rejection_reason, refund_method, refunded_at, '
+            'return_request_item(id, order_item_id, qty_returned, '
+            'order_item(product_id, qty, price, selected_options, product(product_name, image_url))), '
+            'order(order_id, branch_id, total, fulfillment_type, completed_at, '
+            'customer(fname, lname, email, phone_number), branch(branch_name)), '
+            'staff(fname, lname)'
+        )
+        if status_filter in ('pending', 'approved', 'rejected', 'refunded'):
+            q = q.eq('status', status_filter)
+        res  = q.order('requested_at', desc=True).execute()
+        rows = res.data or []
+
+        my_branch = _return_my_branch()
+        if my_branch:
+            rows = [r for r in rows if _return_order_of(r).get('branch_id') == my_branch]
+
+        return jsonify(rows), 200
+    except Exception as e:
+        print(f'List returns error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/returns/<return_id>/approve', methods=['PUT'])
+@staff_required
+def staff_approve_return(return_id):
+    try:
+        rr_res = supabase.table('return_request').select(
+            'id, order_id, status, refund_method, '
+            'return_request_item(id, order_item_id, qty_returned), '
+            'order(order_id, branch_id, order_item(order_item_id, product_id, qty, price, returned_qty, selected_options), '
+            'payment(payment_method, ref_no))'
+        ).eq('id', return_id).execute()
+        if not rr_res.data:
+            return jsonify({'error': 'Return request not found.'}), 404
+        rr = rr_res.data[0]
+        if rr.get('status') != 'pending':
+            return jsonify({'error': 'Only pending return requests can be approved.'}), 400
+
+        order = _return_order_of(rr)
+        my_branch = _return_my_branch()
+        if my_branch and order.get('branch_id') != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
+
+        item_map     = {i['order_item_id']: i for i in (order.get('order_item') or [])}
+        refund_total = 0.0
+        restore_plan = []
+        for rri in (rr.get('return_request_item') or []):
+            oi = item_map.get(rri['order_item_id'])
+            if not oi:
+                continue
+            qty = int(rri['qty_returned'])
+            refund_total += float(oi.get('price') or 0) * qty
+            restore_plan.append((oi, qty))
+
+        # Restore stock to the warehouse — online orders always pull from
+        # there regardless of which branch fulfilled them (see
+        # _deduct_order_item_stock) — and bump order_item.returned_qty,
+        # the same column the existing admin manual-return endpoint uses,
+        # so remaining-returnable math stays consistent across both paths.
+        for oi, qty in restore_plan:
+            pid  = oi.get('product_id')
+            opts = oi.get('selected_options') or {}
+            try:
+                qty_before = 0
+                qty_after  = qty
+                ws = supabase.table('warehouse_stock').select('quantity').eq('product_id', pid).execute()
+                if ws.data:
+                    qty_before = ws.data[0]['quantity']
+                    qty_after  = qty_before + qty
+                    supabase.table('warehouse_stock').update({
+                        'quantity': qty_after, 'updated_at': 'now()'
+                    }).eq('product_id', pid).execute()
+                else:
+                    supabase.table('warehouse_stock').insert({'product_id': pid, 'quantity': qty}).execute()
+                if opts:
+                    all_vs = supabase.table('warehouse_variant_stock').select('id, quantity, options').eq('product_id', pid).execute()
+                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                    if match:
+                        supabase.table('warehouse_variant_stock').update({
+                            'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
+                        }).eq('id', match[0]['id']).execute()
+                pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
+                if pr.data:
+                    supabase.table('product').update({
+                        'quantity': pr.data[0]['quantity'] + qty
+                    }).eq('product_id', pid).execute()
+                supabase.table('order_item').update({
+                    'returned_qty': int(oi.get('returned_qty') or 0) + qty
+                }).eq('order_item_id', oi['order_item_id']).execute()
+                supabase.table('inventory').insert({
+                    'product_id':      pid,
+                    'staff_id':        session.get('staff_id'),
+                    'quantity_added':  qty,
+                    'quantity_before': qty_before,
+                    'quantity_after':  qty_after,
+                    'to_branch_id':    None,
+                    'variant_options': opts if opts else None,
+                    'note':            f'Customer return approved — Order #{rr["order_id"][:8].upper()}',
+                }).execute()
+            except Exception as item_err:
+                print(f'Return stock restore warning ({pid}): {item_err}')
+
+        update_fields = {
+            'status':      'approved',
+            'reviewed_by': session.get('staff_id'),
+            'reviewed_at': datetime.now(timezone.utc).isoformat(),
+        }
+
+        refund_warning = None
+        if rr.get('refund_method') == 'gcash':
+            payment = order.get('payment')
+            if isinstance(payment, list):
+                payment = payment[0] if payment else None
+            intent_id = (payment or {}).get('ref_no')
+            try:
+                if not intent_id:
+                    raise PayMongoError('No GCash payment reference found on this order.')
+                payment_id = paymongo_get_payment_id_from_intent(intent_id)
+                paymongo_create_refund(payment_id, refund_total, notes=f'Return — Order #{rr["order_id"][:8].upper()}')
+                update_fields['status']       = 'refunded'
+                update_fields['refunded_at']  = datetime.now(timezone.utc).isoformat()
+            except PayMongoError as pm_err:
+                refund_warning = str(pm_err)
+                print(f'GCash refund error for return {return_id}: {pm_err}')
+                # Stays 'approved' (not 'refunded') — stock is already
+                # restored above; the refund itself needs manual follow-up.
+        # Cash refunds stay 'approved' until staff/admin confirms the
+        # physical handoff via the mark-refunded route below.
+
+        supabase.table('return_request').update(update_fields).eq('id', return_id).execute()
+
+        resp = {'message': 'Return approved.', 'refund_total': round(refund_total, 2), 'status': update_fields['status']}
+        if refund_warning:
+            resp['warning'] = f'Approved, but the GCash refund could not be completed automatically: {refund_warning}. Please follow up manually.'
+        return jsonify(resp), 200
+    except Exception as e:
+        import traceback; traceback.print_exc()
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/returns/<return_id>/reject', methods=['PUT'])
+@staff_required
+def staff_reject_return(return_id):
+    try:
+        data   = request.get_json(silent=True) or {}
+        reason = (data.get('rejection_reason') or '').strip()
+        if not reason:
+            return jsonify({'error': 'A rejection reason is required — the customer will see it.'}), 400
+
+        rr_res = supabase.table('return_request').select('id, status, order(branch_id)').eq('id', return_id).execute()
+        if not rr_res.data:
+            return jsonify({'error': 'Return request not found.'}), 404
+        rr = rr_res.data[0]
+        if rr.get('status') != 'pending':
+            return jsonify({'error': 'Only pending return requests can be rejected.'}), 400
+
+        order     = _return_order_of(rr)
+        my_branch = _return_my_branch()
+        if my_branch and order.get('branch_id') != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
+
+        supabase.table('return_request').update({
+            'status':           'rejected',
+            'reviewed_by':      session.get('staff_id'),
+            'reviewed_at':      datetime.now(timezone.utc).isoformat(),
+            'rejection_reason': reason,
+        }).eq('id', return_id).execute()
+        return jsonify({'message': 'Return rejected.'}), 200
+    except Exception as e:
+        print(f'Reject return error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/staff/returns/<return_id>/mark-refunded', methods=['PUT'])
+@staff_required
+def staff_mark_return_refunded(return_id):
+    """Cash-only confirmation step — the GCash path above refunds (and
+    flips to 'refunded') automatically on approval; cash has to be handed
+    back physically first, so this is the staff/admin's manual sign-off
+    that it actually happened."""
+    try:
+        rr_res = supabase.table('return_request').select('id, status, refund_method, order(branch_id)').eq('id', return_id).execute()
+        if not rr_res.data:
+            return jsonify({'error': 'Return request not found.'}), 404
+        rr = rr_res.data[0]
+        if rr.get('status') != 'approved':
+            return jsonify({'error': 'Only approved return requests can be marked refunded.'}), 400
+        if rr.get('refund_method') != 'cash':
+            return jsonify({'error': 'This return is not a cash refund.'}), 400
+
+        order     = _return_order_of(rr)
+        my_branch = _return_my_branch()
+        if my_branch and order.get('branch_id') != my_branch:
+            return jsonify({'error': 'This order belongs to a different branch.'}), 403
+
+        supabase.table('return_request').update({
+            'status':      'refunded',
+            'refunded_at': datetime.now(timezone.utc).isoformat(),
+        }).eq('id', return_id).execute()
+        return jsonify({'message': 'Marked refunded.'}), 200
+    except Exception as e:
+        print(f'Mark return refunded error: {e}')
+        return jsonify({'error': str(e)}), 500
+
 # NOTE: the manual "Move to Processing" batch action (POST
 # /api/admin/orders/batch-process) was removed Oct 26 2026 (team decision)
 # — Pending -> Processing is now purely system-driven by the 30-min
@@ -4792,12 +5484,13 @@ def admin_update_order(order_id):
         # processing, for the first time) or gives it back (an order that
         # already reached processing -> cancelled/returned_failed).
         order_res = supabase.table('order').select(
-            'branch_id, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
+            'branch_id, order_type, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
         order_row         = order_res.data[0]
         branch_id         = order_row.get('branch_id')
+        order_type        = order_row.get('order_type', 'walk_in')
         already_processed = bool(order_row.get('processing_started_at'))
         order_items       = order_row.get('order_item') or []
 
@@ -4820,7 +5513,7 @@ def admin_update_order(order_id):
             # twice), and block the transition entirely if stock has since
             # run out, rather than silently flooring at zero.
             if not already_processed:
-                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items)
+                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items, order_type=order_type)
                 if not ok:
                     return jsonify({'error': stock_err}), 400
 
@@ -4884,7 +5577,7 @@ def admin_update_order(order_id):
         if status in ('cancelled', 'returned_failed') and already_processed:
             _restore_order_item_stock(
                 order_id,
-                {'branch_id': branch_id, 'order_item': order_items},
+                {'branch_id': branch_id, 'order_type': order_type, 'order_item': order_items},
                 'Cancelled' if status == 'cancelled' else 'Returned — failed delivery'
             )
 
@@ -5079,7 +5772,7 @@ def _validate_remittance(data, order_data):
         }), 400)
     return True, None
 
-def _deduct_order_item_stock(order_id, branch_id, order_items):
+def _deduct_order_item_stock(order_id, branch_id, order_items, order_type='walk_in'):
     """Shared per-item stock-deduction helper, called exactly once — the
     moment an order actually enters 'processing' (not at checkout; see
     api_place_order). Checks every item has enough stock BEFORE deducting
@@ -5087,9 +5780,20 @@ def _deduct_order_item_stock(order_id, branch_id, order_items):
     is returned so the caller can block the transition instead of silently
     flooring stock at zero and overselling.
 
+    order_type='online' (revision, Nov 2026): online orders draw from the
+    single warehouse_stock/warehouse_variant_stock pool instead of a
+    branch's branch_stock/variant_stock — branch_id may still be None at
+    this point (admin hasn't assigned one yet) since stock location no
+    longer depends on branch assignment. Each pull is also logged to
+    warehouse_pullout (the Item Pullout System) for traceability. Walk-in
+    POS orders (order_type='walk_in', the default) are unaffected — same
+    branch_stock/variant_stock path as before.
+
     order_items: list of {product_id, qty, selected_options, product:{product_name}}
     Returns (ok: bool, error_message_or_None).
     """
+    online = (order_type == 'online')
+
     # Pass 1 — verify availability for every item before touching anything.
     shortages = []
     checked = []
@@ -5101,7 +5805,15 @@ def _deduct_order_item_stock(order_id, branch_id, order_items):
             continue
         available = 0
         try:
-            if opts and branch_id:
+            if online:
+                if opts:
+                    all_vs = supabase.table('warehouse_variant_stock').select('quantity, options').eq('product_id', pid).execute()
+                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                    available = match[0]['quantity'] if match else 0
+                else:
+                    ws = supabase.table('warehouse_stock').select('quantity').eq('product_id', pid).execute()
+                    available = ws.data[0]['quantity'] if ws.data else 0
+            elif opts and branch_id:
                 all_vs = supabase.table('variant_stock').select('quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
                 match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
                 available = match[0]['quantity'] if match else 0
@@ -5126,24 +5838,54 @@ def _deduct_order_item_stock(order_id, branch_id, order_items):
         try:
             qty_before = 0
             qty_after  = 0
-            if branch_id:
-                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
-                if bs.data:
-                    qty_before = bs.data[0]['quantity']
+            if online:
+                ws = supabase.table('warehouse_stock').select('quantity').eq('product_id', pid).execute()
+                if ws.data:
+                    qty_before = ws.data[0]['quantity']
                     qty_after  = max(qty_before - qty, 0)
-                    supabase.table('branch_stock').update({
+                    supabase.table('warehouse_stock').update({
                         'quantity': qty_after, 'updated_at': 'now()'
-                    }).eq('product_id', pid).eq('branch_id', branch_id).execute()
-            if opts and branch_id:
+                    }).eq('product_id', pid).execute()
+                if opts:
+                    try:
+                        all_vs = supabase.table('warehouse_variant_stock').select('id, quantity, options').eq('product_id', pid).execute()
+                        match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                        if match:
+                            supabase.table('warehouse_variant_stock').update({
+                                'quantity': max(match[0]['quantity'] - qty, 0), 'updated_at': 'now()'
+                            }).eq('id', match[0]['id']).execute()
+                    except Exception as vs_err:
+                        print(f'Processing stock deduct (warehouse variant) warning ({pid}): {vs_err}')
                 try:
-                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
-                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                    if match:
-                        supabase.table('variant_stock').update({
-                            'quantity': max(match[0]['quantity'] - qty, 0), 'updated_at': 'now()'
-                        }).eq('id', match[0]['id']).execute()
-                except Exception as vs_err:
-                    print(f'Processing stock deduct (variant) warning ({pid}): {vs_err}')
+                    supabase.table('warehouse_pullout').insert({
+                        'order_id':        order_id,
+                        'product_id':      pid,
+                        'variant_options': opts if opts else None,
+                        'quantity':        qty,
+                        'pulled_by':       session.get('staff_id'),
+                        'note':            f'Online order #{order_id[:8].upper()} entered processing',
+                    }).execute()
+                except Exception as pullout_err:
+                    print(f'warehouse_pullout log warning ({pid}): {pullout_err}')
+            else:
+                if branch_id:
+                    bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                    if bs.data:
+                        qty_before = bs.data[0]['quantity']
+                        qty_after  = max(qty_before - qty, 0)
+                        supabase.table('branch_stock').update({
+                            'quantity': qty_after, 'updated_at': 'now()'
+                        }).eq('product_id', pid).eq('branch_id', branch_id).execute()
+                if opts and branch_id:
+                    try:
+                        all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', branch_id).execute()
+                        match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                        if match:
+                            supabase.table('variant_stock').update({
+                                'quantity': max(match[0]['quantity'] - qty, 0), 'updated_at': 'now()'
+                            }).eq('id', match[0]['id']).execute()
+                    except Exception as vs_err:
+                        print(f'Processing stock deduct (variant) warning ({pid}): {vs_err}')
             pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
             if pr.data:
                 supabase.table('product').update({
@@ -5155,7 +5897,7 @@ def _deduct_order_item_stock(order_id, branch_id, order_items):
                 'quantity_added':  -qty,
                 'quantity_before': qty_before,
                 'quantity_after':  qty_after,
-                'to_branch_id':    branch_id,
+                'to_branch_id':    None if online else branch_id,
                 'variant_options': opts if opts else None,
                 'note':            f'Sale — Order #{order_id[:8].upper()}',
             }).execute()
@@ -5166,8 +5908,16 @@ def _deduct_order_item_stock(order_id, branch_id, order_items):
 def _restore_order_item_stock(order_id, items, note_label):
     """Shared per-item stock-restore helper for a whole order's worth of
     items — same isolated-write pattern as the completed-order Return
-    endpoint above, reused here for a returned_failed delivery."""
-    br_id = items.get('branch_id')
+    endpoint above, reused here for a returned_failed delivery.
+
+    order_type='online' (revision, Nov 2026): an online order's stock was
+    deducted from warehouse_stock/warehouse_variant_stock (not a branch's),
+    regardless of whether branch_id was ever set — restore it to the same
+    pool it came from. `items` is expected to carry 'order_type' now (every
+    caller's select includes it); falls back to the branch_id-based legacy
+    path if it's missing, for safety."""
+    br_id   = items.get('branch_id')
+    online  = (items.get('order_type') == 'online')
     for item in items.get('order_item', []):
         pid  = item.get('product_id')
         qty  = int(item.get('qty', 0))
@@ -5177,28 +5927,51 @@ def _restore_order_item_stock(order_id, items, note_label):
         try:
             qty_before = 0
             qty_after  = qty
-            if br_id:
-                bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
-                if bs.data:
-                    qty_before = bs.data[0]['quantity']
+            if online:
+                ws = supabase.table('warehouse_stock').select('quantity').eq('product_id', pid).execute()
+                if ws.data:
+                    qty_before = ws.data[0]['quantity']
                     qty_after  = qty_before + qty
-                    supabase.table('branch_stock').update({
+                    supabase.table('warehouse_stock').update({
                         'quantity': qty_after, 'updated_at': 'now()'
-                    }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    }).eq('product_id', pid).execute()
                 else:
-                    supabase.table('branch_stock').insert({
-                        'product_id': pid, 'branch_id': br_id, 'quantity': qty
+                    supabase.table('warehouse_stock').insert({
+                        'product_id': pid, 'quantity': qty
                     }).execute()
-            if opts and br_id:
-                try:
-                    all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
-                    match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
-                    if match:
-                        supabase.table('variant_stock').update({
-                            'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
-                        }).eq('id', match[0]['id']).execute()
-                except Exception as vs_err:
-                    print(f'Returned-failed variant stock warning: {vs_err}')
+                if opts:
+                    try:
+                        all_vs = supabase.table('warehouse_variant_stock').select('id, quantity, options').eq('product_id', pid).execute()
+                        match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                        if match:
+                            supabase.table('warehouse_variant_stock').update({
+                                'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
+                            }).eq('id', match[0]['id']).execute()
+                    except Exception as vs_err:
+                        print(f'Returned-failed warehouse variant stock warning: {vs_err}')
+            else:
+                if br_id:
+                    bs = supabase.table('branch_stock').select('quantity').eq('product_id', pid).eq('branch_id', br_id).execute()
+                    if bs.data:
+                        qty_before = bs.data[0]['quantity']
+                        qty_after  = qty_before + qty
+                        supabase.table('branch_stock').update({
+                            'quantity': qty_after, 'updated_at': 'now()'
+                        }).eq('product_id', pid).eq('branch_id', br_id).execute()
+                    else:
+                        supabase.table('branch_stock').insert({
+                            'product_id': pid, 'branch_id': br_id, 'quantity': qty
+                        }).execute()
+                if opts and br_id:
+                    try:
+                        all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', pid).eq('branch_id', br_id).execute()
+                        match  = [v for v in (all_vs.data or []) if v.get('options') == opts]
+                        if match:
+                            supabase.table('variant_stock').update({
+                                'quantity': match[0]['quantity'] + qty, 'updated_at': 'now()'
+                            }).eq('id', match[0]['id']).execute()
+                    except Exception as vs_err:
+                        print(f'Returned-failed variant stock warning: {vs_err}')
             pr = supabase.table('product').select('quantity').eq('product_id', pid).execute()
             if pr.data:
                 supabase.table('product').update({
@@ -5210,7 +5983,7 @@ def _restore_order_item_stock(order_id, items, note_label):
                 'quantity_added':  qty,
                 'quantity_before': qty_before,
                 'quantity_after':  qty_after,
-                'to_branch_id':    br_id,
+                'to_branch_id':    None if online else br_id,
                 'variant_options': opts if opts else None,
                 'note':            f'{note_label} — Order #{order_id[:8].upper()}',
             }).execute()
@@ -5257,7 +6030,7 @@ def _bulk_not_delivered(order_ids, branch_id=None):
     if not order_ids:
         return {'results': []}
     res = supabase.table('order').select(
-        'order_id, status, branch_id, delivery_attempts, order_item(product_id, qty, selected_options)'
+        'order_id, status, branch_id, order_type, delivery_attempts, order_item(product_id, qty, selected_options)'
     ).in_('order_id', order_ids).execute()
     rows = res.data or []
     results = []
@@ -5396,7 +6169,7 @@ def admin_mark_not_delivered(order_id):
     restored, same as a cancellation."""
     try:
         order_res = supabase.table('order').select(
-            'order_id, status, branch_id, delivery_attempts, order_item(product_id, qty, selected_options)'
+            'order_id, status, branch_id, order_type, delivery_attempts, order_item(product_id, qty, selected_options)'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
@@ -5927,39 +6700,12 @@ def _check_pos_stock_availability(cart_items, branch_id):
     return True, None
 
 
-def _resolve_order_branch_id(cart_items):
-    """Best-effort branch assignment for an online order whose client-sent
-    branch_id came back empty/null (final-defense follow-up, Nov 14 2026).
-    The mobile app resolves its own branch_id from the product card that
-    was tapped, which falls back to "any branch with MORE than critical
-    stock" — when every branch happens to be at/below critical stock for
-    that product at the moment of purchase, that fallback finds nothing and
-    the order goes out with branch_id=None. A null-branch order never shows
-    up under either branch's revenue/order figures even once completed —
-    this is exactly how a chunk of real completed-order revenue went
-    missing from both branch breakdowns on the dashboards. Picks whichever
-    branch can actually cover the most of this cart (full match preferred);
-    returns None only if no branch has any of it in stock at all, same as
-    the status quo for that edge case."""
-    try:
-        branches = supabase.table('branch').select('branch_id').execute().data or []
-    except Exception as e:
-        print(f'_resolve_order_branch_id: could not list branches: {e}')
-        return None
-
-    best_id, best_score = None, -1
-    for b in branches:
-        bid = b['branch_id']
-        ok, _ = _check_pos_stock_availability(cart_items, bid)
-        if ok:
-            return bid  # fully covers the cart — no need to keep scoring
-        score = sum(
-            1 for item in cart_items
-            if _check_pos_stock_availability([item], bid)[0]
-        )
-        if score > best_score:
-            best_score, best_id = score, bid
-    return best_id if best_score > 0 else None
+# _resolve_order_branch_id() removed (revision, Nov 2026): online orders no
+# longer get auto-assigned a branch at placement. branch_id now stays NULL
+# until admin deliberately assigns one from the Unassigned Orders queue
+# (see admin_assign_order_branch below). Online stock comes from the single
+# warehouse_stock pool, not a branch's branch_stock, so a branch no longer
+# needs to be guessed just to check/deduct stock.
 
 
 @app.route('/api/staff/orders', methods=['POST'])
@@ -6193,12 +6939,13 @@ def staff_update_order(order_id):
         # (pending -> processing, for the first time) or gives it back (an
         # order that already reached processing -> cancelled/returned_failed).
         order_res = supabase.table('order').select(
-            'branch_id, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
+            'branch_id, order_type, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
         order_row         = order_res.data[0]
         branch_id         = order_row.get('branch_id')
+        order_type        = order_row.get('order_type', 'walk_in')
         already_processed = bool(order_row.get('processing_started_at'))
         order_items       = order_row.get('order_item') or []
 
@@ -6207,10 +6954,17 @@ def staff_update_order(order_id):
         # delivered, mark-not-delivered) never had it, so a staff account
         # could act on another branch's order just by knowing/guessing its
         # order_id (final-defense follow-up, Nov 14 2026).
+        #
+        # Revision, Nov 2026: an online order with branch_id still NULL has
+        # not been assigned to any branch yet by admin, so no staff account
+        # should be able to act on it at all — tightened from "only block
+        # if branch_id is set and doesn't match" to "must match exactly,
+        # NULL included," since a staff member guessing an unassigned
+        # order's id used to slip through the old guard.
         staff_id  = session.get('staff_id')
         staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
         my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
-        if my_branch and branch_id and branch_id != my_branch:
+        if my_branch and branch_id != my_branch:
             return jsonify({'error': 'This order belongs to a different branch.'}), 403
 
         # Same daily processing cap enforced here as admin's route/the batch action.
@@ -6226,7 +6980,7 @@ def staff_update_order(order_id):
             # Stock is reserved only once an order actually enters
             # 'processing' — see the matching comment in admin_update_order.
             if not already_processed:
-                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items)
+                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items, order_type=order_type)
                 if not ok:
                     return jsonify({'error': stock_err}), 400
 
@@ -6286,7 +7040,7 @@ def staff_update_order(order_id):
         if status in ('cancelled', 'returned_failed') and already_processed:
             _restore_order_item_stock(
                 order_id,
-                {'branch_id': branch_id, 'order_item': order_items},
+                {'branch_id': branch_id, 'order_type': order_type, 'order_item': order_items},
                 'Cancelled' if status == 'cancelled' else 'Returned — failed delivery'
             )
 
@@ -6440,10 +7194,16 @@ def staff_mark_delivered(order_id):
             return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked delivered.'}), 400
 
         # Branch scoping — see the matching comment in staff_update_order.
+        # Was `if my_branch and order_data.get('branch_id') and ... != my_branch`
+        # — the extra truthiness check on branch_id let an unassigned
+        # (branch_id=NULL) order slip through uncaught, since `None` is
+        # falsy and short-circuited the whole condition to False. Fixed
+        # (revision, Nov 2026) to match staff_update_order/staff_mark_not_delivered,
+        # which both already check `!= my_branch` unconditionally.
         staff_id  = session.get('staff_id')
         staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
         my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
-        if my_branch and order_data.get('branch_id') and order_data.get('branch_id') != my_branch:
+        if my_branch and order_data.get('branch_id') != my_branch:
             return jsonify({'error': 'This order belongs to a different branch.'}), 403
 
         ok, err = _validate_remittance(data, order_data)
@@ -6471,7 +7231,7 @@ def staff_mark_delivered(order_id):
 def staff_mark_not_delivered(order_id):
     try:
         order_res = supabase.table('order').select(
-            'order_id, status, branch_id, delivery_attempts, order_item(product_id, qty, selected_options)'
+            'order_id, status, branch_id, order_type, delivery_attempts, order_item(product_id, qty, selected_options)'
         ).eq('order_id', order_id).execute()
         if not order_res.data:
             return jsonify({'error': 'Order not found.'}), 404
@@ -6480,11 +7240,13 @@ def staff_mark_not_delivered(order_id):
         if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
             return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked not delivered.'}), 400
 
-        # Branch scoping — see the matching comment in staff_update_order.
+        # Branch scoping — see the matching comment in staff_update_order
+        # (tightened Nov 2026 so an unassigned, branch_id=NULL order isn't
+        # reachable by guessing its id either).
         staff_id  = session.get('staff_id')
         staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
         my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
-        if my_branch and order_data.get('branch_id') and order_data.get('branch_id') != my_branch:
+        if my_branch and order_data.get('branch_id') != my_branch:
             return jsonify({'error': 'This order belongs to a different branch.'}), 403
 
         attempts = int(order_data.get('delivery_attempts') or 0) + 1
