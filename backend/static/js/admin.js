@@ -5077,10 +5077,21 @@ let _warehousePullout      = [];
 let _warehouseActiveTab    = 'unassigned';
 let _assignBranchInFlight  = new Set();
 
+// Pagination (user request, Nov 2026) — same renderPagerCustom design
+// used elsewhere (Orders, Products, etc.), 10 rows/page, one page
+// counter per tab so switching tabs doesn't reset another tab's page.
+const WAREHOUSE_PAGE_SIZE   = 10;
+let warehouseUnassignedPage = 1;
+let warehouseStockPage      = 1;
+let warehousePulloutPage    = 1;
+
 async function loadWarehouse() {
   skTable('warehouseUnassignedBody', [], 7);
   skTable('warehouseStockBody', [], 5);
   skTable('warehousePulloutBody', [], 7);
+  warehouseUnassignedPage = 1;
+  warehouseStockPage      = 1;
+  warehousePulloutPage    = 1;
   if (!allBranches.length) await loadBranches();
   try {
     const [unassignedRes, stockRes, pulloutRes] = await Promise.all([
@@ -5127,15 +5138,23 @@ function switchWarehouseTab(tab) {
 }
 window.switchWarehouseTab = switchWarehouseTab;
 
+function changeWarehouseUnassignedPage(p) { warehouseUnassignedPage = p; renderWarehouseUnassigned(); }
+window.changeWarehouseUnassignedPage = changeWarehouseUnassignedPage;
+
 function renderWarehouseUnassigned() {
   const tbody = document.getElementById('warehouseUnassignedBody');
   if (!tbody) return;
   if (!_warehouseUnassigned.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No unassigned orders — the queue is clear.</td></tr>';
+    document.getElementById('warehouseUnassignedPagination').innerHTML = '';
     updateWarehouseBulkToolbar();
     return;
   }
-  tbody.innerHTML = _warehouseUnassigned.map(o => {
+  const totalPages = Math.ceil(_warehouseUnassigned.length / WAREHOUSE_PAGE_SIZE) || 1;
+  if (warehouseUnassignedPage > totalPages) warehouseUnassignedPage = totalPages;
+  const start = (warehouseUnassignedPage - 1) * WAREHOUSE_PAGE_SIZE;
+  const paged = _warehouseUnassigned.slice(start, start + WAREHOUSE_PAGE_SIZE);
+  tbody.innerHTML = paged.map(o => {
     const cust      = Array.isArray(o.customer) ? o.customer[0] : o.customer;
     const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
     const itemCount = (o.order_item || []).length;
@@ -5151,6 +5170,7 @@ function renderWarehouseUnassigned() {
       <td><button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openAssignBranchModal('${o.order_id}')">Assign Branch</button></td>
     </tr>`;
   }).join('');
+  renderPagerCustom('warehouseUnassignedPagination', _warehouseUnassigned.length, warehouseUnassignedPage, WAREHOUSE_PAGE_SIZE, 'changeWarehouseUnassignedPage');
   const selectAllCb = document.getElementById('warehouseSelectAllCb');
   if (selectAllCb) selectAllCb.checked = false;
   updateWarehouseBulkToolbar();
@@ -5308,19 +5328,27 @@ async function confirmAssignBranch(orderId) {
 }
 window.confirmAssignBranch = confirmAssignBranch;
 
+function changeWarehouseStockPage(p) { warehouseStockPage = p; renderWarehouseStock(); }
+window.changeWarehouseStockPage = changeWarehouseStockPage;
+
 function renderWarehouseStock() {
   const tbody = document.getElementById('warehouseStockBody');
   if (!tbody) return;
   const rows = _warehouseStockData.stock || [];
   if (!rows.length) {
     tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No warehouse stock recorded yet.</td></tr>';
+    document.getElementById('warehouseStockPagination').innerHTML = '';
     return;
   }
   const variantsByProduct = {};
   (_warehouseStockData.variant_stock || []).forEach(v => {
     (variantsByProduct[v.product_id] = variantsByProduct[v.product_id] || []).push(v);
   });
-  tbody.innerHTML = rows.map(r => {
+  const totalPages = Math.ceil(rows.length / WAREHOUSE_PAGE_SIZE) || 1;
+  if (warehouseStockPage > totalPages) warehouseStockPage = totalPages;
+  const start = (warehouseStockPage - 1) * WAREHOUSE_PAGE_SIZE;
+  const paged = rows.slice(start, start + WAREHOUSE_PAGE_SIZE);
+  tbody.innerHTML = paged.map(r => {
     const prod     = Array.isArray(r.product) ? r.product[0] : r.product;
     const variants = variantsByProduct[r.product_id] || [];
     const variantsLabel = variants.length
@@ -5335,6 +5363,7 @@ function renderWarehouseStock() {
       <td>${updated}</td>
     </tr>`;
   }).join('');
+  renderPagerCustom('warehouseStockPagination', rows.length, warehouseStockPage, WAREHOUSE_PAGE_SIZE, 'changeWarehouseStockPage');
 }
 
 function openWarehouseAdjustModal() {
@@ -5394,14 +5423,22 @@ async function confirmWarehouseAdjust() {
 }
 window.confirmWarehouseAdjust = confirmWarehouseAdjust;
 
+function changeWarehousePulloutPage(p) { warehousePulloutPage = p; renderWarehousePullout(); }
+window.changeWarehousePulloutPage = changeWarehousePulloutPage;
+
 function renderWarehousePullout() {
   const tbody = document.getElementById('warehousePulloutBody');
   if (!tbody) return;
   if (!_warehousePullout.length) {
     tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No pullouts recorded yet.</td></tr>';
+    document.getElementById('warehousePulloutPagination').innerHTML = '';
     return;
   }
-  tbody.innerHTML = _warehousePullout.map(p => {
+  const totalPages = Math.ceil(_warehousePullout.length / WAREHOUSE_PAGE_SIZE) || 1;
+  if (warehousePulloutPage > totalPages) warehousePulloutPage = totalPages;
+  const start = (warehousePulloutPage - 1) * WAREHOUSE_PAGE_SIZE;
+  const paged = _warehousePullout.slice(start, start + WAREHOUSE_PAGE_SIZE);
+  tbody.innerHTML = paged.map(p => {
     const prod      = Array.isArray(p.product) ? p.product[0] : p.product;
     const staff     = Array.isArray(p.staff) ? p.staff[0] : p.staff;
     const order     = Array.isArray(p.order) ? p.order[0] : p.order;
@@ -5421,6 +5458,7 @@ function renderWarehousePullout() {
       <td style="font-size:11px;color:var(--text-muted);">${p.note || ''}</td>
     </tr>`;
   }).join('');
+  renderPagerCustom('warehousePulloutPagination', _warehousePullout.length, warehousePulloutPage, WAREHOUSE_PAGE_SIZE, 'changeWarehousePulloutPage');
 }
 
 // ══════════════════════════════════════════════════════
