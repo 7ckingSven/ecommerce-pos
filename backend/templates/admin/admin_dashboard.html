@@ -772,14 +772,21 @@
              team's own discussion of the revision. -->
         <div id="warehouseUnassignedPanel" style="padding:1rem;">
           <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">
-            Online orders placed by customers, not yet routed to a branch. Assign each one to the branch that will fulfill and deliver (or hand off for pickup) it — it then appears in that branch's own Orders/Deliveries, same as any other order.
+            Online orders placed by customers, not yet routed to a branch. Assign each one to the branch that will fulfill and deliver (or hand off for pickup) it — it then appears in that branch's own Orders/Deliveries, same as any other order. Select several to assign them all to the same branch at once.
           </p>
+          <div class="deliv-panel-toolbar" style="margin-bottom:8px;">
+            <span style="font-size:11px;color:var(--text-muted);"><span id="warehouseBulkSelectedCount">0</span> selected</span>
+            <button class="btn btn-solid-green" id="warehouseBulkAssignBtn" disabled style="opacity:0.45;cursor:not-allowed;" onclick="openBulkAssignBranchModal()">Assign Selected to Branch</button>
+          </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Fulfillment</th><th>Placed</th><th>Actions</th></tr>
+                <tr>
+                  <th style="width:32px;"><input type="checkbox" id="warehouseSelectAllCb" onchange="toggleAllWarehouseSelections(this)"/></th>
+                  <th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Fulfillment</th><th>Placed</th><th>Actions</th>
+                </tr>
               </thead>
-              <tbody id="warehouseUnassignedBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
+              <tbody id="warehouseUnassignedBody"><tr><td colspan="8" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
         </div>

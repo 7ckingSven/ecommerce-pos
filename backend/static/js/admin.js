@@ -5131,7 +5131,8 @@ function renderWarehouseUnassigned() {
   const tbody = document.getElementById('warehouseUnassignedBody');
   if (!tbody) return;
   if (!_warehouseUnassigned.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No unassigned orders — the queue is clear.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No unassigned orders — the queue is clear.</td></tr>';
+    updateWarehouseBulkToolbar();
     return;
   }
   tbody.innerHTML = _warehouseUnassigned.map(o => {
@@ -5140,6 +5141,7 @@ function renderWarehouseUnassigned() {
     const itemCount = (o.order_item || []).length;
     const placed    = o.created_at ? new Date(o.created_at).toLocaleString() : '—';
     return `<tr>
+      <td><input type="checkbox" class="warehouse-select-cb" value="${o.order_id}" onchange="updateWarehouseBulkToolbar()"/></td>
       <td>${o.order_id.slice(0,8).toUpperCase()}</td>
       <td>${custName || '—'}</td>
       <td>${itemCount} item(s)</td>
@@ -5149,7 +5151,80 @@ function renderWarehouseUnassigned() {
       <td><button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openAssignBranchModal('${o.order_id}')">Assign Branch</button></td>
     </tr>`;
   }).join('');
+  const selectAllCb = document.getElementById('warehouseSelectAllCb');
+  if (selectAllCb) selectAllCb.checked = false;
+  updateWarehouseBulkToolbar();
 }
+
+// Bulk "Assign Selected to Branch" (user request, Nov 2026) — same
+// checkbox-column + toolbar pattern as the Orders table's bulk actions.
+function toggleAllWarehouseSelections(cb) {
+  document.querySelectorAll('.warehouse-select-cb').forEach(el => { el.checked = cb.checked; });
+  updateWarehouseBulkToolbar();
+}
+window.toggleAllWarehouseSelections = toggleAllWarehouseSelections;
+
+function updateWarehouseBulkToolbar() {
+  const count = document.querySelectorAll('.warehouse-select-cb:checked').length;
+  const countEl = document.getElementById('warehouseBulkSelectedCount');
+  const btn     = document.getElementById('warehouseBulkAssignBtn');
+  if (countEl) countEl.textContent = count;
+  if (btn) {
+    btn.disabled      = count === 0;
+    btn.style.opacity = count === 0 ? '0.45' : '1';
+    btn.style.cursor  = count === 0 ? 'not-allowed' : 'pointer';
+  }
+}
+window.updateWarehouseBulkToolbar = updateWarehouseBulkToolbar;
+
+function openBulkAssignBranchModal() {
+  const ids = Array.from(document.querySelectorAll('.warehouse-select-cb:checked')).map(el => el.value);
+  if (!ids.length) { showToast('Select at least one order first.', 'error'); return; }
+  const branchOptions = allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+
+  showModal(`
+    <div style="padding:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <h3 style="margin:0;font-size:17px;">Assign ${ids.length} Order(s) to Branch</h3>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">Every selected order will be routed to the same branch. Orders that no longer qualify (already assigned, etc.) by the time this runs are skipped automatically.</p>
+      <label class="form-label" style="font-size:12px;">Fulfilling Branch</label>
+      <select id="bulkAssignBranchSelect" class="form-input" style="width:100%;margin-bottom:12px;">
+        <option value="">Select branch</option>
+        ${branchOptions}
+      </select>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-solid-green" onclick="confirmBulkAssignBranch(${JSON.stringify(ids)})">Assign</button>
+      </div>
+    </div>
+  `, '480px', true);
+}
+window.openBulkAssignBranchModal = openBulkAssignBranchModal;
+
+async function confirmBulkAssignBranch(orderIds) {
+  const branchId = document.getElementById('bulkAssignBranchSelect')?.value;
+  if (!branchId) { showToast('Please select a branch.', 'error'); return; }
+  try {
+    const res = await fetch('/api/admin/orders/assign-branch-bulk', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ order_ids: orderIds, branch_id: branchId }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to bulk assign branch.', 'error'); return; }
+    showToast(`Assigned ${data.updated.length} order(s)${data.skipped.length ? `, skipped ${data.skipped.length} (no longer eligible)` : ''}.`);
+    closeModal();
+    invalidateSection('warehouse');
+    invalidateSection('orders');
+    loadWarehouse();
+  } catch (e) {
+    console.error('Bulk assign branch error:', e);
+    showToast('Failed to bulk assign branch.', 'error');
+  }
+}
+window.confirmBulkAssignBranch = confirmBulkAssignBranch;
 
 function openAssignBranchModal(orderId) {
   const order = _warehouseUnassigned.find(o => o.order_id === orderId);

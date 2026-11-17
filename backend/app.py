@@ -5053,6 +5053,52 @@ def admin_assign_order_branch(order_id):
         print(f'Assign order branch error: {e}')
         return jsonify({'error': str(e)}), 500
 
+# Bulk version (user request, Nov 2026) — same per-order rules as the
+# single-order route above, just applied over a list and tolerant of a
+# partial failure: each order's write is isolated so one bad id can't
+# block the rest, mirroring the bulk-remit/bulk-out-for-delivery pattern
+# already used elsewhere in Orders.
+@app.route('/api/admin/orders/assign-branch-bulk', methods=['POST'])
+@admin_required
+def admin_assign_order_branch_bulk():
+    try:
+        data      = request.get_json()
+        order_ids = data.get('order_ids') or []
+        branch_id = data.get('branch_id')
+        if not branch_id:
+            return jsonify({'error': 'branch_id is required.'}), 400
+        if not order_ids:
+            return jsonify({'error': 'At least one order_id is required.'}), 400
+
+        branch_res = supabase.table('branch').select('branch_id').eq('branch_id', branch_id).execute()
+        if not branch_res.data:
+            return jsonify({'error': 'Branch not found.'}), 404
+
+        updated, skipped = [], []
+        now = datetime.now(timezone.utc).isoformat()
+        staff_id = session.get('staff_id')
+        for order_id in order_ids:
+            try:
+                order_res = supabase.table('order').select('order_id, order_type, branch_id').eq('order_id', order_id).execute()
+                order_row = order_res.data[0] if order_res.data else None
+                if not order_row or order_row.get('order_type') != 'online' or order_row.get('branch_id'):
+                    skipped.append(order_id)
+                    continue
+                supabase.table('order').update({
+                    'branch_id':   branch_id,
+                    'assigned_at': now,
+                    'assigned_by': staff_id,
+                }).eq('order_id', order_id).execute()
+                updated.append(order_id)
+            except Exception as item_err:
+                print(f'Bulk assign branch warning ({order_id}): {item_err}')
+                skipped.append(order_id)
+
+        return jsonify({'message': f'Assigned {len(updated)} order(s).', 'updated': updated, 'skipped': skipped}), 200
+    except Exception as e:
+        print(f'Bulk assign order branch error: {e}')
+        return jsonify({'error': str(e)}), 500
+
 # ─── WAREHOUSE (single online-fulfillment stock pool, revision Nov 2026) ───
 # Owned entirely by admin — mirrors the branch_stock Inventory section's
 # shape (restock/adjustment pattern from admin_add_inventory above) but with
