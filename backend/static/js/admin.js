@@ -5608,9 +5608,12 @@ window.confirmFeedbackClose = confirmFeedbackClose;
 // ══════════════════════════════════════════════════════
 let _returnsRows      = [];
 let _returnsActiveTab = 'pending';
+const RETURNS_PAGE_SIZE = 10;
+let returnsPage         = 1;
 
 async function loadReturns() {
   skTable('returnsBody', [], 8);
+  returnsPage = 1;
   try {
     const res = await fetch(`/api/staff/returns?status=${_returnsActiveTab}`);
     _returnsRows = res.ok ? await res.json() : [];
@@ -5641,14 +5644,22 @@ function switchReturnsTab(tab) {
 }
 window.switchReturnsTab = switchReturnsTab;
 
+function changeReturnsPage(p) { returnsPage = p; renderReturns(); }
+window.changeReturnsPage = changeReturnsPage;
+
 function renderReturns() {
   const tbody = document.getElementById('returnsBody');
   if (!tbody) return;
   if (!_returnsRows.length) {
     tbody.innerHTML = '<tr><td colspan="8" class="table-empty">Nothing here.</td></tr>';
+    document.getElementById('returnsPagination').innerHTML = '';
     return;
   }
-  tbody.innerHTML = _returnsRows.map(r => {
+  const totalPages = Math.ceil(_returnsRows.length / RETURNS_PAGE_SIZE) || 1;
+  if (returnsPage > totalPages) returnsPage = totalPages;
+  const start = (returnsPage - 1) * RETURNS_PAGE_SIZE;
+  const paged = _returnsRows.slice(start, start + RETURNS_PAGE_SIZE);
+  tbody.innerHTML = paged.map(r => {
     const order     = Array.isArray(r.order) ? r.order[0] : r.order;
     const cust      = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
     const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
@@ -5671,6 +5682,7 @@ function renderReturns() {
       <td>${action}</td>
     </tr>`;
   }).join('');
+  renderPagerCustom('returnsPagination', _returnsRows.length, returnsPage, RETURNS_PAGE_SIZE, 'changeReturnsPage');
 }
 
 function openReturnReviewModal(returnId) {
