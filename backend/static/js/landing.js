@@ -102,3 +102,35 @@ slideshowEl.addEventListener('mouseenter', () => clearInterval(autoTimer));
 slideshowEl.addEventListener('mouseleave', startAuto);
 
 startAuto();
+
+// ─── Feature Accordions (Nov 13 2026) ──────────────────────
+// Each .acc-item toggles independently (not a single-open-at-a-time
+// accordion) — simplest to follow, and matches how the reference video's
+// feature sections behaved (each item just expands/collapses on its own).
+function toggleAcc(btn) {
+  const item = btn.closest('.acc-item');
+  if (!item) return;
+  const icon = item.querySelector('.acc-icon');
+  item.classList.toggle('open');
+  if (icon) icon.textContent = item.classList.contains('open') ? '−' : '+';
+}
+
+// ─── Scroll-reveal for the new sections below the hero ─────
+// Fades/slides each [data-reveal] section up into place the first time it
+// enters the viewport — cheap, one-shot (unobserves after revealing), and
+// does nothing if IntersectionObserver isn't available (just stays visible
+// via the no-JS fallback below).
+if ('IntersectionObserver' in window) {
+  const revealObserver = new IntersectionObserver((entries) => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('in-view');
+        revealObserver.unobserve(entry.target);
+      }
+    });
+  }, { threshold: 0.15 });
+
+  document.querySelectorAll('[data-reveal]').forEach(el => revealObserver.observe(el));
+} else {
+  document.querySelectorAll('[data-reveal]').forEach(el => el.classList.add('in-view'));
+}
