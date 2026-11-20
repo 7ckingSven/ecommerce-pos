@@ -3154,8 +3154,12 @@ async function refreshStaffNavBadges() {
     // fetching it would just get an auth error for no reason. Orders badge/
     // fetch removed too — it only ever counted pending ONLINE orders, which
     // staff_get_orders no longer returns at all (see app.py).
+    // branch_id + include_low_stock scope this to the branch's own stock
+    // (mirrors the POS fetch above) — without branch_id, /api/products now
+    // serves the customer-facing warehouse catalog instead and hides
+    // anything at/below critical, which emptied this badge out entirely.
     const [productsRaw, requestsRaw] = await Promise.all([
-      fetch('/api/products').then(r => r.json()),
+      fetch(`/api/products${staffBranchId ? `?branch_id=${staffBranchId}&include_low_stock=true` : ''}`).then(r => r.json()),
       fetch('/api/staff/stock-requests').then(r => r.json()),
     ]);
 
@@ -3200,7 +3204,11 @@ async function loadInventory() {
 
   try {
     // Sequential requests to avoid WinError 10035
-    const prodRes        = await fetch('/api/products');
+    // branch_id + include_low_stock scope this to the branch's own stock
+    // (mirrors the POS fetch) — without branch_id, /api/products now serves
+    // the customer-facing warehouse catalog instead and hides anything
+    // at/below critical, which is what was emptying this table out.
+    const prodRes        = await fetch(`/api/products${staffBranchId ? `?branch_id=${staffBranchId}&include_low_stock=true` : ''}`);
     const allInvProdsRaw = await prodRes.json();
     const allInvProds    = Array.isArray(allInvProdsRaw) ? allInvProdsRaw : [];
     // Filter to this branch only
