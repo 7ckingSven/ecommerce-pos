@@ -761,6 +761,22 @@ async function dashGoToBranchSales(branchKey) {
   }, 150);
 }
 
+async function dashGoToOnlineOrders() {
+  // Overview's "Total Online Orders" card → Sales Report's combined Online
+  // Orders card, same "jump + flash" pattern as dashGoToBranchSales above.
+  await _ensureSectionLoaded('sales');
+  showSection('sales', _navEl('sales'));
+  setTimeout(() => {
+    const card = document.getElementById('salesOnlineOrdersCard');
+    if (!card) return;
+    card.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    card.style.transition = 'box-shadow 0.3s ease';
+    card.style.boxShadow  = '0 0 0 3px #3b82f6';
+    setTimeout(() => { card.style.boxShadow = ''; }, 1600);
+  }, 150);
+}
+window.dashGoToOnlineOrders = dashGoToOnlineOrders;
+
 async function dashGoToProducts() {
   await _ensureSectionLoaded('products');
   showSection('products', _navEl('products'));
@@ -1158,7 +1174,8 @@ window.refreshNavBadges = refreshNavBadges;
 // ─── OVERVIEW ─────────────────────────────────────────
 async function loadOverview() {
   // ── Skeleton ──
-  skStats(['statProducts','statOrders','statSales','statSalesTripleE','statSalesFielCollince',
+  skStats(['statProducts','statOrders','statSales','statWalkinSales','statOnlineSales','statOnlineOrders',
+           'statSalesTripleE','statSalesFielCollince',
            'statLowStock','statCriticalStock','statPending','statTodayRevenue','statOutOfStock',
            'statActiveDiscounts']);
   skTable('topSellingBody',    ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 4);
@@ -1201,10 +1218,22 @@ async function loadOverview() {
     // this page's own numbers are internally consistent and match Sales
     // Report's definition of the same metric.
     const totalSales = completedOrders.reduce((s, o) => s + Number(o.total || 0), 0);
-    const salesTripleE     = completedOrders
+
+    // Online orders aren't tied to a specific branch (they're fulfilled from
+    // the shared warehouse pool), so branch sales now count walk-in/POS
+    // orders only — previously this included any online order that happened
+    // to carry that branch's branch_id, inflating both branch cards with
+    // revenue that was never really "theirs". Walk-in Sales and Online Sales
+    // get their own separate cards below instead.
+    const walkinOrders = completedOrders.filter(o => o.order_type === 'walk_in');
+    const onlineOrders = completedOrders.filter(o => o.order_type === 'online');
+    const walkinSales  = walkinOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+    const onlineSales  = onlineOrders.reduce((s, o) => s + Number(o.total || 0), 0);
+
+    const salesTripleE     = walkinOrders
       .filter(o => tripleEBranch && o.branch_id === tripleEBranch.branch_id)
       .reduce((s, o) => s + Number(o.total || 0), 0);
-    const salesFielCollince = completedOrders
+    const salesFielCollince = walkinOrders
       .filter(o => fielCollinceBranch && o.branch_id === fielCollinceBranch.branch_id)
       .reduce((s, o) => s + Number(o.total || 0), 0);
 
@@ -1213,6 +1242,12 @@ async function loadOverview() {
     if (teEl)  teEl.textContent  = '₱' + salesTripleE.toLocaleString('en-PH', { minimumFractionDigits: 2 });
     if (fcEl)  fcEl.textContent  = '₱' + salesFielCollince.toLocaleString('en-PH', { minimumFractionDigits: 2 });
     document.getElementById('statSales').textContent = peso(totalSales);
+    const walkinEl = document.getElementById('statWalkinSales');
+    const onlineRevEl = document.getElementById('statOnlineSales');
+    const onlineCountEl = document.getElementById('statOnlineOrders');
+    if (walkinEl) walkinEl.textContent = peso(walkinSales);
+    if (onlineRevEl) onlineRevEl.textContent = peso(onlineSales);
+    if (onlineCountEl) onlineCountEl.textContent = onlineOrders.length;
 
     const getTotal = p => p.branch_stock?.length
       ? p.branch_stock.reduce((s, bs) => s + Number(bs.quantity), 0)
@@ -6439,10 +6474,12 @@ function renderBranchTrendChart(completed, teId, fcId, hasBranchData, allWalkin)
       .reduce((s, o) => s + Number(o.total || 0), 0));
   }
 
+  // Walk-in only — matches the Branch Performance cards above, which no
+  // longer attribute online orders to a specific branch.
   let teSeries, fcSeries;
   if (hasBranchData) {
-    teSeries = sumFor(o => o.branch_id === teId);
-    fcSeries = sumFor(o => o.branch_id === fcId);
+    teSeries = sumFor(o => o.branch_id === teId && o.order_type === 'walk_in');
+    fcSeries = sumFor(o => o.branch_id === fcId && o.order_type === 'walk_in');
   } else {
     // No branch_id on orders yet — fall back to treating walk-ins as
     // Triple E (same convention used for the summary cards above).
@@ -6656,18 +6693,27 @@ function renderSalesData(completed, allOrders) {
   const online = completed.filter(o => o.order_type === 'online').reduce((s, o) => s + Number(o.total || 0), 0);
   const walkin = completed.filter(o => o.order_type === 'walk_in').reduce((s, o) => s + Number(o.total || 0), 0);
 
+  // Combined online order count (Triple E + Fiel Collince) — online orders
+  // aren't tied to a branch any more (they're fulfilled from the shared
+  // warehouse pool), so this is shown as its own card instead of a per-branch
+  // "Online" line inside the Branch Performance cards below.
+  const onlineOrders = completed.filter(o => o.order_type === 'online');
+
   document.getElementById('salesTotal').textContent  = peso(total);
   document.getElementById('salesOnline').textContent = peso(online);
   document.getElementById('salesWalkin').textContent = peso(walkin);
+  const onlineOrdersEl = document.getElementById('salesOnlineOrders');
+  if (onlineOrdersEl) onlineOrdersEl.textContent = onlineOrders.length;
 
-  // Branch stats
+  // Branch stats — walk-in/POS orders only. Online orders are no longer
+  // attributed to a branch's revenue here; they're covered by the
+  // top-level Online Sales / Online Orders cards instead.
   const teId = allBranches.find(b => b.branch_name?.toLowerCase().includes('triple'))?.branch_id;
   const fcId = allBranches.find(b => b.branch_name?.toLowerCase().includes('fiel') || b.branch_name?.toLowerCase().includes('collince'))?.branch_id;
 
   function branchStats(id) {
-    const b = completed.filter(o => o.branch_id === id);
-    return { revenue: b.reduce((s,o)=>s+Number(o.total||0),0), orders:b.length,
-             walkin:b.filter(o=>o.order_type==='walk_in').length, online:b.filter(o=>o.order_type==='online').length };
+    const b = completed.filter(o => o.branch_id === id && o.order_type === 'walk_in');
+    return { revenue: b.reduce((s,o)=>s+Number(o.total||0),0), orders:b.length, walkin:b.length };
   }
 
   // Check if any orders have branch_id assigned
@@ -6681,18 +6727,16 @@ function renderSalesData(completed, allOrders) {
   } else {
     // No branch assigned yet — show walk-in under Triple E (default POS branch)
     te = { revenue: allWalkin.reduce((s,o)=>s+Number(o.total||0),0), orders: allWalkin.length,
-           walkin: allWalkin.length, online: 0 };
-    fc = { revenue: 0, orders: 0, walkin: 0, online: 0 };
+           walkin: allWalkin.length };
+    fc = { revenue: 0, orders: 0, walkin: 0 };
   }
 
   document.getElementById('branchTE_revenue').textContent = peso(te.revenue);
   document.getElementById('branchTE_orders').textContent  = te.orders;
   document.getElementById('branchTE_walkin').textContent  = te.walkin;
-  document.getElementById('branchTE_online').textContent  = te.online;
   document.getElementById('branchFC_revenue').textContent = peso(fc.revenue);
   document.getElementById('branchFC_orders').textContent  = fc.orders;
   document.getElementById('branchFC_walkin').textContent  = fc.walkin;
-  document.getElementById('branchFC_online').textContent  = fc.online;
 
   // Show only the selected branch's card when a specific branch is chosen
   // in the filter — previously both cards always showed regardless of the
@@ -6816,14 +6860,13 @@ function printSalesReport() {
   const totalEl   = document.getElementById('salesTotal')?.textContent   || '₱0.00';
   const onlineEl  = document.getElementById('salesOnline')?.textContent  || '₱0.00';
   const walkinEl  = document.getElementById('salesWalkin')?.textContent  || '₱0.00';
+  const onlineOrdersEl = document.getElementById('salesOnlineOrders')?.textContent || '0';
   const teRev     = document.getElementById('branchTE_revenue')?.textContent || '₱0.00';
   const teOrders  = document.getElementById('branchTE_orders')?.textContent  || '0';
   const teWalkin  = document.getElementById('branchTE_walkin')?.textContent  || '0';
-  const teOnline  = document.getElementById('branchTE_online')?.textContent  || '0';
   const fcRev     = document.getElementById('branchFC_revenue')?.textContent || '₱0.00';
   const fcOrders  = document.getElementById('branchFC_orders')?.textContent  || '0';
   const fcWalkin  = document.getElementById('branchFC_walkin')?.textContent  || '0';
-  const fcOnline  = document.getElementById('branchFC_online')?.textContent  || '0';
 
   // Top products
   const topRows   = document.getElementById('topProductsBody')?.innerHTML   || '';
@@ -6842,18 +6885,16 @@ function printSalesReport() {
     showTE ? `
       <div class="branch-box">
         <div class="branch-name">Triple E</div>
-        <div class="branch-row"><span>Total Revenue</span><span><b>${teRev}</b></span></div>
+        <div class="branch-row"><span>Revenue (walk-in)</span><span><b>${teRev}</b></span></div>
         <div class="branch-row"><span>Total Orders</span><span>${teOrders}</span></div>
         <div class="branch-row"><span>Walk-in Orders</span><span>${teWalkin}</span></div>
-        <div class="branch-row"><span>Online Orders</span><span>${teOnline}</span></div>
       </div>` : '',
     showFC ? `
       <div class="branch-box">
         <div class="branch-name">Fiel Collince</div>
-        <div class="branch-row"><span>Total Revenue</span><span><b>${fcRev}</b></span></div>
+        <div class="branch-row"><span>Revenue (walk-in)</span><span><b>${fcRev}</b></span></div>
         <div class="branch-row"><span>Total Orders</span><span>${fcOrders}</span></div>
         <div class="branch-row"><span>Walk-in Orders</span><span>${fcWalkin}</span></div>
-        <div class="branch-row"><span>Online Orders</span><span>${fcOnline}</span></div>
       </div>` : '',
   ].join('');
   const branchGridCols = (showTE && showFC) ? 'repeat(2, 1fr)' : '1fr';
@@ -6875,7 +6916,7 @@ function printSalesReport() {
     .badge-green { background: #dcfce7; color: #14532d; border-radius: 4px; padding: 2px 8px; font-size: 11px; font-weight: 700; }
     .section { margin-bottom: 20px; }
     .section-title { font-size: 13px; font-weight: 700; color: #14532d; text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #dcfce7; padding-bottom: 6px; margin-bottom: 10px; }
-    .stat-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 16px; }
+    .stat-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 16px; }
     .stat-box { background: #f0fdf4; border: 1px solid #bbf7d0; border-radius: 8px; padding: 12px; text-align: center; }
     .stat-box .val { font-size: 18px; font-weight: 800; color: #14532d; }
     .stat-box .lbl { font-size: 11px; color: #6b7280; margin-top: 2px; }
@@ -6911,6 +6952,7 @@ function printSalesReport() {
       <div class="stat-box"><div class="val">${totalEl}</div><div class="lbl">Total Revenue</div></div>
       <div class="stat-box"><div class="val">${onlineEl}</div><div class="lbl">Online Sales</div></div>
       <div class="stat-box"><div class="val">${walkinEl}</div><div class="lbl">Walk-in Sales</div></div>
+      <div class="stat-box"><div class="val">${onlineOrdersEl}</div><div class="lbl">Online Orders</div></div>
     </div>
   </div>
 
@@ -6998,10 +7040,11 @@ function exportSalesExcel() {
     ['Total Revenue',  document.getElementById('salesTotal')?.textContent  || ''],
     ['Online Sales',   document.getElementById('salesOnline')?.textContent || ''],
     ['Walk-in Sales',  document.getElementById('salesWalkin')?.textContent || ''],
+    ['Online Orders',  document.getElementById('salesOnlineOrders')?.textContent || ''],
     ['Total Customers',document.getElementById('salesCustomers')?.textContent || ''],
     [],
-    ['BRANCH BREAKDOWN'],
-    ['Branch', 'Revenue', 'Total Orders', 'Walk-in', 'Online'],
+    ['BRANCH BREAKDOWN (walk-in only)'],
+    ['Branch', 'Revenue', 'Total Orders', 'Walk-in'],
   ];
   if (showTE) {
     summaryData.push([
@@ -7009,7 +7052,6 @@ function exportSalesExcel() {
       document.getElementById('branchTE_revenue')?.textContent || '',
       document.getElementById('branchTE_orders')?.textContent  || '',
       document.getElementById('branchTE_walkin')?.textContent  || '',
-      document.getElementById('branchTE_online')?.textContent  || '',
     ]);
   }
   if (showFC) {
@@ -7018,7 +7060,6 @@ function exportSalesExcel() {
       document.getElementById('branchFC_revenue')?.textContent || '',
       document.getElementById('branchFC_orders')?.textContent  || '',
       document.getElementById('branchFC_walkin')?.textContent  || '',
-      document.getElementById('branchFC_online')?.textContent  || '',
     ]);
   }
 
@@ -7292,9 +7333,9 @@ window.printStockMovementHistory = printStockMovementHistory;
 
 async function loadSales() {
   // ── Skeleton ──
-  skStats(['salesTotal','salesOnline','salesWalkin','salesCustomers']);
-  skStats(['branchTE_revenue','branchTE_orders','branchTE_walkin','branchTE_online',
-           'branchFC_revenue','branchFC_orders','branchFC_walkin','branchFC_online']);
+  skStats(['salesTotal','salesOnline','salesWalkin','salesOnlineOrders','salesCustomers']);
+  skStats(['branchTE_revenue','branchTE_orders','branchTE_walkin',
+           'branchFC_revenue','branchFC_orders','branchFC_walkin']);
   skTable('paymentBreakdownBody', ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
   skTable('topProductsBody',      ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);
   skTable('leastProductsBody',    ['sk-cell-full','sk-cell-sm','sk-cell-sm'], 5);

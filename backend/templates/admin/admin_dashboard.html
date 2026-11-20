@@ -186,6 +186,36 @@
             <span class="stat-sub">Revenue</span>
           </div>
         </div>
+        <div class="stat-card" onclick="dashGoToSales()" title="View Sales Reports" role="button" tabindex="0">
+          <div class="stat-icon stat-icon--yellow">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">Walk-in Sales</span>
+            <span class="stat-value" id="statWalkinSales">—</span>
+            <span class="stat-sub">POS transactions</span>
+          </div>
+        </div>
+        <div class="stat-card" onclick="dashGoToSales()" title="View Sales Reports" role="button" tabindex="0">
+          <div class="stat-icon stat-icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/></svg>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">Online Sales</span>
+            <span class="stat-value" id="statOnlineSales">—</span>
+            <span class="stat-sub">Mobile app orders</span>
+          </div>
+        </div>
+        <div class="stat-card" onclick="dashGoToOnlineOrders()" title="View online orders in Sales Reports" role="button" tabindex="0">
+          <div class="stat-icon stat-icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><path d="M9 21V9"/></svg>
+          </div>
+          <div class="stat-info">
+            <span class="stat-label">Total Online Orders</span>
+            <span class="stat-value" id="statOnlineOrders">—</span>
+            <span class="stat-sub">Triple E + Fiel Collince</span>
+          </div>
+        </div>
         <div class="stat-card" onclick="dashGoToBranchSales('TE')" title="View Triple E's sales report" role="button" tabindex="0">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -193,7 +223,7 @@
           <div class="stat-info">
             <span class="stat-label">Triple E Sales</span>
             <span class="stat-value" id="statSalesTripleE">—</span>
-            <span class="stat-sub">Branch Revenue</span>
+            <span class="stat-sub">Walk-in only</span>
           </div>
         </div>
         <div class="stat-card" onclick="dashGoToBranchSales('FC')" title="View Fiel Collince's sales report" role="button" tabindex="0">
@@ -203,7 +233,7 @@
           <div class="stat-info">
             <span class="stat-label">Fiel Collince Sales</span>
             <span class="stat-value" id="statSalesFielCollince">—</span>
-            <span class="stat-sub">Branch Revenue</span>
+            <span class="stat-sub">Walk-in only</span>
           </div>
         </div>
         <div class="stat-card" onclick="dashGoToInventory('low_stock')" title="View low-stock items" role="button" tabindex="0">
@@ -1060,6 +1090,12 @@
           </div>
           <div class="stat-info"><span class="stat-label">Walk-in Sales</span><span class="stat-value" id="salesWalkin">—</span><span class="stat-sub">POS transactions</span></div>
         </div>
+        <div class="stat-card" id="salesOnlineOrdersCard">
+          <div class="stat-icon stat-icon--blue">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2" ry="2"/><line x1="3" y1="9" x2="21" y2="9"/><path d="M9 21V9"/></svg>
+          </div>
+          <div class="stat-info"><span class="stat-label">Online Orders</span><span class="stat-value" id="salesOnlineOrders">—</span><span class="stat-sub">Triple E + Fiel Collince combined</span></div>
+        </div>
         <div class="stat-card">
           <div class="stat-icon stat-icon--green">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/></svg>
@@ -1072,7 +1108,7 @@
       <div class="card" style="margin-bottom:1.5rem;">
         <div class="card-header">
           <h3 class="card-title">Branch Performance</h3>
-          <span style="font-size:12px;color:var(--text-muted);">Completed orders only</span>
+          <span style="font-size:12px;color:var(--text-muted);">Walk-in (in-store) sales only — completed orders</span>
         </div>
         <div id="branchCardsGrid" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;padding:1rem;">
           <!-- Triple E Card -->
@@ -1082,7 +1118,6 @@
               <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Revenue</span><span style="font-size:13px;font-weight:700;color:var(--g-400);" id="branchTE_revenue">—</span></div>
               <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Orders</span><span style="font-size:13px;font-weight:600;" id="branchTE_orders">—</span></div>
               <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Walk-in</span><span style="font-size:13px;font-weight:600;" id="branchTE_walkin">—</span></div>
-              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Online</span><span style="font-size:13px;font-weight:600;" id="branchTE_online">—</span></div>
             </div>
           </div>
           <!-- Fiel Collince Card -->
@@ -1092,7 +1127,6 @@
               <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Revenue</span><span style="font-size:13px;font-weight:700;color:#3b82f6;" id="branchFC_revenue">—</span></div>
               <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Orders</span><span style="font-size:13px;font-weight:600;" id="branchFC_orders">—</span></div>
               <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Walk-in</span><span style="font-size:13px;font-weight:600;" id="branchFC_walkin">—</span></div>
-              <div style="display:flex;justify-content:space-between;"><span style="font-size:12px;color:var(--text-muted);">Online</span><span style="font-size:13px;font-weight:600;" id="branchFC_online">—</span></div>
             </div>
           </div>
         </div>

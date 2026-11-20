@@ -4428,7 +4428,7 @@ let allSummaryOrders = []; // store all orders for date filtering
 
 async function loadSummary() {
   // ── Skeleton ──
-  skStats(['summaryToday','summaryOrders','summaryWalkin','summaryOnline']);
+  skStats(['summaryToday','summaryOrders','summaryWalkin']);
   skTable('summaryTodayBody', ['sk-cell-sm','sk-cell-full','sk-cell-md',
                                'sk-cell-sm','sk-cell-sm','sk-cell-sm'], 6);
   // ─────────────
@@ -4471,16 +4471,20 @@ function renderSummaryForRange(fromStr, toStr) {
     return localDate >= fromStr && localDate <= toStr;
   });
 
-  const allValid = filtered.filter(o => o.status !== 'cancelled');
-  const total    = allValid.reduce((s, o) => s + Number(o.total || 0), 0);
+  // Walk-in/POS only — staff no longer handles the online-order lifecycle
+  // at all (see the note above this function), so an online order that
+  // still happens to carry this branch's branch_id isn't this branch's own
+  // sale and shouldn't inflate its totals or show up in its transactions.
+  const allValid       = filtered.filter(o => o.status !== 'cancelled' && o.order_type === 'walk_in');
+  const total          = allValid.reduce((s, o) => s + Number(o.total || 0), 0);
+  const filteredWalkin = filtered.filter(o => o.order_type === 'walk_in');
 
   document.getElementById('summaryToday').textContent  = peso(total);
   document.getElementById('summaryOrders').textContent = allValid.length;
-  document.getElementById('summaryWalkin').textContent = allValid.filter(o => o.order_type === 'walk_in').length;
-  document.getElementById('summaryOnline').textContent = allValid.filter(o => o.order_type === 'online').length;
+  document.getElementById('summaryWalkin').textContent = allValid.length;
 
-  document.getElementById('summaryTodayBody').innerHTML = filtered.length
-    ? filtered.map(o => `
+  document.getElementById('summaryTodayBody').innerHTML = filteredWalkin.length
+    ? filteredWalkin.map(o => `
         <tr>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
