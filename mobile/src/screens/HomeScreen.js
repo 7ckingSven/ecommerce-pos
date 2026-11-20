@@ -154,6 +154,10 @@ export default function HomeScreen({ navigation }) {
   const [loading,     setLoading]     = useState(true);
   const [refreshing,  setRefreshing]  = useState(false);
   const [error,       setError]       = useState(false);
+  // Populated alongside `error` so the error screen can say what actually
+  // went wrong instead of always blaming the user's internet connection
+  // (see classifyLoadError below — bug fix, Nov 2026).
+  const [errorDetail, setErrorDetail] = useState(null);
   const { cartCount, refreshCartCount } = useCart();
   const [loggedIn,      setLoggedIn]      = useState(false);
   const [searchFocused,  setSearchFocused]  = useState(false);
@@ -294,9 +298,61 @@ export default function HomeScreen({ navigation }) {
   // state directly here would be stale, since this function is captured
   // once by useFocusEffect's empty-deps callback; liveFiltersRef (kept
   // current by the effect above) avoids that same trap.
+  //
+  // Tells apart WHY a product load failed, so the error screen can say
+  // something true instead of always blaming the user's internet (bug fix,
+  // Nov 2026):
+  //  - error.response  → the server answered, just not with success. This is
+  //    NOT a connectivity problem — it's a real backend/DB error (e.g. a
+  //    500 from the warehouse-stock query, or a Supabase table whose
+  //    PostgREST access grants were never (re-)applied). Surface the status
+  //    code and whatever message the API sent back.
+  //  - error.request present, no error.response → the request went out but
+  //    nothing came back: a genuine network/connectivity failure.
+  //  - error.code === 'ECONNABORTED' → axios's own 30s timeout fired before
+  //    either of the above — most likely a slow/waking Render instance
+  //    rather than no connection at all.
+  //  - anything else → something unexpected on the client (e.g. a bug in
+  //    this screen's own code), not a connection issue either.
+  function classifyLoadError(e) {
+    if (e?.code === 'ECONNABORTED') {
+      return {
+        kind: 'timeout',
+        title: 'Taking too long',
+        message: "The server is taking a while to respond. It may just be waking up — please try again in a moment.",
+        logMessage: 'timeout',
+      };
+    }
+    if (e?.response) {
+      const status  = e.response.status;
+      const apiMsg  = e.response.data?.error || e.response.data?.message;
+      return {
+        kind: 'server',
+        title: 'Something went wrong on our end',
+        message: apiMsg || `The server returned an error (status ${status}). This isn't a connection problem — please try again, and let support know if it keeps happening.`,
+        logMessage: `server error ${status}: ${apiMsg || '(no message)'}`,
+      };
+    }
+    if (e?.request) {
+      return {
+        kind: 'network',
+        title: 'Connection Error',
+        message: 'Could not reach the server. Please check your internet connection and try again.',
+        logMessage: 'no response (network)',
+      };
+    }
+    return {
+      kind: 'client',
+      title: 'Something went wrong',
+      message: e?.message || 'An unexpected error occurred while loading products.',
+      logMessage: `client-side error: ${e?.message || e}`,
+    };
+  }
+
   async function loadProducts(overrides) {
     try {
       setError(false);
+      setErrorDetail(null);
       // Always fetch ALL products — filter client-side to preserve chip list.
       // One card per product now (revision, Nov 2026) — the backend already
       // hides a product entirely when the warehouse pool is at/below the
@@ -315,7 +371,18 @@ export default function HomeScreen({ navigation }) {
       setCategories(cats);
       setBrands(brnds);
     } catch (e) {
-      console.error('Load products error:', e);
+      // Bug fix (Nov 2026): this used to always set the same "check your
+      // internet connection" error regardless of what actually failed —
+      // misleading whenever the phone had a perfectly good connection but
+      // the SERVER returned an error (e.g. a 500 from a Supabase/schema
+      // issue on the warehouse-stock query, or a permission error on a
+      // table Supabase stopped auto-granting access to). classifyLoadError
+      // tells a real network/timeout failure apart from a server response,
+      // logs the real status/message, and the error screen below now
+      // reflects whichever one actually happened.
+      const detail = classifyLoadError(e);
+      console.error('Load products error:', detail.logMessage, e);
+      setErrorDetail(detail);
       setError(true);
     } finally {
       setLoading(false);
@@ -723,12 +790,18 @@ export default function HomeScreen({ navigation }) {
         <SkeletonLoader type="product" count={6} />
       ) : error ? (
         <View style={styles.errorWrap}>
-          <Feather name="wifi-off" size={56} color={COLORS.grayLight}/>
-          <Text style={styles.errorTitle}>Connection Error</Text>
-          <Text style={styles.errorText}>Could not load products. Please check your internet connection.</Text>
+          <Feather
+            name={errorDetail?.kind === 'network' ? 'wifi-off' : 'alert-circle'}
+            size={56}
+            color={COLORS.grayLight}
+          />
+          <Text style={styles.errorTitle}>{errorDetail?.title || 'Connection Error'}</Text>
+          <Text style={styles.errorText}>
+            {errorDetail?.message || 'Could not load products. Please check your internet connection.'}
+          </Text>
           <TouchableOpacity
             style={styles.retryBtn}
-            onPress={() => { setError(false); setLoading(true); loadProducts(); }}
+            onPress={() => { setError(false); setErrorDetail(null); setLoading(true); loadProducts(); }}
           >
             <Text style={styles.retryBtnText}>Try Again</Text>
           </TouchableOpacity>

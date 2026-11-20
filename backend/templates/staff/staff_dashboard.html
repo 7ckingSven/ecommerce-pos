@@ -37,15 +37,10 @@
       <a href="#" class="nav-item" onclick="showSection('orders', this)" data-tooltip="Orders">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
         <span>Orders</span>
-        <span id="ordersBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
         <span class="nav-refresh-btn" onclick="event.stopPropagation();forceRefreshSection(this)" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
       </a>
-      <a href="#" class="nav-item" onclick="showSection('returns', this)" data-tooltip="Returns">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 2.13-9.36L1 10"/></svg>
-        <span>Returns</span>
-        <span id="returnsPendingBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
-        <span class="nav-refresh-btn" onclick="event.stopPropagation();forceRefreshSection(this)" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
-      </a>
+      <!-- Returns nav item removed (staff rework, Nov 2026) — return review
+           is admin-only now. -->
       <a href="#" class="nav-item" onclick="showSection('requests', this)" data-tooltip="Stock Requests">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/><rect x="9" y="3" width="6" height="4" rx="1"/><line x1="9" y1="12" x2="15" y2="12"/><line x1="9" y1="16" x2="15" y2="16"/></svg>
         <span>Stock Requests</span>
@@ -539,17 +534,11 @@
         <select class="filter-select" id="staffOrderTypeFilter" onchange="filterStaffOrderType(this.value)">
           <option value="">All Orders</option>
           <option value="walk_in">Walk-in</option>
-          <option value="online">Online</option>
         </select>
         <select class="filter-select" id="staffOrderStatusFilter" onchange="filterStaffOrders(this.value)">
           <option value="">All Status</option>
-          <option value="pending">Pending</option>
-          <option value="processing">Processing</option>
-          <option value="out_for_delivery">Out for Delivery</option>
-          <option value="not_remitted">Not Remitted</option>
           <option value="completed">Completed</option>
           <option value="cancelled">Cancelled</option>
-          <option value="returned_failed">Returned</option>
         </select>
         <select class="filter-select" id="staffOrderYearFilter" onchange="filterStaffOrderYear(this.value)">
           <option value="">All Years</option>
@@ -575,188 +564,31 @@
         <button id="staffClearFiltersBtn" class="btn btn-cancel" onclick="clearStaffOrderFilters()" disabled style="font-size:12px;padding:6px 12px;opacity:0.5;cursor:not-allowed;margin-left:auto;">Clear Filters</button>
       </div>
       <div class="card">
-        <!-- Bulk Mark Out for Delivery (user request, Oct 29 2026) — see the
-             matching note in admin_dashboard.html. -->
-        <div class="table-toolbar">
-          <span style="font-size:11px;color:var(--text-muted);">Check processing orders below to batch-advance them.</span>
-          <button class="btn btn-solid-green" style="font-size:12px;padding:6px 14px;" onclick="staffBulkMarkOutForDeliverySelected()">Mark Out for Delivery (Selected)</button>
-        </div>
         <div class="table-wrap">
           <table class="data-table">
             <thead>
-              <tr><th style="width:30px;"><input type="checkbox" id="staffOrdersSelectAll" onchange="toggleAllStaffOrderSelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Type</th><th>Items</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Action</th></tr>
+              <tr><th>Order ID</th><th>Customer</th><th>Type</th><th>Items</th><th>Total</th><th>Payment</th><th>Date</th><th>Status</th><th>Action</th></tr>
             </thead>
-            <tbody id="staffOrdersBody"><tr><td colspan="10" class="table-empty">Loading...</td></tr></tbody>
+            <tbody id="staffOrdersBody"><tr><td colspan="9" class="table-empty">Loading...</td></tr></tbody>
           </table>
         </div>
         <div id="staffOrdersPagination" style="padding:0 1rem;"></div>
       </div>
-
-      <!-- ─── Deliveries ───────────────────────── -->
-      <div class="card" style="margin-top:16px;">
-        <div class="deliv-card-head">
-          <h3 class="card-title" style="margin:0;">Deliveries</h3>
-          <div class="deliv-tabs">
-            <button id="staffDeliveriesTabTodayBtn" class="deliv-tab active" onclick="staffSwitchDeliveriesTab('today')">Out for Deliveries</button>
-            <button id="staffDeliveriesTabDeliveredBtn" class="deliv-tab" onclick="staffSwitchDeliveriesTab('delivered')">Delivered Today</button>
-            <button id="staffDeliveriesTabScheduledBtn" class="deliv-tab" onclick="staffSwitchDeliveriesTab('scheduled')">Scheduled for Retry</button>
-            <button id="staffDeliveriesTabFailedBtn" class="deliv-tab" onclick="staffSwitchDeliveriesTab('failed')">Failed Attempts Today</button>
-            <button id="staffDeliveriesTabReturnedBtn" class="deliv-tab" onclick="staffSwitchDeliveriesTab('returned')">Returned Today</button>
-          </div>
-        </div>
-        <div id="staffDeliveriesCountsStrip" class="deliv-stats">
-          <div class="deliv-stat">
-            <span class="deliv-stat-label">Total Today</span>
-            <span class="deliv-stat-value" id="staffDeliveriesCountTotal">0</span>
-          </div>
-          <div class="deliv-stat deliv-stat--green">
-            <span class="deliv-stat-label">Completed / Remitted</span>
-            <span class="deliv-stat-value" id="staffDeliveriesCountCompleted">0</span>
-          </div>
-          <div class="deliv-stat deliv-stat--yellow">
-            <span class="deliv-stat-label">Failed Attempts</span>
-            <span class="deliv-stat-value" id="staffDeliveriesCountFailed">0</span>
-          </div>
-          <div class="deliv-stat deliv-stat--red">
-            <span class="deliv-stat-label">Returned</span>
-            <span class="deliv-stat-value" id="staffDeliveriesCountReturned">0</span>
-          </div>
-          <div class="deliv-stat deliv-stat--red">
-            <span class="deliv-stat-label">Not Remitted (5pm)</span>
-            <span class="deliv-stat-value" id="staffDeliveriesCountNotRemitted">0</span>
-          </div>
-        </div>
-        <div id="staffRemittanceSummaryStrip" class="deliv-remit-strip">
-          <div class="deliv-remit-item">
-            <span class="deliv-remit-label">Expected Today</span>
-            <span class="deliv-remit-value"><span id="staffRemitExpectedTotal">₱0.00</span><small id="staffRemitExpectedCount"></small></span>
-          </div>
-          <div class="deliv-remit-item">
-            <span class="deliv-remit-label">Remitted So Far</span>
-            <span class="deliv-remit-value"><span id="staffRemitActualTotal">₱0.00</span><small id="staffRemitActualCount"></small></span>
-          </div>
-          <div class="deliv-remit-item">
-            <span class="deliv-remit-label">Remaining</span>
-            <span class="deliv-remit-value"><span id="staffRemitRemainingTotal">₱0.00</span></span>
-          </div>
-        </div>
-        <div class="deliv-note">
-          Total Deliveries Today = Out for Deliveries + Delivered Today. Completed/Remitted = Delivered Today. Failed Attempts = a Not-Delivered click recorded today, rescheduled to retry (not yet final). Returned/Failed = 3rd attempt failed. Full order history for any date is still in the Orders table's status filter above.
-        </div>
-
-        <!-- Out for Deliveries: dispatched for today, awaiting Remit/Not
-             Delivered. An order lands here directly once it becomes
-             out_for_delivery (via the Orders module or the lazy auto-
-             advance) — the separate "To Dispatch" staging tab was removed
-             Oct 26 2026, so this is now the Deliveries card's first tab. -->
-        <div id="staffDeliveriesTodayPanel" style="padding:1rem;">
-          <div class="deliv-panel-toolbar">
-            <span style="font-size:11px;color:var(--text-muted);">Closing hour is 5:00 PM — anything still here past then is auto-marked "Not Remitted" and needs follow-up tomorrow. Remittance reopens at 6:00 AM.</span>
-            <div style="display:flex;gap:8px;">
-              <button class="btn btn-solid-green" onclick="staffBulkRemitSelectedOrders()" title="Complete every selected order, trusting each order's computed total — no amount typing needed">Bulk Remit Selected</button>
-              <button class="btn btn-cancel" onclick="staffBulkNotDeliveredSelectedOrders()">Bulk Not Delivered Selected</button>
-              <button class="btn btn-outline-green" onclick="staffCloseRemittanceNow()" title="Close today's remittance early for your branch — flags every still-pending delivery as Not Remitted right now instead of waiting for the 5pm auto-flag">Close Remittance</button>
-            </div>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th style="width:30px;"><input type="checkbox" id="staffDeliveriesTodaySelectAll" onchange="staffToggleAllTodayDeliverySelections(this)"/></th><th>Order ID</th><th>Customer</th><th>Address</th><th>Payment</th><th>Attempts</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="staffDeliveriesTodayBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Delivered Today: completed orders dispatched today — the order-
-             level breakdown backing "Remitted So Far" above. Read-only. -->
-        <div id="staffDeliveriesDeliveredPanel" style="padding:1rem;display:none;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Amount Remitted</th></tr>
-              </thead>
-              <tbody id="staffDeliveriesDeliveredBody"><tr><td colspan="4" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Scheduled for Retry: failed once/twice (not final), the
-             courier keeps it and retries on the rescheduled dispatch_date.
-             Read-only — it reappears in "Out for Deliveries" on its own
-             once that day arrives, no manual redispatch needed. -->
-        <div id="staffDeliveriesScheduledPanel" style="padding:1rem;display:none;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Address</th><th>Retry Date</th><th>Total</th></tr>
-              </thead>
-              <tbody id="staffDeliveriesScheduledBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Failed Attempts Today: non-final Not-Delivered events (attempt
-             1 or 2) recorded today — rescheduled for retry, not yet final.
-             Read-only. -->
-        <div id="staffDeliveriesFailedPanel" style="padding:1rem;display:none;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Attempt</th><th>Amount</th></tr>
-              </thead>
-              <tbody id="staffDeliveriesFailedBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-
-        <!-- Returned/Failed Today: orders that hit their 3rd failed
-             attempt today, dropped from the batch. Read-only. -->
-        <div id="staffDeliveriesReturnedPanel" style="padding:1rem;display:none;">
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Order ID</th><th>Customer</th><th>Payment</th><th>Amount (not collected)</th></tr>
-              </thead>
-              <tbody id="staffDeliveriesReturnedBody"><tr><td colspan="4" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-        </div>
-      </div>
+      <!-- "Deliveries" card (Out for Deliveries/Delivered/Scheduled/Failed/
+           Returned tabs + remittance strip + bulk remit/not-delivered/close-
+           remittance actions) removed entirely (staff rework, Nov 2026) —
+           staff no longer handles the online-order delivery/remittance
+           lifecycle at all; that whole flow, and these tables, are admin-
+           only now (see admin_dashboard.html's own Warehouse/Orders
+           sections). This Orders table is walk-in/POS-transactions
+           monitoring only. -->
     </section>
 
-    <!-- ─── RETURNS & REFUNDS SECTION (revision, Nov 2026) ───
-         Both admin and staff (at the fulfilling branch) can review a
-         return request — this view is scoped server-side to this staff
-         account's own branch; admin sees every branch from their own
-         dashboard's equivalent section. -->
-    <section class="section" id="section-returns">
-      <div class="card">
-        <div class="deliv-card-head">
-          <h3 class="card-title" style="margin:0;">Returns & Refunds</h3>
-          <div class="deliv-tabs">
-            <button id="returnsTabPendingBtn" class="deliv-tab active" onclick="switchReturnsTab('pending')">Pending</button>
-            <button id="returnsTabApprovedBtn" class="deliv-tab" onclick="switchReturnsTab('approved')">Approved</button>
-            <button id="returnsTabRejectedBtn" class="deliv-tab" onclick="switchReturnsTab('rejected')">Rejected</button>
-            <button id="returnsTabRefundedBtn" class="deliv-tab" onclick="switchReturnsTab('refunded')">Refunded</button>
-          </div>
-        </div>
-        <div style="padding:1rem;">
-          <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">
-            Customer-submitted returns for your branch's orders — filed within 12 hours of the order being marked received. Approving restores the item(s) to warehouse stock and either refunds the customer's GCash payment automatically or marks the refund for a manual cash handback.
-          </p>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr><th>Requested</th><th>Order</th><th>Customer</th><th>Items</th><th>Refund</th><th>Status</th><th>Actions</th></tr>
-              </thead>
-              <tbody id="returnsBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-          <div id="returnsPagination"></div>
-        </div>
-      </div>
-    </section>
+    <!-- Returns & Refunds section removed from staff entirely (staff
+         rework, Nov 2026) — return review is admin-only now (see
+         admin_dashboard.html's own Returns section, which already calls
+         these same /api/staff/returns/* endpoints — only the decorator on
+         the backend changed, from @staff_required to @admin_required). -->
 
     <!-- ─── SALES SUMMARY SECTION ─────────────────── -->
     <section class="section" id="section-summary">

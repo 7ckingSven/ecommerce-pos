@@ -1,18 +1,28 @@
 /* ============================================================
    ADMIN DASHBOARD — Triple E & Fiel Collins
-   Dark / Light Theme with Green Accent
+   Dark / Light Theme — deep jade green (brand) + a kraft-amber
+   accent reserved for the Warehouse module (stock on the move:
+   receiving, distributing to branches). Visual refresh, Nov 2026.
    ============================================================ */
 @import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@600;700&family=Sora:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
 /* ─── CSS Variables ─── */
 :root {
-  --g-400: #4ade80;
-  --g-500: #22c55e;
-  --g-600: #16a34a;
-  --g-700: #15803d;
-  --g-900: #14532d;
-  --radius:    12px;
-  --radius-sm: 8px;
+  --g-400: #6fc495;
+  --g-500: #359467;
+  --g-600: #277a52;
+  --g-700: #1f6342;
+  --g-900: #143c29;
+  /* Warehouse/logistics accent — used sparingly: the "Distribute to
+     Branch" action, the Warehouse nav highlight on hover, and the
+     warning/low-stock tier (which already shared this hue family). */
+  --a-400: #dba559;
+  --a-500: #c6872e;
+  --a-600: #a66f22;
+  --a-700: #7f561d;
+  --radius:    10px;
+  --radius-sm: 7px;
+  --radius-lg: 14px;
   --transition: 0.2s ease;
 }
 
@@ -178,11 +188,11 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   transition: opacity var(--transition);
 }
 .nav-item:hover {
-  background: rgba(74,222,128,0.08);
+  background: rgba(111,196,149,0.08);
   color: var(--g-400);
 }
 .nav-item.active {
-  background: rgba(74,222,128,0.12);
+  background: rgba(111,196,149,0.12);
   color: var(--g-400);
   font-weight: 600;
   padding-right: 34px;
@@ -293,8 +303,8 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   flex-shrink: 0;
 }
 .sidebar-logout:hover {
-  background: rgba(239,68,68,0.1);
-  color: #ef4444;
+  background: rgba(204,79,79,0.1);
+  color: #cc4f4f;
 }
 
 /* ══════════════════════════════════════════════════════
@@ -469,9 +479,9 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   font-family: 'JetBrains Mono', monospace;
 }
 .topbar-badge {
-  background: rgba(74,222,128,0.12);
+  background: rgba(111,196,149,0.12);
   color: var(--g-400);
-  border: 1px solid rgba(74,222,128,0.2);
+  border: 1px solid rgba(111,196,149,0.2);
   border-radius: 999px;
   padding: 3px 10px;
   font-size: 13px;
@@ -501,21 +511,34 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .stat-card {
   background: var(--card-bg);
   border: 1px solid var(--border);
+  border-left: 3px solid var(--border);
   border-radius: var(--radius);
   padding: 1.2rem;
   display: flex;
   align-items: center;
   gap: 1rem;
-  box-shadow: 0 2px 8px var(--shadow);
   transition: all var(--transition);
 }
+/* A hairline accent on the card's leading edge, keyed to its own icon's
+   hue — a quieter stand-in for the identical drop-shadow every card used
+   to share, and it reads as a quick category cue when scanning the row.
+   Degrades gracefully (plain border) in a browser without :has(). */
+.stat-card:has(.stat-icon--green)  { border-left-color: var(--g-500); }
+.stat-card:has(.stat-icon--blue)   { border-left-color: #5478c0; }
+.stat-card:has(.stat-icon--yellow) { border-left-color: var(--a-500); }
+.stat-card:has(.stat-icon--red)    { border-left-color: #cc4f4f; }
 .stat-card[onclick] {
   cursor: pointer;
 }
 .stat-card:hover {
   border-color: var(--g-700);
+  border-left-color: var(--g-500);
+  box-shadow: 0 4px 14px var(--shadow);
   transform: translateY(-1px);
 }
+.stat-card:has(.stat-icon--blue):hover   { border-left-color: #5478c0; }
+.stat-card:has(.stat-icon--yellow):hover { border-left-color: var(--a-500); }
+.stat-card:has(.stat-icon--red):hover    { border-left-color: #cc4f4f; }
 .stat-card[onclick]:focus-visible {
   outline: 2px solid var(--g-500);
   outline-offset: 2px;
@@ -529,10 +552,10 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   flex-shrink: 0;
 }
 .stat-icon svg { width: 20px; height: 20px; }
-.stat-icon--green { background: rgba(22,163,74,0.12); color: var(--g-500); }
-.stat-icon--blue  { background: rgba(59,130,246,0.12); color: #3b82f6; }
-.stat-icon--yellow{ background: rgba(234,179,8,0.12);  color: #eab308; }
-.stat-icon--red   { background: rgba(239,68,68,0.12);  color: #ef4444; }
+.stat-icon--green { background: rgba(39,122,82,0.12); color: var(--g-500); }
+.stat-icon--blue  { background: rgba(84,120,192,0.12); color: #5478c0; }
+.stat-icon--yellow{ background: rgba(198,135,46,0.12);  color: #c6872e; }
+.stat-icon--red   { background: rgba(204,79,79,0.12);  color: #cc4f4f; }
 .stat-info { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .stat-label { font-size: 13px; color: var(--text-muted); font-weight: 600; letter-spacing: 0.2px; }
 .stat-value { font-size: 1.5rem; font-weight: 700; color: var(--text); font-family: 'JetBrains Mono', monospace; }
@@ -550,8 +573,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
   background: var(--card-bg);
   border: 1px solid var(--border);
   border-radius: var(--radius);
-  box-shadow: 0 2px 8px var(--shadow);
-  transition: background var(--transition);
+  transition: background var(--transition), border-color var(--transition);
   overflow: hidden;
 }
 .card-header {
@@ -596,7 +618,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .search-wrap { min-height: 40px; }
 .search-wrap:focus-within {
   border-color: var(--g-600);
-  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+  box-shadow: 0 0 0 3px rgba(111,196,149,0.15);
 }
 .search-input {
   border: none;
@@ -649,7 +671,7 @@ button { cursor: pointer; font-family: 'Sora', sans-serif; }
 .filter-select:focus,
 .filter-select:focus-visible {
   border-color: var(--g-600);
-  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+  box-shadow: 0 0 0 3px rgba(111,196,149,0.15);
 }
 
 /* ─── Table ─── */
@@ -816,10 +838,10 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
   font-weight: 600;
   white-space: nowrap;
 }
-.badge--green  { background: rgba(22,163,74,0.12);  color: #22c55e; }
-.badge--yellow { background: rgba(234,179,8,0.12);  color: #eab308; }
-.badge--blue   { background: rgba(59,130,246,0.12); color: #3b82f6; }
-.badge--red    { background: rgba(239,68,68,0.12);  color: #ef4444; }
+.badge--green  { background: rgba(39,122,82,0.12);  color: #359467; }
+.badge--yellow { background: rgba(198,135,46,0.12);  color: #c6872e; }
+.badge--blue   { background: rgba(84,120,192,0.12); color: #5478c0; }
+.badge--red    { background: rgba(204,79,79,0.12);  color: #cc4f4f; }
 .badge--gray   { background: rgba(107,114,128,0.12);color: #9ca3af; }
 .badge--purple { background: rgba(139,92,246,0.12); color: #8b5cf6; }
 
@@ -863,7 +885,7 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
 .deliv-tab.active {
   background: var(--g-600);
   color: #ffffff;
-  box-shadow: 0 2px 6px rgba(22,163,74,0.35);
+  box-shadow: 0 2px 6px rgba(39,122,82,0.35);
 }
 .deliv-stats {
   display: grid;
@@ -890,15 +912,15 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
   color: var(--text-muted);
 }
 .deliv-stat-value { font-size: 18px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text); }
-.deliv-stat--green  .deliv-stat-value { color: #22c55e; }
-.deliv-stat--yellow .deliv-stat-value { color: #eab308; }
-.deliv-stat--red    .deliv-stat-value { color: #ef4444; }
+.deliv-stat--green  .deliv-stat-value { color: #359467; }
+.deliv-stat--yellow .deliv-stat-value { color: #c6872e; }
+.deliv-stat--red    .deliv-stat-value { color: #cc4f4f; }
 
 .deliv-remit-strip {
   margin: 12px 20px 0;
   padding: 12px 16px;
-  background: rgba(22,163,74,0.07);
-  border: 1px solid rgba(22,163,74,0.18);
+  background: rgba(39,122,82,0.07);
+  border: 1px solid rgba(39,122,82,0.18);
   border-radius: var(--radius-sm);
   display: flex;
   gap: 2rem;
@@ -947,9 +969,9 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
   display: inline-flex;
   align-items: center;
   gap: 3px;
-  background: rgba(245,158,11,0.15);
-  color: #d97706;
-  border: 1px solid rgba(245,158,11,0.35);
+  background: rgba(198,135,46,0.15);
+  color: #a66f22;
+  border: 1px solid rgba(198,135,46,0.35);
   border-radius: 999px;
   font-size: 10.5px;
   font-weight: 700;
@@ -979,7 +1001,7 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
 }
 .btn-view svg { width: 13px; height: 13px; flex-shrink: 0; }
 .btn-view:hover {
-  background: rgba(34,197,94,0.12);
+  background: rgba(53,148,103,0.12);
   border-color: var(--g-600);
   color: var(--g-400);
 }
@@ -1000,7 +1022,13 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
   white-space: nowrap;
 }
 .btn-solid-green { background: var(--g-600); color: #ffffff; transition: all 0.2s ease; }
-.btn-solid-green:hover { background: var(--g-700); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(22,163,74,0.4); }
+.btn-solid-green:hover { background: var(--g-700); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(39,122,82,0.4); }
+/* Reserved for the Warehouse module's own hero action — "Distribute to
+   Branch" — so the one new thing this rework added to the UI (stock
+   finally leaving the warehouse pool for a branch) reads as its own
+   distinct action, not just another green button among many. */
+.btn-solid-amber { background: var(--a-600); color: #ffffff; transition: all 0.2s ease; }
+.btn-solid-amber:hover { background: var(--a-700); transform: translateY(-1px); box-shadow: 0 4px 12px rgba(166,111,34,0.4); }
 .btn:disabled,
 .btn:disabled:hover {
   background: #9ca3af;
@@ -1022,7 +1050,7 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
   border: 1.5px solid var(--g-600);
 }
 .btn-outline-green:hover {
-  background: rgba(34,197,94,0.12);
+  background: rgba(53,148,103,0.12);
   color: var(--g-400);
   border-color: var(--g-500);
   transform: translateY(-1px);
@@ -1052,7 +1080,7 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
   transition: all var(--transition);
 }
 .btn-icon:hover { background: var(--hover); color: var(--text); }
-.btn-icon--red:hover { background: rgba(239,68,68,0.1); color: #ef4444; }
+.btn-icon--red:hover { background: rgba(204,79,79,0.1); color: #cc4f4f; }
 
 /* ─── Forms ─── */
 /* Typography scale shared by every "label" (a caption above/describing a
@@ -1082,7 +1110,7 @@ label.appr-req-row:not(.appr-req-head):hover { background: var(--hover); }
 .form-input:focus,
 .form-input:focus-visible {
   border-color: var(--g-600);
-  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+  box-shadow: 0 0 0 3px rgba(111,196,149,0.15);
 }
 .form-input::placeholder { color: var(--text-muted); opacity: 0.85; }
 .form-input[readonly] {
@@ -1107,7 +1135,7 @@ select.form-input {
 .form-row-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
 .form-row-3 { display: grid; grid-template-columns: 1fr 0.4fr 1fr; gap: 1rem; }
 .field-hint { font-size: 13px; color: var(--text-muted); }
-.req { color: #ef4444; }
+.req { color: #cc4f4f; }
 
 /* Groups a long form (Add/Edit Product, etc.) into labeled sections so it
    reads as distinct steps instead of one unbroken column of fields. */
@@ -1248,7 +1276,7 @@ select.form-input {
   animation: toastIn 0.3s ease;
 }
 .toast.show { display: block; }
-.toast.error { background: #dc2626; }
+.toast.error { background: #b23a3a; }
 @keyframes toastIn {
   from { opacity: 0; transform: translateY(10px); }
   to   { opacity: 1; transform: translateY(0); }
@@ -1278,7 +1306,7 @@ select.form-input {
   height: 16px;
   padding: 0 4px;
   border-radius: 999px;
-  background: #dc2626;
+  background: #b23a3a;
   color: #fff;
   font-size: 10px;
   font-weight: 700;
@@ -1326,10 +1354,10 @@ select.form-input {
   height: 8px;
   border-radius: 50%;
   margin-top: 5px;
-  background: #16a34a;
+  background: #277a52;
 }
-.notif-item-dot.warn   { background: #f59e0b; }
-.notif-item-dot.danger { background: #dc2626; }
+.notif-item-dot.warn   { background: #c6872e; }
+.notif-item-dot.danger { background: #b23a3a; }
 .notif-item-label { font-size: 12.5px; line-height: 1.4; color: var(--text); }
 .notif-empty {
   padding: 24px 14px;
@@ -1495,9 +1523,9 @@ select.form-input {
   font-weight: 700;
 }
 
-.branch-stock-qty.in-stock  { color: #16a34a; }
-.branch-stock-qty.low-stock { color: #f59e0b; }
-.branch-stock-qty.out-stock { color: #ef4444; }
+.branch-stock-qty.in-stock  { color: #277a52; }
+.branch-stock-qty.low-stock { color: #c6872e; }
+.branch-stock-qty.out-stock { color: #cc4f4f; }
 
 /* ============================================================
    CUSTOM SCROLLBAR — Green Theme (Admin)
@@ -1531,22 +1559,22 @@ select.form-input {
   background: transparent;
 }
 /* ─── Stock Transfer & Adjust Stock Button Hovers ─── */
-.btn[style*="background:#3b82f6"]:hover {
-  background: #2563eb !important;
-  border-color: #2563eb !important;
+.btn[style*="background:#5478c0"]:hover {
+  background: #4365a3 !important;
+  border-color: #4365a3 !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(59,130,246,0.4);
+  box-shadow: 0 4px 12px rgba(84,120,192,0.4);
   transition: all 0.2s ease;
 }
-.btn[style*="background:#ef4444"]:hover {
-  background: #dc2626 !important;
-  border-color: #dc2626 !important;
+.btn[style*="background:#cc4f4f"]:hover {
+  background: #b23a3a !important;
+  border-color: #b23a3a !important;
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(239,68,68,0.4);
+  box-shadow: 0 4px 12px rgba(204,79,79,0.4);
   transition: all 0.2s ease;
 }
-.btn[style*="background:#3b82f6"],
-.btn[style*="background:#ef4444"] {
+.btn[style*="background:#5478c0"],
+.btn[style*="background:#cc4f4f"] {
   transition: all 0.2s ease;
 }
 

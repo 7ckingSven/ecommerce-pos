@@ -3414,59 +3414,61 @@ def admin_create_purchase_order():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
-def _po_add_branch_stock(supabase, session, product_id, branch_id, qty_added, variant_options, po_label, supplier=None):
-    """Add qty_added to branch_stock (upsert), log to inventory, update variant_stock, auto-activate product.
-    `supplier` (Oct 26 2026 adviser follow-up — restock price/supplier are
-    now recorded at the moment of receiving, per line item) is logged onto
-    the inventory row alongside the restock, same column Add Stock already
-    uses (inventory.supplier)."""
+def _po_add_warehouse_stock(supabase, session, product_id, qty_added, variant_options, po_label, supplier=None):
+    """PO rework (Nov 2026): a received PO line item now lands wholly in the
+    warehouse pool (warehouse_stock/warehouse_variant_stock) — no more
+    per-branch split at receiving time. Mirrors _po_add_branch_stock below,
+    just with no branch_id (to_branch_id stays NULL on the inventory log,
+    same as admin_adjust_warehouse_stock's own restocks). Stock then only
+    reaches a branch later, via the separate warehouse-distribute feature."""
     import time as _t
-    # Upsert branch_stock
-    bs_res = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', branch_id).execute()
-    if bs_res.data:
-        qty_before = bs_res.data[0]['quantity']
+    if variant_options:
+        all_wvs = supabase.table('warehouse_variant_stock').select('id, quantity, options').eq('product_id', product_id).execute()
+        match   = [v for v in (all_wvs.data or []) if v.get('options') == variant_options]
+        qty_before = match[0]['quantity'] if match else 0
         qty_after  = qty_before + qty_added
-        supabase.table('branch_stock').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', product_id).eq('branch_id', branch_id).execute()
+        if match:
+            supabase.table('warehouse_variant_stock').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('id', match[0]['id']).execute()
+        else:
+            supabase.table('warehouse_variant_stock').insert({'product_id': product_id, 'options': variant_options, 'quantity': qty_after}).execute()
     else:
-        qty_before = 0
-        qty_after  = qty_added
-        supabase.table('branch_stock').insert({'product_id': product_id, 'branch_id': branch_id, 'quantity': qty_added}).execute()
+        wh_res = supabase.table('warehouse_stock').select('quantity').eq('product_id', product_id).execute()
+        qty_before = wh_res.data[0]['quantity'] if wh_res.data else 0
+        qty_after  = qty_before + qty_added
+        if wh_res.data:
+            supabase.table('warehouse_stock').update({'quantity': qty_after, 'updated_at': 'now()'}).eq('product_id', product_id).execute()
+        else:
+            supabase.table('warehouse_stock').insert({'product_id': product_id, 'quantity': qty_after}).execute()
 
-    # Log to inventory
+    # Log to inventory — to_branch_id left NULL, same convention the
+    # warehouse's other restock path (admin_adjust_warehouse_stock) uses.
     supabase.table('inventory').insert({
         'product_id':      product_id,
         'staff_id':        session.get('staff_id'),
         'quantity_added':  qty_added,
         'quantity_before': qty_before,
         'quantity_after':  qty_after,
-        'to_branch_id':    branch_id,
+        'to_branch_id':    None,
         'variant_options': variant_options if variant_options else None,
         'supplier':        supplier or None,
-        'note':            f'PO received — {po_label}',
+        'note':            f'PO received into warehouse — {po_label}',
     }).execute()
 
-    # Update variant_stock if item has variant_options
-    if variant_options and branch_id:
-        try:
-            _t.sleep(0.05)
-            all_vs = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', branch_id).execute()
-            match  = [v for v in (all_vs.data or []) if v.get('options') == variant_options]
-            if match:
-                supabase.table('variant_stock').update({'quantity': match[0]['quantity'] + qty_added, 'updated_at': 'now()'}).eq('id', match[0]['id']).execute()
-            else:
-                supabase.table('variant_stock').insert({'product_id': product_id, 'branch_id': branch_id, 'options': variant_options, 'quantity': qty_added}).execute()
-        except Exception as vs_err:
-            print(f'Variant stock PO update warning: {vs_err}')
-
-    # Auto-activate product if total branch stock >= 1
+    # Auto-activate the product once it has stock to sell, mirroring
+    # _po_add_branch_stock's own auto-activate (there, keyed off branch_stock
+    # totals; here, the warehouse pool is the signal instead).
     try:
         _t.sleep(0.1)
-        all_bs = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).execute()
-        if all_bs.data and sum(bs['quantity'] for bs in all_bs.data) >= 1:
-            _t.sleep(0.1)
+        if qty_after >= 1:
             supabase.table('product').update({'status': 'active'}).eq('product_id', product_id).execute()
     except Exception as act_err:
-        print(f'Auto-activate warning: {act_err}')
+        print(f'Auto-activate warning (warehouse PO receive): {act_err}')
+
+
+# _po_add_branch_stock() removed (PO rework, Nov 2026) — a received PO line
+# item no longer goes straight to a branch's branch_stock; every call site
+# now uses _po_add_warehouse_stock() above instead. Stock reaches a branch
+# only afterward, through the separate warehouse-distribute feature.
 
 
 @app.route('/api/admin/purchase-orders/<po_id>', methods=['PUT'])
@@ -3503,34 +3505,32 @@ def admin_update_purchase_order(po_id):
 
         # ─── Receiving action ──────────────────────────────
         import time
-        items_payload = data.get('items', [])  # [{po_item_id, product_id, received_quantity, branches:[{branch_id,quantity}]}]
+        items_payload = data.get('items', [])  # [{po_item_id, product_id, received_quantity, unit_cost, supplier}]
         # received_quantity here is the amount arriving THIS batch, not the
         # cumulative total — a PO can be received across several batches
         # until every item's running total reaches what was ordered.
+        #
+        # PO rework (Nov 2026): every item received now goes wholly into the
+        # warehouse pool (warehouse_stock/warehouse_variant_stock) — there is
+        # no more per-branch split at receiving time (no `branch_id`/
+        # `branches` in the payload any more). Stock only reaches a branch
+        # afterward, via the separate warehouse-distribute feature
+        # (admin_distribute_warehouse_stock) — "so the process is less
+        # hassle" was the whole point of moving POs to land in the warehouse
+        # first, per the user's own framing of this rework.
 
-        # Fallback: legacy single-branch or flat branches payload — fully
-        # receives every item in one shot (no partial tracking), same as
-        # the original behavior.
+        # Fallback: legacy flat payload with no per-item breakdown — fully
+        # receives every item in one shot into the warehouse (no partial
+        # tracking), same shape the original single-batch behavior had.
         if not items_payload:
-            po_branch_id = data.get('branch_id')
-            branches     = data.get('branches', [])
             items_res = supabase.table('po_item').select(
                 '*, product(quantity), variant_options'
             ).eq('po_id', po_id).execute()
 
-            if branches:
-                branch_list = [(b['branch_id'], int(b['quantity'])) for b in branches if b.get('branch_id') and int(b.get('quantity', 0)) > 0]
-            elif po_branch_id:
-                branch_list = [(po_branch_id, None)]
-            else:
-                branch_list = []
-
             for item in items_res.data:
                 variant_options = item.get('variant_options')
                 item_qty        = item['quantity']
-                for (b_id, b_qty) in branch_list:
-                    qty_added = b_qty if b_qty is not None else item_qty
-                    _po_add_branch_stock(supabase, session, item['product_id'], b_id, qty_added, variant_options, data.get('po_number', po_id))
+                _po_add_warehouse_stock(supabase, session, item['product_id'], item_qty, variant_options, data.get('po_number', po_id), supplier=item.get('supplier'))
                 supabase.table('po_item').update({'received_quantity': item_qty}).eq('po_item_id', item['po_item_id']).execute()
 
             updates = {'status': 'received', 'updated_at': 'now()'}
@@ -3556,12 +3556,11 @@ def admin_update_purchase_order(po_id):
             i['received_quantity'] = i.get('received_quantity') or 0
         items_by_id = {i['po_item_id']: i for i in all_items}
 
-        # Validate BEFORE writing anything:
-        #  - the amount arriving this batch can't exceed what's still
-        #    outstanding for that item (ordered minus already received)
-        #  - branch distribution must add up EXACTLY to the amount arriving
-        #    this batch — a partial split (e.g. 20 arriving, only 10
-        #    distributed) would silently lose track of the other 10
+        # Validate BEFORE writing anything: the amount arriving this batch
+        # can't exceed what's still outstanding for that item (ordered
+        # minus already received). (The old branch-distribution-must-add-up
+        # check is gone along with the branch split itself — a received
+        # batch now goes wholly into the warehouse, nothing to reconcile.)
         for item_entry in items_payload:
             po_item = items_by_id.get(item_entry.get('po_item_id'))
             if not po_item:
@@ -3573,11 +3572,6 @@ def admin_update_purchase_order(po_id):
             if this_batch > outstanding:
                 return jsonify({
                     'error': f"Quantity arriving ({this_batch}) exceeds what's still outstanding ({outstanding}) for one or more items."
-                }), 400
-            dist_total = sum(int(b.get('quantity', 0)) for b in item_entry.get('branches', []))
-            if dist_total != this_batch:
-                return jsonify({
-                    'error': f'Branch distribution ({dist_total}) must equal the quantity arriving this batch ({this_batch}) for one or more items.'
                 }), 400
             # Unit Cost & Supplier are collected HERE now (Oct 26 2026
             # adviser follow-up), not at Create PO — required for any line
@@ -3616,17 +3610,11 @@ def admin_update_purchase_order(po_id):
                 continue
             try:
                 product_id      = item_entry.get('product_id') or po_item['product_id']
-                branch_dist     = item_entry.get('branches', [])  # [{branch_id, quantity}]
                 variant_options = po_item.get('variant_options')
                 item_cost       = float(item_entry.get('unit_cost', 0))
                 item_supplier   = (item_entry.get('supplier') or '').strip()
 
-                for b in branch_dist:
-                    b_id  = b.get('branch_id')
-                    b_qty = int(b.get('quantity', 0))
-                    if not b_id or b_qty <= 0:
-                        continue
-                    _po_add_branch_stock(supabase, session, product_id, b_id, b_qty, variant_options, data.get('po_number', po_id), supplier=item_supplier)
+                _po_add_warehouse_stock(supabase, session, product_id, this_batch, variant_options, data.get('po_number', po_id), supplier=item_supplier)
 
                 new_received = po_item['received_quantity'] + this_batch
                 # unit_cost/supplier are recorded on the po_item the moment
@@ -5001,103 +4989,15 @@ def admin_get_orders():
         print(f'Admin orders error: {e}')
         return jsonify({'error': str(e)}), 500
 
-# Unassigned Orders queue + branch-assignment action (revision, Nov 2026).
-# Every online order is created with branch_id=NULL now (see api_place_order
-# — the customer never picks a branch anymore). This is where admin reviews
-# that queue and decides which branch fulfills each order; staff never see
-# an order in their own dashboard until it's been assigned here.
-@app.route('/api/admin/orders/unassigned', methods=['GET'])
-@admin_required
-def admin_get_unassigned_orders():
-    try:
-        res = supabase.table('order').select(
-            'order_id, total, status, fulfillment_type, date, created_at, address, shipping_fee, '
-            'customer(fname, lname, email, phone_number), '
-            'order_item(order_item_id, product_id, qty, selected_options, product(product_name, image_url))'
-        ).eq('order_type', 'online').is_('branch_id', 'null').order('created_at', desc=False).execute()
-        return jsonify(res.data or []), 200
-    except Exception as e:
-        print(f'Unassigned orders error: {e}')
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/admin/orders/<order_id>/assign-branch', methods=['PUT'])
-@admin_required
-def admin_assign_order_branch(order_id):
-    try:
-        data      = request.get_json()
-        branch_id = data.get('branch_id')
-        if not branch_id:
-            return jsonify({'error': 'branch_id is required.'}), 400
-
-        branch_res = supabase.table('branch').select('branch_id').eq('branch_id', branch_id).execute()
-        if not branch_res.data:
-            return jsonify({'error': 'Branch not found.'}), 404
-
-        order_res = supabase.table('order').select('order_id, order_type, branch_id').eq('order_id', order_id).execute()
-        if not order_res.data:
-            return jsonify({'error': 'Order not found.'}), 404
-        order_row = order_res.data[0]
-        if order_row.get('order_type') != 'online':
-            return jsonify({'error': 'Only online orders can be assigned to a branch here.'}), 400
-        if order_row.get('branch_id'):
-            return jsonify({'error': 'Order already has an assigned branch.'}), 400
-
-        supabase.table('order').update({
-            'branch_id':   branch_id,
-            'assigned_at': datetime.now(timezone.utc).isoformat(),
-            'assigned_by': session.get('staff_id'),
-        }).eq('order_id', order_id).execute()
-
-        return jsonify({'message': 'Order assigned to branch.', 'order_id': order_id, 'branch_id': branch_id}), 200
-    except Exception as e:
-        print(f'Assign order branch error: {e}')
-        return jsonify({'error': str(e)}), 500
-
-# Bulk version (user request, Nov 2026) — same per-order rules as the
-# single-order route above, just applied over a list and tolerant of a
-# partial failure: each order's write is isolated so one bad id can't
-# block the rest, mirroring the bulk-remit/bulk-out-for-delivery pattern
-# already used elsewhere in Orders.
-@app.route('/api/admin/orders/assign-branch-bulk', methods=['POST'])
-@admin_required
-def admin_assign_order_branch_bulk():
-    try:
-        data      = request.get_json()
-        order_ids = data.get('order_ids') or []
-        branch_id = data.get('branch_id')
-        if not branch_id:
-            return jsonify({'error': 'branch_id is required.'}), 400
-        if not order_ids:
-            return jsonify({'error': 'At least one order_id is required.'}), 400
-
-        branch_res = supabase.table('branch').select('branch_id').eq('branch_id', branch_id).execute()
-        if not branch_res.data:
-            return jsonify({'error': 'Branch not found.'}), 404
-
-        updated, skipped = [], []
-        now = datetime.now(timezone.utc).isoformat()
-        staff_id = session.get('staff_id')
-        for order_id in order_ids:
-            try:
-                order_res = supabase.table('order').select('order_id, order_type, branch_id').eq('order_id', order_id).execute()
-                order_row = order_res.data[0] if order_res.data else None
-                if not order_row or order_row.get('order_type') != 'online' or order_row.get('branch_id'):
-                    skipped.append(order_id)
-                    continue
-                supabase.table('order').update({
-                    'branch_id':   branch_id,
-                    'assigned_at': now,
-                    'assigned_by': staff_id,
-                }).eq('order_id', order_id).execute()
-                updated.append(order_id)
-            except Exception as item_err:
-                print(f'Bulk assign branch warning ({order_id}): {item_err}')
-                skipped.append(order_id)
-
-        return jsonify({'message': f'Assigned {len(updated)} order(s).', 'updated': updated, 'skipped': skipped}), 200
-    except Exception as e:
-        print(f'Bulk assign order branch error: {e}')
-        return jsonify({'error': str(e)}), 500
+# Unassigned Orders queue + branch-assignment (admin_get_unassigned_orders,
+# admin_assign_order_branch, admin_assign_order_branch_bulk) — removed
+# entirely, staff rework Nov 2026. Online orders no longer get routed to a
+# branch at all: admin now processes the full online-order lifecycle
+# directly from the Orders module (admin_update_order and friends below),
+# which already deducts from warehouse_stock regardless of branch_id, so
+# nothing about order processing depended on this assignment step — it only
+# ever existed to make an order visible in a branch's staff dashboard, and
+# staff no longer handles online orders at all.
 
 # ─── WAREHOUSE (single online-fulfillment stock pool, revision Nov 2026) ───
 # Owned entirely by admin — mirrors the branch_stock Inventory section's
@@ -5194,20 +5094,138 @@ def admin_adjust_warehouse_stock():
 @app.route('/api/admin/warehouse-pullout', methods=['GET'])
 @admin_required
 def admin_get_warehouse_pullout():
-    """Item Pullout System log — every unit pulled from the warehouse to
-    fulfill an online order (written by _deduct_order_item_stock whenever
-    an order enters processing). Read-only history, newest first."""
+    """Item Pullout System log — every unit leaving the warehouse pool,
+    newest first. Two event types share this log (staff rework, Nov 2026):
+    1) online-order fulfillment pulls (order_id set, written by
+       _deduct_order_item_stock whenever an order enters processing), and
+    2) warehouse→branch stock distribution (to_branch_id set, written by
+       admin_distribute_warehouse_stock below) — admin pushing warehouse
+       stock down into a branch's own branch_stock for walk-in/POS shelf
+       restocking. Read-only history."""
     try:
         limit = request.args.get('limit', default=200, type=int)
         if limit <= 0 or limit > 1000:
             limit = 200
         res = supabase.table('warehouse_pullout').select(
-            'id, order_id, product_id, variant_options, quantity, pulled_by, pulled_at, note, '
-            'product(product_name, image_url), staff(fname, lname), order(status, fulfillment_type, branch_id, branch(branch_name))'
+            'id, order_id, product_id, variant_options, quantity, pulled_by, pulled_at, note, to_branch_id, '
+            'product(product_name, image_url), staff(fname, lname), '
+            'order(status, fulfillment_type, branch_id, branch(branch_name)), '
+            'to_branch:to_branch_id(branch_name)'
         ).order('pulled_at', desc=True).limit(limit).execute()
         return jsonify(res.data or []), 200
     except Exception as e:
         print(f'Warehouse pullout fetch error: {e}')
+        return jsonify({'error': str(e)}), 500
+
+# Warehouse→branch stock distribution (new, staff rework Nov 2026) — admin
+# pushes warehouse_stock down into one branch's branch_stock, for that
+# branch's walk-in/POS shelf. This is the "distribute to branches" half of
+# the rework: purchase orders land in the warehouse first (see the
+# Purchase Orders rework below), and this is how stock then actually
+# reaches a branch from there. Logged into warehouse_pullout (to_branch_id
+# set, order_id left NULL) alongside online-order pulls, and into the
+# general `inventory` audit table on the receiving branch's side, same as
+# any other branch restock.
+@app.route('/api/admin/warehouse-stock/distribute', methods=['POST'])
+@admin_required
+def admin_distribute_warehouse_stock():
+    try:
+        data            = request.get_json()
+        product_id      = data.get('product_id')
+        branch_id       = data.get('branch_id')
+        variant_options = data.get('variant_options') or None
+        qty, qty_err    = _require_int_qty(data.get('quantity', 0), 'Quantity')
+        if qty_err: return qty_err
+        note = data.get('note', '')
+
+        if not product_id or not branch_id:
+            return jsonify({'error': 'Product and branch are required.'}), 400
+        if qty <= 0:
+            return jsonify({'error': 'Quantity must be greater than zero.'}), 400
+
+        branch_res = supabase.table('branch').select('branch_id').eq('branch_id', branch_id).execute()
+        if not branch_res.data:
+            return jsonify({'error': 'Branch not found.'}), 404
+
+        # ── Deduct from the warehouse pool first — block the whole move if
+        # there isn't enough, rather than partially distributing. ──────────
+        if variant_options:
+            all_wvs   = supabase.table('warehouse_variant_stock').select('id, quantity, options').eq('product_id', product_id).execute()
+            wvs_match = [v for v in (all_wvs.data or []) if v.get('options') == variant_options]
+            wh_before = wvs_match[0]['quantity'] if wvs_match else 0
+            if wh_before < qty:
+                return jsonify({'error': f'Only {wh_before} unit(s) of this variant available in the warehouse.'}), 400
+            supabase.table('warehouse_variant_stock').update({
+                'quantity': wh_before - qty, 'updated_at': 'now()'
+            }).eq('id', wvs_match[0]['id']).execute()
+        else:
+            wh_res    = supabase.table('warehouse_stock').select('quantity').eq('product_id', product_id).execute()
+            wh_before = wh_res.data[0]['quantity'] if wh_res.data else 0
+            if wh_before < qty:
+                return jsonify({'error': f'Only {wh_before} unit(s) available in the warehouse.'}), 400
+            supabase.table('warehouse_stock').update({
+                'quantity': wh_before - qty, 'updated_at': 'now()'
+            }).eq('product_id', product_id).execute()
+
+        # ── Add to the destination branch's stock ───────────────────────
+        if variant_options:
+            all_vs   = supabase.table('variant_stock').select('id, quantity, options').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+            vs_match = [v for v in (all_vs.data or []) if v.get('options') == variant_options]
+            if vs_match:
+                supabase.table('variant_stock').update({
+                    'quantity': vs_match[0]['quantity'] + qty, 'updated_at': 'now()'
+                }).eq('id', vs_match[0]['id']).execute()
+            else:
+                supabase.table('variant_stock').insert({
+                    'product_id': product_id, 'branch_id': branch_id, 'options': variant_options, 'quantity': qty,
+                }).execute()
+
+        bs_res     = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).eq('branch_id', branch_id).execute()
+        qty_before = bs_res.data[0]['quantity'] if bs_res.data else 0
+        qty_after  = qty_before + qty
+        if bs_res.data:
+            supabase.table('branch_stock').update({
+                'quantity': qty_after, 'updated_at': 'now()'
+            }).eq('product_id', product_id).eq('branch_id', branch_id).execute()
+        else:
+            supabase.table('branch_stock').insert({
+                'product_id': product_id, 'branch_id': branch_id, 'quantity': qty_after,
+            }).execute()
+
+        # Keep product.quantity in sync with the real branch_stock total,
+        # same fix applied to the other restock endpoints.
+        all_bs = supabase.table('branch_stock').select('quantity').eq('product_id', product_id).execute()
+        total_branch_qty = sum(int(r.get('quantity') or 0) for r in (all_bs.data or []))
+        supabase.table('product').update({'quantity': total_branch_qty}).eq('product_id', product_id).execute()
+
+        # ── Log: warehouse_pullout (the shared Item Pullout Log) + the
+        # general inventory audit trail on the receiving branch's side. ───
+        try:
+            supabase.table('warehouse_pullout').insert({
+                'product_id':      product_id,
+                'variant_options': variant_options,
+                'quantity':        qty,
+                'pulled_by':       session.get('staff_id'),
+                'to_branch_id':    branch_id,
+                'note':            note or 'Distributed from warehouse to branch',
+            }).execute()
+        except Exception as pullout_err:
+            print(f'warehouse_pullout log warning (distribute): {pullout_err}')
+
+        supabase.table('inventory').insert({
+            'product_id':      product_id,
+            'staff_id':        session.get('staff_id'),
+            'quantity_added':  qty,
+            'quantity_before': qty_before,
+            'quantity_after':  qty_after,
+            'to_branch_id':    branch_id,
+            'variant_options': variant_options,
+            'note':            note or 'Warehouse → branch distribution',
+        }).execute()
+
+        return jsonify({'message': 'Stock distributed to branch.'}), 201
+    except Exception as e:
+        print(f'Warehouse distribute error: {e}')
         return jsonify({'error': str(e)}), 500
 
 # ─── CRM: FEEDBACK & INQUIRIES — admin inbox (revision, Nov 2026) ──────
@@ -5270,10 +5288,14 @@ def admin_close_feedback(feedback_id):
         print(f'Admin close feedback error: {e}')
         return jsonify({'error': str(e)}), 500
 
-# ─── RETURNS & REFUNDS — staff/admin review (revision, Nov 2026) ──────
-# @staff_required (not @admin_required): both admin and staff at the
-# fulfilling branch can review a return per the user's decision — staff
-# are scoped to their own branch's orders below, admin sees every branch.
+# ─── RETURNS & REFUNDS — admin-only review (reworked, Nov 2026) ───────
+# Was @staff_required (branch-scoped) under the old "either admin or staff
+# at the fulfilling branch" model. Staff rework removed the whole concept
+# of a return/order having a "fulfilling branch," so review is admin-only
+# now. _return_my_branch() always returns None for an admin session (the
+# role check below), so the branch-scoping it still feeds is inert — kept
+# as-is rather than stripped, since it's harmless and this isn't the place
+# to also chase down every call site.
 def _return_my_branch():
     """None for admin (unrestricted) or a staff account with no branch
     assigned; otherwise that staff's branch_id, used to scope the list/
@@ -5289,7 +5311,7 @@ def _return_order_of(row):
     return (o[0] if o else {}) if isinstance(o, list) else (o or {})
 
 @app.route('/api/staff/returns', methods=['GET'])
-@staff_required
+@admin_required
 def staff_list_returns():
     try:
         status_filter = request.args.get('status')
@@ -5317,7 +5339,7 @@ def staff_list_returns():
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/staff/returns/<return_id>/approve', methods=['PUT'])
-@staff_required
+@admin_required
 def staff_approve_return(return_id):
     try:
         rr_res = supabase.table('return_request').select(
@@ -5434,7 +5456,7 @@ def staff_approve_return(return_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/staff/returns/<return_id>/reject', methods=['PUT'])
-@staff_required
+@admin_required
 def staff_reject_return(return_id):
     try:
         data   = request.get_json(silent=True) or {}
@@ -5466,7 +5488,7 @@ def staff_reject_return(return_id):
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/staff/returns/<return_id>/mark-refunded', methods=['PUT'])
-@staff_required
+@admin_required
 def staff_mark_return_refunded(return_id):
     """Cash-only confirmation step — the GCash path above refunds (and
     flips to 'refunded') automatically on approval; cash has to be handed
@@ -6560,9 +6582,15 @@ def staff_get_orders():
             print(f'Staff orders warning: staff_id={staff_id} has no branch_id assigned — returning empty list instead of all branches.')
             return jsonify([]), 200
 
+        # Staff rework, Nov 2026: staff's Orders module is walk-in/POS
+        # transactions only now — online orders are never branch-assigned
+        # any more (see admin_get_unassigned_orders' removal), so the
+        # .eq('branch_id', ...) filter alone already excludes them. The
+        # explicit .neq('order_type', 'online') is kept anyway as a direct,
+        # readable guarantee rather than relying solely on that invariant.
         query = supabase.table('order').select(
             'order_id, total, status, order_type, is_offline_sync, date, created_at, branch_id, shipping_fee, address, address_note, processing_started_at, dispatch_date, delivery_attempts, branch(branch_name), customer(fname, lname, email, phone_number), staff:staff_id(fname, lname), order_item(order_item_id, product_id, qty, price, returned_qty, selected_options, product(product_name, image_url, image_urls, option_groups, variant_overrides)), payment(payment_method, status, ref_no, sender_number, receipt_image_url)'
-        ).order('created_at', desc=True).limit(limit).eq('branch_id', branch_id)
+        ).order('created_at', desc=True).limit(limit).eq('branch_id', branch_id).neq('order_type', 'online')
 
         import time
         # Retry on Windows socket error
@@ -6747,11 +6775,12 @@ def _check_pos_stock_availability(cart_items, branch_id):
 
 
 # _resolve_order_branch_id() removed (revision, Nov 2026): online orders no
-# longer get auto-assigned a branch at placement. branch_id now stays NULL
-# until admin deliberately assigns one from the Unassigned Orders queue
-# (see admin_assign_order_branch below). Online stock comes from the single
-# warehouse_stock pool, not a branch's branch_stock, so a branch no longer
-# needs to be guessed just to check/deduct stock.
+# longer get auto-assigned a branch at placement. Under the later staff
+# rework (Nov 2026), branch_id now simply stays NULL forever for online
+# orders — there's no assignment step at all any more, admin processes
+# them directly from the Orders module. Online stock comes from the single
+# warehouse_stock pool, not a branch's branch_stock, so a branch was never
+# actually needed just to check/deduct stock.
 
 
 @app.route('/api/staff/orders', methods=['POST'])
@@ -6967,132 +6996,13 @@ def staff_place_order():
         print(traceback.format_exc())
         return jsonify({'error': str(e)}), 500
 
-@app.route('/api/staff/orders/<order_id>', methods=['PUT'])
-@staff_required
-def staff_update_order(order_id):
-    try:
-        data       = request.get_json()
-        status     = data.get('status')
-        # 'completed' deliberately excluded — see the matching comment in
-        # admin_update_order; only the dedicated Remit endpoint may
-        # complete an order.
-        valid_statuses = ['pending', 'processing', 'out_for_delivery', 'not_remitted', 'cancelled', 'returned_failed']
-        if status not in valid_statuses:
-            return jsonify({'error': 'Invalid status. Use the Remit action to complete an order.'}), 400
-
-        # Fetch the order's current state once — same purpose as the admin
-        # route: deciding whether this transition takes stock off the shelf
-        # (pending -> processing, for the first time) or gives it back (an
-        # order that already reached processing -> cancelled/returned_failed).
-        order_res = supabase.table('order').select(
-            'branch_id, order_type, processing_started_at, order_item(product_id, qty, selected_options, product(product_name))'
-        ).eq('order_id', order_id).execute()
-        if not order_res.data:
-            return jsonify({'error': 'Order not found.'}), 404
-        order_row         = order_res.data[0]
-        branch_id         = order_row.get('branch_id')
-        order_type        = order_row.get('order_type', 'walk_in')
-        already_processed = bool(order_row.get('processing_started_at'))
-        order_items       = order_row.get('order_item') or []
-
-        # Branch scoping — same guard staff_return_order_items already has
-        # a few routes down; this route and the two below it (mark-
-        # delivered, mark-not-delivered) never had it, so a staff account
-        # could act on another branch's order just by knowing/guessing its
-        # order_id (final-defense follow-up, Nov 14 2026).
-        #
-        # Revision, Nov 2026: an online order with branch_id still NULL has
-        # not been assigned to any branch yet by admin, so no staff account
-        # should be able to act on it at all — tightened from "only block
-        # if branch_id is set and doesn't match" to "must match exactly,
-        # NULL included," since a staff member guessing an unassigned
-        # order's id used to slip through the old guard.
-        staff_id  = session.get('staff_id')
-        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
-        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
-        if my_branch and branch_id != my_branch:
-            return jsonify({'error': 'This order belongs to a different branch.'}), 403
-
-        # Same daily processing cap enforced here as admin's route/the batch action.
-        if status == 'processing':
-            today_start = datetime.utcnow().strftime('%Y-%m-%dT00:00:00')
-            today_end   = datetime.utcnow().strftime('%Y-%m-%dT23:59:59.999999')
-            used_today_res = supabase.table('order').select('order_id') \
-                .gte('processing_started_at', today_start) \
-                .lte('processing_started_at', today_end).execute()
-            if len(used_today_res.data or []) >= DAILY_PROCESSING_CAP:
-                return jsonify({'error': f'Daily processing cap of {DAILY_PROCESSING_CAP} already reached today.'}), 400
-
-            # Stock is reserved only once an order actually enters
-            # 'processing' — see the matching comment in admin_update_order.
-            if not already_processed:
-                ok, stock_err = _deduct_order_item_stock(order_id, branch_id, order_items, order_type=order_type)
-                if not ok:
-                    return jsonify({'error': stock_err}), 400
-
-        # Update status and assign staff_id if not already set
-        update_data = {'status': status}
-        staff_id = session.get('staff_id')
-        if staff_id:
-            existing = supabase.table('order').select('staff_id').eq('order_id', order_id).execute()
-            if existing.data and not existing.data[0].get('staff_id'):
-                update_data['staff_id'] = staff_id
-
-        # Same auto-advance timer start as the admin route — keeps the lazy
-        # Processing -> Out for Delivery check accurate regardless of which
-        # role moved the order into processing.
-        if status == 'processing':
-            update_data['processing_started_at'] = datetime.utcnow().isoformat()
-
-        # Same "To Dispatch" removal as the admin route (team decision, Oct
-        # 26 2026) — stamp dispatch_date the moment the order becomes
-        # out_for_delivery, here too, so staff's own "Mark Out for Delivery"
-        # button dispatches it directly instead of leaving it in a staging step.
-        if status == 'out_for_delivery':
-            update_data['dispatch_date'] = datetime.utcnow().strftime('%Y-%m-%d')
-
-        supabase.table('order').update(update_data).eq('order_id', order_id).execute()
-
-        # Send push notification to customer
-        try:
-            order_res = supabase.table('order').select(
-                'customer_id, customer(fcm_token, fname)'
-            ).eq('order_id', order_id).execute()
-            if order_res.data:
-                order_data = order_res.data[0]
-                customer   = order_res.data[0].get('customer')
-                if isinstance(customer, list): customer = customer[0] if customer else {}
-                fcm_token  = customer.get('fcm_token') if customer else None
-                fname      = customer.get('fname', 'Customer') if customer else 'Customer'
-                if fcm_token and status in ORDER_STATUS_MESSAGES:
-                    notif_title, notif_body = ORDER_STATUS_MESSAGES[status]
-                    send_push_notification(
-                        fcm_token,
-                        notif_title,
-                        notif_body,
-                        {'order_id': order_id, 'status': status}
-                    )
-        except Exception as notif_err:
-            print(f'Notification error: {notif_err}')
-
-        # If cancelled or returned/failed delivery — return stock to branch,
-        # but ONLY if this order actually reached 'processing' at some point
-        # (already_processed, fetched above). A still-pending order was
-        # never deducted, so cancelling it must NOT add stock back.
-        # (returned_failed here is a safety net for the generic PUT route;
-        # the dedicated not-delivered endpoint below is the normal path and
-        # already does its own restore, so this is a no-op in that case
-        # since the order will already be past 'processing'.)
-        if status in ('cancelled', 'returned_failed') and already_processed:
-            _restore_order_item_stock(
-                order_id,
-                {'branch_id': branch_id, 'order_type': order_type, 'order_item': order_items},
-                'Cancelled' if status == 'cancelled' else 'Returned — failed delivery'
-            )
-
-        return jsonify({'message': f'Order status updated to {status}.'}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
+# staff_update_order (PUT /api/staff/orders/<order_id>) removed — staff
+# rework, Nov 2026. Staff no longer processes online orders at all (that
+# whole lifecycle — pending/processing/out_for_delivery/remit — is now
+# admin-only, via admin_update_order). Walk-in/POS orders are created
+# directly as 'completed' (see staff_place_order) and never pass through
+# this status machine, so removing it changes nothing walk-in staff
+# actually used.
 
 # Staff-side version of the admin return route above — same per-item
 # isolated-write pattern, scoped to orders placed at the staff's own branch.
@@ -7212,185 +7122,12 @@ def staff_return_order_items(order_id):
         return jsonify({'error': str(e)}), 500
 
 # ─── Deliveries (staff) ─────────────────────────────────
-# Branch-scoped mirror of the admin endpoints above — a staff member only
-# ever acts on their own branch's orders.
-# (The old /api/admin|staff/orders/dispatch bulk-dispatch routes were removed
-# Oct 26 2026, along with the "To Dispatch" staging tab they fed — see
-# admin_update_order/staff_update_order, which now stamp dispatch_date the
-# moment an order becomes out_for_delivery instead of requiring a second
-# manual dispatch step.)
-
-@app.route('/api/staff/orders/<order_id>/delivered', methods=['POST'])
-@staff_required
-def staff_mark_delivered(order_id):
-    """Remit action — branch-scoped mirror of admin_mark_delivered above.
-    Every order, GCash or COD, now requires {"amount_remitted": <number>}
-    that matches the order's full total (items + shipping) before it's
-    allowed to complete."""
-    try:
-        data = request.get_json(silent=True) or {}
-        order_res = supabase.table('order').select(
-            'order_id, status, branch_id, total, shipping_fee, payment(payment_method, status)'
-        ).eq('order_id', order_id).execute()
-        if not order_res.data:
-            return jsonify({'error': 'Order not found.'}), 404
-
-        order_data = order_res.data[0]
-        if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
-            return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked delivered.'}), 400
-
-        # Branch scoping — see the matching comment in staff_update_order.
-        # Was `if my_branch and order_data.get('branch_id') and ... != my_branch`
-        # — the extra truthiness check on branch_id let an unassigned
-        # (branch_id=NULL) order slip through uncaught, since `None` is
-        # falsy and short-circuited the whole condition to False. Fixed
-        # (revision, Nov 2026) to match staff_update_order/staff_mark_not_delivered,
-        # which both already check `!= my_branch` unconditionally.
-        staff_id  = session.get('staff_id')
-        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
-        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
-        if my_branch and order_data.get('branch_id') != my_branch:
-            return jsonify({'error': 'This order belongs to a different branch.'}), 403
-
-        ok, err = _validate_remittance(data, order_data)
-        if not ok:
-            return err
-
-        payment = order_data.get('payment')
-        if isinstance(payment, list):
-            payment = payment[0] if payment else None
-        payment_status = (payment or {}).get('status')
-        if payment_status != 'paid':
-            supabase.table('payment').update({'status': 'paid'}).eq('order_id', order_id).execute()
-
-        supabase.table('order').update({
-            'status': 'completed',
-            'completed_at': datetime.now(timezone.utc).isoformat(),
-        }).eq('order_id', order_id).execute()
-        return jsonify({'message': 'Order marked delivered.', 'order_id': order_id}), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/staff/orders/<order_id>/not-delivered', methods=['POST'])
-@staff_required
-def staff_mark_not_delivered(order_id):
-    try:
-        order_res = supabase.table('order').select(
-            'order_id, status, branch_id, order_type, delivery_attempts, order_item(product_id, qty, selected_options)'
-        ).eq('order_id', order_id).execute()
-        if not order_res.data:
-            return jsonify({'error': 'Order not found.'}), 404
-
-        order_data = order_res.data[0]
-        if order_data.get('status') not in ('out_for_delivery', 'not_remitted'):
-            return jsonify({'error': 'Only out-for-delivery (or not-remitted) orders can be marked not delivered.'}), 400
-
-        # Branch scoping — see the matching comment in staff_update_order
-        # (tightened Nov 2026 so an unassigned, branch_id=NULL order isn't
-        # reachable by guessing its id either).
-        staff_id  = session.get('staff_id')
-        staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
-        my_branch = staff_res.data[0]['branch_id'] if staff_res.data else None
-        if my_branch and order_data.get('branch_id') != my_branch:
-            return jsonify({'error': 'This order belongs to a different branch.'}), 403
-
-        attempts = int(order_data.get('delivery_attempts') or 0) + 1
-        attempted_at = datetime.now(timezone.utc).isoformat()
-
-        if attempts >= 3:
-            supabase.table('order').update({
-                'status': 'returned_failed',
-                'delivery_attempts': attempts,
-                'last_attempt_at': attempted_at,
-            }).eq('order_id', order_id).execute()
-            _restore_order_item_stock(order_id, order_data, 'Returned — failed delivery')
-            return jsonify({'message': 'Order returned after 3 failed delivery attempts.', 'delivery_attempts': attempts, 'final': True}), 200
-        else:
-            # Courier-retry model — see admin_mark_not_delivered's comment
-            # for the full reasoning. Reschedules for tomorrow instead of
-            # clearing dispatch_date, so the order reappears in "Out for
-            # Deliveries" automatically once that day arrives.
-            next_dispatch = (datetime.utcnow() + timedelta(days=1)).strftime('%Y-%m-%d')
-            supabase.table('order').update({
-                'delivery_attempts': attempts,
-                'dispatch_date': next_dispatch,
-                'last_attempt_at': attempted_at,
-            }).eq('order_id', order_id).execute()
-            return jsonify({'message': f'Delivery attempt {attempts} of 3 recorded. Retry scheduled for {next_dispatch}.', 'delivery_attempts': attempts, 'final': False, 'next_dispatch': next_dispatch}), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-def _staff_branch_id():
-    staff_id = session.get('staff_id')
-    staff_res = supabase.table('staff').select('branch_id').eq('staff_id', staff_id).execute()
-    return staff_res.data[0]['branch_id'] if staff_res.data else None
-
-@app.route('/api/staff/orders/close-remittance', methods=['POST'])
-@staff_required
-def staff_close_remittance():
-    """Branch-scoped mirror of admin_close_remittance above — closes only
-    the logged-in staff member's own branch."""
-    try:
-        branch_id = _staff_branch_id()
-        if not branch_id:
-            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
-        count = _auto_flag_not_remitted_orders(force=True, branch_id=branch_id)
-        return jsonify({'message': f'Remittance closed. {count} order(s) flagged as not remitted.', 'flagged_count': count}), 200
-    except Exception as e:
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/staff/orders/remit-bulk', methods=['POST'])
-@staff_required
-def staff_remit_bulk():
-    """Branch-scoped mirror of admin_remit_bulk above."""
-    try:
-        branch_id = _staff_branch_id()
-        if not branch_id:
-            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
-        data = request.get_json(silent=True) or {}
-        order_ids = data.get('order_ids', [])
-        if not order_ids:
-            return jsonify({'error': 'At least one order_id is required.'}), 400
-        return jsonify(_bulk_remit_orders(order_ids, branch_id=branch_id)), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/staff/orders/not-delivered-bulk', methods=['POST'])
-@staff_required
-def staff_not_delivered_bulk():
-    """Branch-scoped mirror of admin_not_delivered_bulk above."""
-    try:
-        branch_id = _staff_branch_id()
-        if not branch_id:
-            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
-        data = request.get_json(silent=True) or {}
-        order_ids = data.get('order_ids', [])
-        if not order_ids:
-            return jsonify({'error': 'At least one order_id is required.'}), 400
-        return jsonify(_bulk_not_delivered(order_ids, branch_id=branch_id)), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
-
-@app.route('/api/staff/orders/out-for-delivery-bulk', methods=['POST'])
-@staff_required
-def staff_out_for_delivery_bulk():
-    """Branch-scoped mirror of admin_out_for_delivery_bulk above."""
-    try:
-        branch_id = _staff_branch_id()
-        if not branch_id:
-            return jsonify({'error': 'Your account has no branch assigned — contact an admin.'}), 403
-        data = request.get_json(silent=True) or {}
-        order_ids = data.get('order_ids', [])
-        if not order_ids:
-            return jsonify({'error': 'At least one order_id is required.'}), 400
-        return jsonify(_bulk_mark_out_for_delivery(order_ids, branch_id=branch_id)), 200
-    except Exception as e:
-        import traceback; traceback.print_exc()
-        return jsonify({'error': str(e)}), 500
+# Removed entirely — staff rework, Nov 2026. Online-order delivery/
+# remittance (mark delivered, not delivered, close-remittance, the three
+# bulk actions) is now admin-only; see the matching admin_* routes above.
+# Staff's Orders module is walk-in/POS transactions only now, and those
+# orders are created directly as 'completed' and never enter this
+# delivery/remittance lifecycle, so nothing walk-in-facing used these.
 
 # ─── Staff Inventory ──────────────────────────────────
 

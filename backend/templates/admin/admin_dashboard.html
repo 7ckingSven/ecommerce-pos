@@ -53,7 +53,6 @@
       <a href="#" class="nav-item" onclick="showSection('warehouse', this)" data-tooltip="Warehouse">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 9l9-7 9 7"/><path d="M4 10v10a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1v-6h4v6a1 1 0 0 0 1 1h4a1 1 0 0 0 1-1V10"/></svg>
         <span>Warehouse</span>
-        <span id="warehouseUnassignedBadge" style="display:none;background:#ef4444;color:#fff;border-radius:999px;font-size:10px;padding:1px 6px;margin-left:auto;font-weight:700;"></span>
         <span class="nav-refresh-btn" onclick="event.stopPropagation();forceRefreshSection(this)" title="Refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg></span>
       </a>
       <a href="#" class="nav-item" onclick="showSection('feedback', this)" data-tooltip="Feedback">
@@ -748,80 +747,78 @@
     </section>
 
     <!-- ─── WAREHOUSE SECTION ─────────────────────────────
-         Admin-only (revision, Nov 2026): the single online-fulfillment
-         stock pool, the branch-assignment queue for newly-placed online
-         orders, and the Item Pullout history. Staff never see any of this
-         — their dashboard only ever shows orders already assigned to
-         their own branch (see staff.js's Orders section + task 5's
-         branch-guard fix). -->
+         Admin-only, reworked Nov 2026: purely about warehouse STOCK now.
+         The old Unassigned Orders tab is gone — online orders are never
+         routed to a branch any more; admin processes the full online-order
+         lifecycle directly from the Orders module (orders module now
+         receives both online orders and walk-in transactions). Purchase
+         Orders land here first (see the Purchase Orders module's rework),
+         and "Distribute to Branch" below is how stock actually reaches a
+         branch's own stock afterward — logged into the Item Pullout log
+         alongside online-order pulls. -->
     <section class="section" id="section-warehouse">
       <div class="card">
         <div class="deliv-card-head">
           <h3 class="card-title" style="margin:0;">Warehouse</h3>
           <div class="deliv-tabs">
-            <button id="warehouseTabUnassignedBtn" class="deliv-tab active" onclick="switchWarehouseTab('unassigned')">Unassigned Orders</button>
-            <button id="warehouseTabStockBtn" class="deliv-tab" onclick="switchWarehouseTab('stock')">Warehouse Stock</button>
+            <button id="warehouseTabStockBtn" class="deliv-tab active" onclick="switchWarehouseTab('stock')">Warehouse Stock</button>
             <button id="warehouseTabPulloutBtn" class="deliv-tab" onclick="switchWarehouseTab('pullout')">Item Pullout Log</button>
           </div>
         </div>
 
-        <!-- Unassigned Orders: online orders with branch_id = NULL. Admin's
-             job is to look at each one and decide which branch fulfills
-             it — the "system decision making" the panel asked about is
-             this manual review step, not an automated algorithm, per the
-             team's own discussion of the revision. -->
-        <div id="warehouseUnassignedPanel" style="padding:1rem;">
-          <p style="font-size:12px;color:var(--text-muted);margin:0 0 10px;">
-            Online orders placed by customers, not yet routed to a branch. Assign each one to the branch that will fulfill and deliver (or hand off for pickup) it — it then appears in that branch's own Orders/Deliveries, same as any other order. Select several to assign them all to the same branch at once.
-          </p>
-          <div class="deliv-panel-toolbar" style="margin-bottom:8px;">
-            <span style="font-size:11px;color:var(--text-muted);"><span id="warehouseBulkSelectedCount">0</span> selected</span>
-            <button class="btn btn-solid-green" id="warehouseBulkAssignBtn" disabled style="opacity:0.45;cursor:not-allowed;" onclick="openBulkAssignBranchModal()">Assign Selected to Branch</button>
-          </div>
-          <div class="table-wrap">
-            <table class="data-table">
-              <thead>
-                <tr>
-                  <th style="width:32px;"><input type="checkbox" id="warehouseSelectAllCb" onchange="toggleAllWarehouseSelections(this)"/></th>
-                  <th>Order ID</th><th>Customer</th><th>Items</th><th>Total</th><th>Fulfillment</th><th>Placed</th><th>Actions</th>
-                </tr>
-              </thead>
-              <tbody id="warehouseUnassignedBody"><tr><td colspan="8" class="table-empty">Loading...</td></tr></tbody>
-            </table>
-          </div>
-          <div id="warehouseUnassignedPagination"></div>
-        </div>
-
         <!-- Warehouse Stock: the single online-fulfillment pool, shared by
              every branch. Separate from each branch's own branch_stock
-             (still shown in the Inventory section for walk-in POS). -->
-        <div id="warehouseStockPanel" style="padding:1rem;display:none;">
+             (still shown in the Inventory section for walk-in POS).
+             Purchase Orders land here first now; "Distribute to Branch"
+             is how it then reaches a branch. -->
+        <div id="warehouseStockPanel" style="padding:1rem;">
           <div class="deliv-panel-toolbar">
-            <span style="font-size:11px;color:var(--text-muted);">Stock here backs the mobile app's product listings — it's independent of any branch's own walk-in stock.</span>
+            <span style="font-size:11px;color:var(--text-muted);">Stock here backs the mobile app's product listings, and is where received Purchase Orders land first. Independent of any branch's own walk-in stock until distributed. Same stock-level detail as the branch Inventory view — just one combined pool instead of one card per branch.</span>
             <div style="display:flex;gap:8px;">
               <button class="btn btn-solid-green" onclick="openWarehouseAdjustModal()">Adjust Stock</button>
+              <button class="btn btn-solid-amber" onclick="openWarehouseDistributeModal()">Distribute to Branch</button>
+            </div>
+          </div>
+          <div class="card-header" style="flex-wrap:wrap;gap:8px;padding:0 0 0.75rem;border:none;">
+            <div style="display:flex;align-items:center;gap:8px;margin-left:auto;">
+              <select class="filter-select" id="warehouseStockLevelFilter" onchange="filterWarehouseStockLevel(this.value)" style="font-size:12px;">
+                <option value="">All Stock Levels</option>
+                <option value="critical_stock">🔴 Critical Level (≤5)</option>
+                <option value="low_stock">🟡 Low Stock (6–10)</option>
+                <option value="out_of_stock">⚫ Out of Stock</option>
+              </select>
+              <div class="search-wrap" style="max-width:260px;">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;flex-shrink:0;color:var(--text-muted);"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                <input type="text" id="warehouseStockSearchInput" class="search-input" placeholder="Search products..." onkeydown="if(event.key==='Enter') filterWarehouseStock(this.value)" oninput="this.nextElementSibling.style.display=this.value?'flex':'none'; if(!this.value) filterWarehouseStock('')" style="font-size:12px;"/>
+                <button type="button" class="search-clear-btn" onclick="this.previousElementSibling.value='';this.style.display='none';filterWarehouseStock('');this.previousElementSibling.focus();">✕</button>
+                <button class="search-btn" onclick="filterWarehouseStock(document.getElementById('warehouseStockSearchInput').value)">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+                  Search
+                </button>
+              </div>
             </div>
           </div>
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Product</th><th>Category</th><th>Quantity</th><th>Variants</th><th>Updated</th></tr>
+                <tr><th style="width:28px;"></th><th>Product</th><th>Category</th><th style="text-align:center;">Stock</th><th>Status</th><th>Updated</th></tr>
               </thead>
-              <tbody id="warehouseStockBody"><tr><td colspan="5" class="table-empty">Loading...</td></tr></tbody>
+              <tbody id="warehouseStockBody"><tr><td colspan="6" class="table-empty">Loading...</td></tr></tbody>
             </table>
           </div>
           <div id="warehouseStockPagination"></div>
         </div>
 
-        <!-- Item Pullout Log: every unit pulled from the warehouse to
-             fulfill an online order (written automatically once an order
-             enters processing — see _deduct_order_item_stock in app.py).
-             Read-only history. -->
+        <!-- Item Pullout Log: every unit leaving the warehouse pool — both
+             online-order fulfillment pulls (written automatically once an
+             order enters processing — see _deduct_order_item_stock in
+             app.py) and warehouse → branch distributions (written by the
+             Distribute to Branch action above). Read-only history. -->
         <div id="warehousePulloutPanel" style="padding:1rem;display:none;">
           <div class="table-wrap">
             <table class="data-table">
               <thead>
-                <tr><th>Date</th><th>Order</th><th>Product</th><th>Variant</th><th>Qty</th><th>Pulled By</th><th>Note</th></tr>
+                <tr><th>Date</th><th>Order / Branch</th><th>Product</th><th>Variant</th><th>Qty</th><th>By</th><th>Note</th></tr>
               </thead>
               <tbody id="warehousePulloutBody"><tr><td colspan="7" class="table-empty">Loading...</td></tr></tbody>
             </table>

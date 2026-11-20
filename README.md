@@ -9,7 +9,7 @@ A capstone project built for **Triple E and Fiel Collins General Merchandise** �
 
 This system serves three types of users:
 
-- **Admin (Web — Desktop)** — Full control over products, inventory, discounts, purchase orders, users, sales reports, and audit trail.
+- **Admin (Web — Desktop)** — Full control over products, inventory, the central warehouse pool and online fulfillment, discounts, purchase orders, users, sales reports, customer returns/refunds, feedback & inquiries, and audit trail.
 - **Staff (Web — Desktop)** — Manages POS checkout, inventory (including branch transfers and stock requests), discounts, and sales reports.
 - **Customers (Mobile — Android)** — Browse products, place orders, manage cart, track order status, and view order history.
 
@@ -33,6 +33,8 @@ This system serves three types of users:
 - **Mark as Order Received** button (appears when status is Out for Delivery)
 - **Buy Again** — on a completed order, re-fetches the item fresh (current price/stock/discount, not the order's stale snapshot) and opens it; a multi-item order opens a picker to choose which product
 - **Dark mode** — System / Light / Dark toggle (Profile → Appearance), applied app-wide and persisted across restarts
+- **Post-delivery returns & refunds** — request a return on a `completed` order within a 12-hour window, per item; refund method mirrors how the order was paid (GCash auto-reversed via PayMongo, cash confirmed by staff/admin on handoff); tracks pending/approved/rejected/refunded status
+- **Feedback & Inquiries** — submit feedback or a question to the store, with reply history
 - Order history with full detail: branch, address, selected options, images, PayMongo reference for GCash orders
 - **Auto-refresh every 10 seconds** on Home and Orders screens
 - Forgot password via OTP (email)
@@ -44,10 +46,13 @@ This system serves three types of users:
 - **Dashboard drill-down** — every stat card on the main dashboard is clickable, jumping straight into the matching filtered view (or branch highlight) instead of being a static number
 - **Product Management** — Add, edit, deactivate products with multiple images and option groups (variants). Image upload optional. **Sub-category** field under Category, and products priced with a **Base Price** (cost) and **Resale Price**, with Base Price auto-filling PO Unit Cost. Net Weight and Status are deferred — hidden at creation, only required/editable once the product exists via Edit; products missing a net weight are flagged in the table. **Per-choice and per-combo price/image overrides** on variant products. **Price Change History** — every resale-price edit is logged; view the full history for one product or across all products from a "Price History" button.
 - **Barcode Generation** — auto-generates a 12-digit numeric barcode per product, plus distinct barcodes per variant choice and per variant combination; generate/print from the Products table or Inventory, with a styled confirmation modal for bulk generation.
-- **Inventory Management** — Branch stock summary (side-by-side per branch, with a per-row **Generate PO** quick action on critical/out-of-stock items), stock movement history (date **and** time), add stock, transfer, adjust stock, process returns on completed orders, generate/print barcodes. Low stock alert banner.
+- **Inventory Management** — Branch stock summary (side-by-side per branch, with a per-row **Generate PO** quick action on critical/out-of-stock items), stock movement history (date **and** time), add stock, transfer, adjust stock, process returns on completed orders, generate/print barcodes. Low stock alert banner. This is the **staff POS / walk-in** stock — separate from the Warehouse pool below, which backs the mobile app.
+- **Warehouse** *(revision, Nov 2026)* — The central, branch-independent stock pool that backs the mobile app's product listings and online orders. **Warehouse Stock** tab: same level of detail as the branch Inventory view (product image, color-coded stock-level badge, expandable per-variant breakdown, search/filter) but as one combined pool instead of per-branch cards; **Adjust Stock** action for manual restocks/corrections; **Distribute to Branch** pushes a chosen quantity from the warehouse down into a specific branch's own stock. **Item Pullout Log** tab — read-only trail of every unit leaving the warehouse, whether pulled to fulfill an online order or pushed out via Distribute to Branch. Purchase Orders now land here first (see PO below), not directly into a branch.
 - **Discount Management** — Create/edit discounts with start and end dates, countdown status badges, assign to products with branch filter, remove discounts. Products with discounts table.
-- **Purchase Order (PO)** — Create POs (auto-fillable from approved stock requests via **Use Approved Requests**, or in bulk per supplier via Inventory's "Generate PO for Selected"), with a color-coded stock-level tag (OUT OF STOCK/CRITICAL/LOW/OK) per item instead of Unit Cost/Supplier entry at this stage. **Unit Cost and Supplier are now entered at Receive & Distribute time, per line item** — not at creation — since a single PO can source different products from different suppliers; Supplier is a dropdown-with-free-text field backed by prior supplier names. Mark as Ordered/Received with **partial-receive support** (status reflects actual received quantities), **digital receipt** generated after creation and after each receive. A search box (PO #/note/ID) and **View All** button sit on the toolbar alongside the status/date filters.
-- **Orders** — Full order detail modal: product images, selected options, branch name, delivery address, delivery landmark/notes, customer phone, shipping fee. GCash orders show the **PayMongo Reference** and a verified **Paid** status. **Notification bell** in the topbar (live/actionable list — pending orders, stock requests, incoming transfers, stock alerts, orders awaiting Remit, new Returned/Failed) with a badge count and toast on new items. Auto-advance **Pending → Processing** within 30 minutes (plus a per-order **Process Now** bypass), automatic **Processing → Out for Delivery** after 1 day, and a **Deliveries** card (To Dispatch / Scheduled for Retry / Out for Deliveries tabs) where a **Remit** action (typed amount must match the order total) replaces the old plain Delivered button for every order, GCash and COD alike — plus **Bulk Remit** and **Bulk Not Delivered** for multi-selected orders. A non-final failed delivery reschedules the order to the next day (courier retries, doesn't return to To Dispatch); the 3rd failure marks it Returned/Failed and restores stock. Orders still out for delivery past 5:00 PM (Manila time) auto-flag as **Not Remitted** and stay actionable the next day. An **Expected vs Remitted** summary strip plus Delivered/Failed-Attempts/Returned-Failed "Today" tabs round out the Deliveries card.
+- **Purchase Order (PO)** — Create POs (auto-fillable from approved stock requests via **Use Approved Requests**, or in bulk per supplier via Inventory's "Generate PO for Selected"), with a color-coded stock-level tag (OUT OF STOCK/CRITICAL/LOW/OK) per item instead of Unit Cost/Supplier entry at this stage. **Unit Cost and Supplier are now entered at Receive & Distribute time, per line item** — not at creation — since a single PO can source different products from different suppliers; Supplier is a dropdown-with-free-text field backed by prior supplier names. **Received stock now lands in the Warehouse pool first** *(revision, Nov 2026)* — reaching a specific branch's shelf afterward via the Warehouse module's Distribute to Branch action, rather than splitting straight to branches at receive time. Mark as Ordered/Received with **partial-receive support** (status reflects actual received quantities), **digital receipt** generated after creation and after each receive. A search box (PO #/note/ID) and **View All** button sit on the toolbar alongside the status/date filters.
+- **Orders** *(online orders are admin-only, revision Nov 2026 — see Staff section)* — Full order detail modal: product images, selected options, branch name, delivery address, delivery landmark/notes, customer phone, shipping fee. GCash orders show the **PayMongo Reference** and a verified **Paid** status. **Notification bell** in the topbar (live/actionable list — pending orders, stock requests, incoming transfers, stock alerts, orders awaiting Remit, new Returned/Failed) with a badge count and toast on new items. Auto-advance **Pending → Processing** within 30 minutes (plus a per-order **Process Now** bypass), automatic **Processing → Out for Delivery** after 1 day, and a **Deliveries** card (To Dispatch / Scheduled for Retry / Out for Deliveries tabs) where a **Remit** action (typed amount must match the order total) replaces the old plain Delivered button for every order, GCash and COD alike — plus **Bulk Remit** and **Bulk Not Delivered** for multi-selected orders. A non-final failed delivery reschedules the order to the next day (courier retries, doesn't return to To Dispatch); the 3rd failure marks it Returned/Failed and restores stock (to the Warehouse pool for an online order). Orders still out for delivery past 5:00 PM (Manila time) auto-flag as **Not Remitted** and stay actionable the next day. An **Expected vs Remitted** summary strip plus Delivered/Failed-Attempts/Returned-Failed "Today" tabs round out the Deliveries card.
+- **Customer Returns & Refunds** *(revision, Nov 2026)* — Review customer-submitted return requests (12-hour post-delivery window), approve (auto-refunds GCash via PayMongo, or marks a cash refund once physically handed back) or reject with a reason shown to the customer. Separate from the Inventory module's direct per-item "Process Return" on a completed order, which has no request/approval step.
+- **Feedback & Inquiries** *(revision, Nov 2026)* — Review and respond to customer-submitted feedback/inquiries from the mobile app; mark resolved.
 - **User Management** — Manage Admin and Staff accounts, with each staff row showing their assigned **branch** directly in the table. **Login Activity** — audit trail of every admin/staff login/logout.
 - **Sales Report** — Sales analytics, revenue breakdown, walk-in vs online orders, plus a filterable **stock movement history** table (type, date range, branch) with Excel export.
 - **Stock Requests** — Review and batch-approve/reject staff stock requests (multi-item submissions grouped into one row with variant/branch/requester detail), with a shared daily PO auto-fill path.
@@ -58,17 +63,18 @@ This system serves three types of users:
 ### Staff (Web System)
 - **POS (Sales Management)** — Process walk-in orders, GCash (via PayMongo QR, server-verified) or cash payment, **VAT-inclusive receipt** (12%) with print support. Button disabled while processing. Cart quantity is **directly editable** (typed, stock-clamped), and a dedicated **USB barcode scanner** input (keyboard-wedge, auto-focused on the POS tab) adds products straight to cart, including variant products — working online or offline. Scanning a variant's own barcode preselects that exact variant.
 - **Inventory Management** — View branch-specific stock, submit stock requests to admin — auto-filled from the triggering critical/out-of-stock product, including every critical variant in one batch submission; bulk row-select with **Request Stock for Selected**. **Generate/print barcodes** — same access as Admin, so a variant/label can be (re)printed without needing an admin on hand. **Transfer Stock** to the other branch — requires that branch's own staff to approve before stock numbers move; an **Incoming Transfers** table (Approve/Reject) and **Outgoing Transfers** table (Cancel, while still pending) track both directions.
-- **Orders** — View online customer orders with full detail modal (product images, selected options, branch, delivery address, landmark/notes, customer phone). GCash orders show the **PayMongo Reference** and a verified **Paid** status. Same **notification bell**, Process Now, Deliveries card (To Dispatch / Scheduled for Retry / Out for Deliveries), Remit/Bulk Remit/Bulk Not Delivered, Not Remitted auto-flag, and Expected-vs-Remitted summary as Admin, scoped to the staff member's own branch.
 - **Sales Summary** — View daily/weekly sales with walk-in and online breakdown.
 - **Confirmation dialogs** — A confirm-before-save/process step on every create/edit/process action, including POS checkout (cash and GCash).
+
+> **Scope change (revision, Nov 2026):** online orders, the Warehouse module, customer returns/refunds, and Feedback & Inquiries are now **admin-only** — the Staff dashboard no longer has online-order action UI or a Returns module; Staff's Orders/Deliveries workflow above was walk-in to begin with and is unaffected. Staff still submits stock requests and handles branch-to-branch transfers as before.
 
 ### System-Wide
 - Unified login for all users — specific error messages (user not found vs wrong password)
 - **Multi-Factor Authentication (MFA) on web login** — an unrecognized browser must verify a 6-digit email code before admin/staff login completes; that browser is then trusted going forward
 - **Logout hardening** — Back/Forward navigation after logout cannot replay a cached dashboard; always lands back on login
 - Role-based dashboard routing (Admin / Staff / Customer)
-- Branch-based product visibility — controlled by branch stock (no `available_at` field)
-- **Stock is deducted only when an order enters Processing** (not at checkout/Pending), with the transition blocked if stock has since run out
+- **Two independent stock pools** *(revision, Nov 2026)* — mobile/online product visibility is controlled by the central **Warehouse** pool (`warehouse_stock`/`warehouse_variant_stock`), never branch stock; staff POS/walk-in visibility is controlled by **branch stock** as before. `available_at` and `cart.branch_id` are both unused/deprecated now
+- **Stock is deducted only when an order enters Processing** (not at checkout/Pending), with the transition blocked if stock has since run out — from the Warehouse pool for an online order, from branch stock for a walk-in order
 - **Critical-stock reserve buffer** — a product/variant at or below the ≤5-unit critical threshold is hidden from POS and the mobile app and can't be added to a sale/cart, so stock is never sold down to literally zero
 - Auto-refresh: 5 seconds (web) / 10 seconds (mobile)
 - Buttons disabled while processing to prevent duplicate submissions
@@ -205,7 +211,7 @@ ecommerce-pos/
 | `/api/auth/check-duplicate` | POST | Check if email/username/phone is taken |
 | `/api/forgot-password` | POST | Request OTP for password reset |
 | `/api/verify-otp-mobile` | POST | Verify OTP and reset password |
-| `/api/products` | GET | Get active products (expanded by branch stock) |
+| `/api/products` | GET | Get active products — one card per product, backed by the central Warehouse pool *(revision, Nov 2026; previously expanded by branch stock)* |
 | `/api/products/<id>` | GET | Get single product detail |
 | `/api/cart` | GET/POST | Get or add to cart |
 | `/api/cart/<id>` | PUT/DELETE | Update or remove cart item |
@@ -215,6 +221,8 @@ ecommerce-pos/
 | `/api/orders/paymongo/gcash/status/<payment_intent_id>` | GET | Poll a Payment Intent's status (used while the GCash WebView is open) |
 | `/api/customer/fcm-token` | POST | Save/update the customer's Firebase Cloud Messaging device token |
 | `/api/profile` | GET/PUT | Get or update customer profile |
+| `/api/returns` | POST | *(Nov 2026)* Submit a post-delivery return request for a `completed` order (12-hour window) |
+| `/api/feedback` | GET/POST | *(Nov 2026)* Get own feedback/inquiry history, or submit a new one |
 
 ---
 
@@ -246,17 +254,23 @@ This project uses **Supabase (PostgreSQL)**.
 | `stock_request` | Staff stock requests to admin — batch-submittable (`batch_id`) with admin notes and PO-conversion tracking |
 | `stock_transfer` | Staff-initiated branch-to-branch transfer requests, requiring the destination branch's approval before stock moves |
 | `purchase_order` | Admin purchase orders to suppliers — status reflects partial vs full receiving; its own `supplier` column is now legacy (see `po_item.supplier`) |
-| `po_item` | Items per purchase order, with cumulative `received_quantity` for partial receives, plus per-line-item `unit_cost`, `supplier`, and `requesting_branch_id` (all entered/set at receive time) |
+| `po_item` | Items per purchase order, with cumulative `received_quantity` for partial receives, plus per-line-item `unit_cost`, `supplier` (all entered/set at receive time). `requesting_branch_id` is now historical/reference only — every received line lands in the Warehouse pool first, regardless |
 | `otp_codes` | OTP tokens for mobile password reset |
+| `warehouse_stock` | *(Nov 2026)* Central online-fulfillment stock pool — one row per product, no branch split. Backs mobile-app visibility and online orders |
+| `warehouse_variant_stock` | *(Nov 2026)* Variant-level counterpart to `warehouse_stock` |
+| `warehouse_pullout` | *(Nov 2026)* Trail of every unit leaving the warehouse pool — online-order fulfillment pulls and admin's Distribute-to-Branch pulls alike |
+| `return_request` / `return_request_item` | *(Nov 2026)* Customer-initiated post-delivery return/refund requests (12-hour window), reviewed by admin/staff at the fulfilling branch — separate from the admin/staff direct per-item "Process Return" |
+| `feedback` | *(Nov 2026)* Customer feedback/inquiries submitted from the mobile app, reviewed by admin |
 
 ### Key Business Rules
-- **Branch stock controls visibility** — products only show on the app if the branch has stock > 0
+- **Two stock pools, Nov 2026 revision** — mobile/online visibility and online-order fulfillment read `warehouse_stock`/`warehouse_variant_stock` only; staff POS/walk-in reads `branch_stock`/`variant_stock` only, unaffected
 - **VAT Inclusive (12%)** — applied on POS walk-in receipts
 - Payment methods: **GCash** (verified via a PayMongo Payment Intent — no manual reference entry) or **walk-in cash**
 - **Shipping fee** — 4-zone model (South Cotabato free / Region XII / rest of Mindanao mainland / Luzon-Visayas), each with an under-500g flat rate and a weight-based rate beyond that; computed server-side, mirrored client-side
-- Order statuses: `pending` → `processing` → `out_for_delivery` → (`not_remitted` if unresolved past 5pm Manila time) → `completed` (Remit) or `returned_failed` (3rd failed attempt); `cancelled` before dispatch. ⚠️ `returned_failed`/`not_remitted` are not yet accepted by the live `order.status` database constraint — see `DATABASE.md`
-- **Stock timing** — stock is deducted only once an order enters `processing`, not at checkout; a critical-stock (≤5 units) reserve buffer keeps a product from being sold down to zero
-- **Returns** — a completed order's items can be returned individually (up to the remaining un-returned quantity), which restores stock and logs an `inventory` row distinct from a sale or cancellation
+- Order statuses: `pending` → `processing` → `out_for_delivery` → (`not_remitted` if unresolved past 5pm Manila time) → `completed` (Remit) or `returned_failed` (3rd failed attempt); `cancelled` before dispatch
+- **Stock timing** — stock is deducted only once an order enters `processing`, not at checkout (from the Warehouse pool for online, branch stock for walk-in); a critical-stock (≤5 units) reserve buffer keeps a product from being sold down to zero
+- **Returns, two paths** — (1) admin/staff direct per-item return on a `completed` order (no approval step, unchanged); (2) customer-initiated return request from the mobile app (12-hour window, admin/staff-at-branch approval, refund mirrors the original payment method, stock always restores to the Warehouse pool)
+- **Purchase Orders land in the Warehouse first** — receiving no longer splits straight to branches; admin's Distribute to Branch action is the separate step that pushes warehouse stock down into a branch afterward
 - **Stock requests** — staff submissions auto-fill from critical/out-of-stock levels (every critical variant in one batch); admin can batch-approve/reject and pull approved requests straight into a PO draft
 - **Stock transfer (staff-to-staff)** — a source branch's request only moves stock once the destination branch approves it (re-checked against live stock at approval time); the source branch can cancel its own pending request
 - **PO Unit Cost & Supplier** — entered per line item at Receive & Distribute time (not at PO creation), since one PO can source items from different suppliers

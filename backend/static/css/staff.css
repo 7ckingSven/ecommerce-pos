@@ -35,7 +35,7 @@
 }
 .pos-search-wrap:focus-within {
   border-color: var(--g-600);
-  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+  box-shadow: 0 0 0 3px rgba(111,196,149,0.15);
 }
 
 /* ─── Barcode Scanner Input ───
@@ -46,11 +46,11 @@
 .pos-barcode-wrap {
   border-style: dashed;
   border-color: var(--g-600);
-  background: rgba(22,163,74,0.05);
+  background: rgba(39,122,82,0.05);
   transition: background 0.15s, border-color 0.15s;
 }
-.pos-barcode-wrap--hit  { background: rgba(22,163,74,0.18) !important; }
-.pos-barcode-wrap--miss { background: rgba(239,68,68,0.14) !important; border-color: #ef4444 !important; }
+.pos-barcode-wrap--hit  { background: rgba(39,122,82,0.18) !important; }
+.pos-barcode-wrap--miss { background: rgba(204,79,79,0.14) !important; border-color: #cc4f4f !important; }
 
 /* ─── Category Tabs ───
    Redesigned from pill chips to a tab bar: a continuous bottom border runs
@@ -90,8 +90,8 @@
   flex-shrink: 0;
   margin-bottom: -1.5px; /* overlaps the row's own bottom border */
 }
-.pos-cat:hover { color: var(--g-400); background: rgba(22,163,74,0.06); }
-.pos-cat.active { color: var(--g-400); border-bottom-color: var(--g-600); background: rgba(22,163,74,0.08); }
+.pos-cat:hover { color: var(--g-400); background: rgba(39,122,82,0.06); }
+.pos-cat.active { color: var(--g-400); border-bottom-color: var(--g-600); background: rgba(39,122,82,0.08); }
 
 /* ─── Category Tabs — sub-category flyout ───
    Only the category level shows in the row; hovering (or tapping, via
@@ -142,7 +142,7 @@
   white-space: nowrap;
   transition: all 0.15s;
 }
-.pos-subcat-item:hover { background: rgba(22,163,74,0.1); color: var(--g-400); }
+.pos-subcat-item:hover { background: rgba(39,122,82,0.1); color: var(--g-400); }
 .pos-subcat-item.active { background: var(--g-600); color: #ffffff; }
 
 /* ─── Product Grid ─── */
@@ -185,11 +185,11 @@
 .pos-product-card.critical-stock {
   opacity: 0.75;
   cursor: not-allowed;
-  border-color: #f59e0b;
+  border-color: #c6872e;
 }
 .pos-product-card.out-of-stock:hover,
 .pos-product-card.critical-stock:hover {
-  border-color: #f59e0b;
+  border-color: #c6872e;
   transform: none;
   box-shadow: none;
 }
@@ -364,7 +364,7 @@
 .pos-qty-input:focus {
   border-color: var(--g-600);
   outline: none;
-  box-shadow: 0 0 0 3px rgba(74,222,128,0.15);
+  box-shadow: 0 0 0 3px rgba(111,196,149,0.15);
 }
 .pos-remove-btn {
   background: none;
@@ -376,7 +376,7 @@
   transition: all 0.2s;
   display: flex;
 }
-.pos-remove-btn:hover { color: #ef4444; background: rgba(239,68,68,0.1); }
+.pos-remove-btn:hover { color: #cc4f4f; background: rgba(204,79,79,0.1); }
 
 /* ─── Summary ─── */
 .pos-summary {
@@ -439,7 +439,7 @@
   transition: all 0.2s;
 }
 .pos-pay-btn:hover { border-color: var(--g-600); color: var(--g-400); }
-.pos-pay-btn.active { background: rgba(22,163,74,0.12); border-color: var(--g-600); color: var(--g-400); }
+.pos-pay-btn.active { background: rgba(39,122,82,0.12); border-color: var(--g-600); color: var(--g-400); }
 .pos-pay-btn:disabled, .pos-pay-btn:disabled:hover { border-color: var(--border); color: var(--text-muted); }
 .pos-refno, .pos-cash-input { display: flex; flex-direction: column; gap: 6px; }
 
@@ -448,9 +448,9 @@
   display: flex;
   align-items: center;
   gap: 10px;
-  background: rgba(245,158,11,0.12);
-  border: 1px solid rgba(245,158,11,0.4);
-  color: #b45309;
+  background: rgba(198,135,46,0.12);
+  border: 1px solid rgba(198,135,46,0.4);
+  color: #7f561d;
   border-radius: var(--radius-sm);
   padding: 10px 16px;
   margin-bottom: 1rem;
@@ -458,13 +458,13 @@
   font-weight: 500;
 }
 .pos-offline-banner--syncing {
-  background: rgba(22,163,74,0.10);
-  border-color: rgba(22,163,74,0.35);
-  color: var(--g-700, #15803d);
+  background: rgba(39,122,82,0.10);
+  border-color: rgba(39,122,82,0.35);
+  color: var(--g-700, #1f6342);
 }
 .pos-offline-banner-text { flex: 1; }
 .pos-offline-pending-count {
-  background: #b45309;
+  background: #7f561d;
   color: #fff;
   border-radius: 999px;
   font-size: 11px;
@@ -750,7 +750,7 @@
 .pos-discount-trigger:hover { border-color: var(--g-600); }
 .pos-discount-wrap.open .pos-discount-trigger {
   border-color: var(--g-600);
-  box-shadow: 0 0 0 3px rgba(22,163,74,0.12);
+  box-shadow: 0 0 0 3px rgba(39,122,82,0.12);
 }
 
 .pos-discount-trigger-left {
@@ -767,7 +767,7 @@
   width: 24px;
   height: 24px;
   border-radius: 6px;
-  background: rgba(22,163,74,0.1);
+  background: rgba(39,122,82,0.1);
   color: var(--g-600);
   flex-shrink: 0;
 }
@@ -820,7 +820,7 @@
 }
 .pos-discount-option:last-child { border-bottom: none; }
 .pos-discount-option:hover { background: var(--hover); }
-.pos-discount-option.active { background: rgba(22,163,74,0.08); }
+.pos-discount-option.active { background: rgba(39,122,82,0.08); }
 
 .pos-discount-option-none .pos-discount-opt-name {
   color: var(--text-muted);
@@ -850,7 +850,7 @@
 .pos-discount-badge {
   padding: 2px 8px;
   border-radius: 999px;
-  background: rgba(22,163,74,0.12);
+  background: rgba(39,122,82,0.12);
   color: var(--g-400);
   font-size: 11px;
   font-weight: 700;

@@ -168,8 +168,7 @@ window.changeStaffInvPage    = changeStaffInvPage;
 const pageTitles = {
   pos:       ['Point of Sale',    'Process walk-in customer orders'],
   inventory: ['Inventory',        'View branch stock levels'],
-  orders:    ['Orders',           'Manage online customer orders'],
-  returns:   ['Returns & Refunds','Review and resolve customer return requests for your branch'],
+  orders:    ['Orders',           'Monitor walk-in POS transactions for your branch'],
   requests:  ['Stock Requests',   'Request stock from admin'],
   summary:   ['Sales Summary',    'View sales performance'],
   profile:   ['My Profile',       'View and update your account information'],
@@ -339,7 +338,8 @@ const SSE_TABLE_SECTIONS = {
   order:          ['orders', 'summary', 'pos'],
   inventory:      ['inventory', 'pos', 'summary'],
   product:        ['pos', 'inventory'],
-  return_request: ['returns'],
+  // return_request -> ['returns'] removed (staff rework, Nov 2026) — the
+  // Returns section no longer exists on staff; return review is admin-only.
 };
 const LIVE_UPDATES_POLL_MS = 8000;
 let _liveUpdatesCursor = 0;
@@ -436,9 +436,9 @@ function goToNotifSection(section, type) {
   const dd = document.getElementById('notifDropdown');
   if (dd) dd.style.display = 'none';
   showSection(section, null);
-  // Delivery items live inside Orders, under the Deliveries card's own
-  // tabs — jump straight to the right tab, not just the section.
-  if (type === 'out_for_delivery') staffSwitchDeliveriesTab('today');
+  // 'out_for_delivery' notification items/the Deliveries card's tabs were
+  // removed from staff entirely (staff rework, Nov 2026) — that lifecycle
+  // is admin-only now, so there's no tab left here to jump to.
 }
 
 async function loadNotifications() {
@@ -539,7 +539,6 @@ var loaders = {
   pos:       loadPosProducts,
   inventory: loadInventory,
   orders:    loadOrders,
-  returns:   loadReturns,
   summary:   loadSummary,
   requests:  loadRequests,
   profile:   loadProfile,
@@ -3150,11 +3149,14 @@ function renderInvHistory(data) {
 // contained and low-risk to add.
 async function refreshStaffNavBadges() {
   try {
-    const [productsRaw, orders, requestsRaw, pendingReturns] = await Promise.all([
+    // Returns badge/fetch removed (staff rework, Nov 2026) — return review
+    // is admin-only now; /api/staff/returns is @admin_required, so staff
+    // fetching it would just get an auth error for no reason. Orders badge/
+    // fetch removed too — it only ever counted pending ONLINE orders, which
+    // staff_get_orders no longer returns at all (see app.py).
+    const [productsRaw, requestsRaw] = await Promise.all([
       fetch('/api/products').then(r => r.json()),
-      fetch('/api/staff/orders?limit=50').then(r => r.json()),
       fetch('/api/staff/stock-requests').then(r => r.json()),
-      fetch('/api/staff/returns?status=pending').then(r => r.json()),
     ]);
 
     const allProducts = Array.isArray(productsRaw) ? productsRaw : [];
@@ -3173,8 +3175,6 @@ async function refreshStaffNavBadges() {
       invBadge.style.display = badgeCount > 0 ? 'inline-block' : 'none';
     }
 
-    updateOrdersBadge(Array.isArray(orders) ? orders : []);
-
     const requests = Array.isArray(requestsRaw) ? requestsRaw : [];
     const pending  = requests.filter(r => r.status === 'pending').length;
     const reqBadge = document.getElementById('reqBadge');
@@ -3183,12 +3183,6 @@ async function refreshStaffNavBadges() {
       reqBadge.style.display = pending > 0 ? 'inline' : 'none';
     }
 
-    const pendingReturnsCount = Array.isArray(pendingReturns) ? pendingReturns.length : 0;
-    const returnsBadge = document.getElementById('returnsPendingBadge');
-    if (returnsBadge) {
-      returnsBadge.textContent   = pendingReturnsCount > 99 ? '99+' : pendingReturnsCount;
-      returnsBadge.style.display = pendingReturnsCount > 0 ? 'inline-block' : 'none';
-    }
   } catch (e) { console.error('Nav badges error:', e); }
 }
 window.refreshStaffNavBadges = refreshStaffNavBadges;
@@ -4034,12 +4028,8 @@ window.staffGoToInvHistory = staffGoToInvHistory;
 
 async function loadOrders() {
   // ── Skeleton ──
-  skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
-                              'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
-  // Deliveries for Today (skTable no-ops if the tbody isn't on the current
-  // page, same as every other call site in this file).
-  skTable('staffDeliveriesTodayBody', ['sk-cell-sm','sk-cell-md','sk-cell-full',
-                                       'sk-cell-sm','sk-cell-sm','sk-cell-md'], 5);
+  skTable('staffOrdersBody', ['sk-cell-sm','sk-cell-md','sk-cell-full','sk-cell-sm',
+                              'sk-cell-sm','sk-cell-sm','sk-cell-sm','sk-cell-sm'], 8);
   // ─────────────
   try {
     const res  = await fetch('/api/staff/orders?limit=50');
@@ -4053,53 +4043,20 @@ async function loadOrders() {
     populateStaffOrderYearFilter(staffOrders);
     populateStaffOrderDayOptions();
     applyStaffOrderFilters();
-    updateOrdersBadge(staffOrders);
-    renderStaffDeliveriesForToday(staffOrders);
   } catch (e) { console.error('Orders error:', e); showToast('Could not load orders. Check your connection and try again.', 'error'); }
 }
 
-function updateOrdersBadge(orders) {
-  const badge   = document.getElementById('ordersBadge');
-  if (!badge) return;
-  // Count pending online orders from customers
-  const pending = orders.filter(o =>
-    o.status === 'pending' && o.order_type === 'online'
-  ).length;
-  if (pending > 0) {
-    badge.textContent    = pending > 99 ? '99+' : pending;
-    badge.style.display  = 'inline-block';
-  } else {
-    badge.style.display  = 'none';
-  }
-}
+// updateOrdersBadge() and the "ordersBadge" nav pill removed (staff rework,
+// Nov 2026) — it only ever counted PENDING ONLINE orders, and staff_get_orders
+// now excludes order_type='online' entirely (see app.py), so the count was
+// always zero. Walk-in orders are created straight to 'completed' and never
+// sit "pending", so there's nothing left for this badge to ever report.
 
-// Bulk Mark Out for Delivery (user request, Oct 29 2026) — see the matching
-// note in admin.js. Checkboxes only render on 'processing' rows below.
-function toggleAllStaffOrderSelections(cb) {
-  document.querySelectorAll('.staff-order-select-cb').forEach(el => { el.checked = cb.checked; });
-}
-window.toggleAllStaffOrderSelections = toggleAllStaffOrderSelections;
-
-async function staffBulkMarkOutForDeliverySelected() {
-  const ids = Array.from(document.querySelectorAll('.staff-order-select-cb:checked')).map(el => el.value);
-  if (!ids.length) { showToast('Select at least one processing order first.', 'error'); return; }
-  const confirmed = await showConfirmDialog('Confirm Bulk Mark Out for Delivery', `Mark ${ids.length} order(s) as Out for Delivery?`);
-  if (!confirmed) return;
-  try {
-    const res  = await fetch('/api/staff/orders/out-for-delivery-bulk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: ids }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast(`Marked ${body.updated.length} order(s) Out for Delivery${body.skipped.length ? `, skipped ${body.skipped.length} (not eligible)` : ''}.`);
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to bulk mark out for delivery.', 'error');
-    }
-  } catch (e) { showToast('Error during bulk mark out for delivery.', 'error'); }
-}
-window.staffBulkMarkOutForDeliverySelected = staffBulkMarkOutForDeliverySelected;
+// Bulk Mark Out for Delivery / row checkboxes removed (staff rework, Nov
+// 2026) — staff no longer processes online orders at all (no trigger
+// actions left: see orderStatusActionHtml/updateOrderStatus removal
+// below), so there is nothing left to batch-advance here. This section is
+// now walk-in/POS-transactions monitoring only.
 
 const ORDER_STATUS_FLOW   = { pending: 'processing', processing: 'out_for_delivery' };
 const ORDER_STATUS_LABELS = { pending: 'Pending', processing: 'Processing', out_for_delivery: 'Out for Delivery', not_remitted: 'Not Remitted', completed: 'Completed', cancelled: 'Cancelled', returned_failed: 'Returned' };
@@ -4118,85 +4075,19 @@ function sortOrdersHierarchy(orders) {
   });
 }
 
-// Per the Oct 25 adviser consultation: a free-form status dropdown is "not
-// supposed to be" the way an order moves forward — each step now needs its
-// own explicit trigger action instead. Pending -> Processing is purely
-// system-driven (30-min auto-advance in app.py — the manual "Move to
-// Processing" batch button was removed Oct 26 2026), so it gets no manual
-// button here at all; Processing -> Out for Delivery is the one step this
-// row-level action still drives, as a single contextual button. Everything
-// past that (Delivered, Not Delivered) already goes through the dedicated
-// Deliveries-for-Today actions, not this cell.
-function orderStatusActionHtml(order, updateFnName) {
-  const status = order.status;
-  if (status === 'pending') {
-    // Adviser follow-up (Oct 26 2026): give a manual bypass instead of
-    // only ever waiting out the 30-min auto-advance — same endpoint/cap
-    // enforcement as the auto-advance, just triggered per-order by hand.
-    return `<span style="font-size:11px;color:var(--text-muted);font-style:italic;white-space:nowrap;">Auto after 30 min</span>
-      <button class="btn btn-outline-green" style="font-size:11px;padding:4px 9px;white-space:nowrap;" title="Move to Processing now instead of waiting"
-          onclick="${updateFnName}('${order.order_id}', 'processing')">Process Now</button>`;
-  }
-  const next = ORDER_STATUS_FLOW[status];
-  if (!next) return '';
-  return `<button class="btn btn-solid-green" style="font-size:11px;padding:5px 10px;white-space:nowrap;"
-      onclick="${updateFnName}('${order.order_id}', '${next}')">Mark ${ORDER_STATUS_LABELS[next]}</button>`;
-}
-
-// ─── Print Parcel Label ─────────────────────────────────
-// Only ever offered while an order is 'processing' (see renderStaffOrders) —
-// the window between stock being deducted and the order actually leaving,
-// which is when a label needs to go on the parcel. Opens a small print-only
-// window rather than reusing the receipt modal, since this is a shipping
-// label (recipient + items to pack), not a payment receipt.
-function printOrderLabel(order) {
-  const addrParts  = (order.address || '').split('|');
-  const addrString = addrParts.length > 1
-    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
-    : (order.address || '');
-  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const phone    = order.customer?.phone_number || '';
-  const itemsHtml = (order.order_item || []).map(i => {
-    const opts = i.selected_options && Object.keys(i.selected_options).length
-      ? ' (' + Object.entries(i.selected_options).map(([k, v]) => `${k}: ${v}`).join(', ') + ')'
-      : '';
-    return `<tr><td style="padding:4px 0;">${i.product?.product_name || '—'}${opts}</td><td style="padding:4px 0;text-align:right;">x${i.qty}</td></tr>`;
-  }).join('');
-
-  const html = `
-    <html><head><title>Parcel Label — ${shortId(order.order_id)}</title>
-    <style>
-      body{font-family:Arial,sans-serif;padding:24px;color:#111;}
-      h2{margin:0 0 4px;font-size:18px;}
-      .muted{color:#666;font-size:12px;}
-      .box{border:2px solid #111;border-radius:8px;padding:16px;margin-top:16px;}
-      table{width:100%;font-size:13px;margin-top:10px;border-top:1px solid #ccc;padding-top:6px;}
-      .label{font-size:11px;color:#666;text-transform:uppercase;letter-spacing:0.5px;}
-    </style></head><body>
-      <h2>TEFC E-Commerce — Parcel Label</h2>
-      <div class="muted">Order #${shortId(order.order_id)} · ${(order.order_type || '').toUpperCase()}</div>
-      <div class="box">
-        <div class="label">Deliver To</div>
-        <div style="font-size:15px;font-weight:bold;margin:2px 0 6px;">${customer}</div>
-        <div>${addrString || 'No address provided'}</div>
-        ${order.address_note ? `<div class="muted">Note: ${order.address_note}</div>` : ''}
-        ${phone ? `<div class="muted">Phone: ${phone}</div>` : ''}
-        <table>${itemsHtml}</table>
-      </div>
-      <script>window.onload = () => { window.print(); };</script>
-    </body></html>`;
-  const win = window.open('', '_blank', 'width=480,height=640');
-  if (!win) { showToast('Allow pop-ups to print the parcel label.', 'error'); return; }
-  win.document.write(html);
-  win.document.close();
-}
+// orderStatusActionHtml() / printOrderLabel() removed (staff rework, Nov
+// 2026) — staff no longer drives the online-order status lifecycle at all
+// (Processing/Out for Delivery/Delivered are admin-only now, from the
+// Orders module), and walk-in orders are created straight to 'completed'
+// via staff_place_order so they never need a trigger button either. This
+// table is now a read-only monitor of this branch's walk-in/POS
+// transactions plus whatever online orders still reference it historically.
 
 function renderStaffOrders(orders) {
   const paged = paginate(orders, staffOrdersPage);
   document.getElementById('staffOrdersBody').innerHTML = paged.length
     ? paged.map(o => `
         <tr>
-          <td>${o.status === 'processing' ? `<input type="checkbox" class="staff-order-select-cb" value="${o.order_id}"/>` : ''}</td>
           <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
           <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
           <td><span class="order-type-cell">${badge(o.order_type)}${offlineSyncTag(o)}</span></td>
@@ -4218,20 +4109,13 @@ function renderStaffOrders(orders) {
           })()}</td>
           <td>${badge(o.status)}</td>
           <td class="order-actions-cell">
-            ${orderStatusActionHtml(o, 'updateOrderStatus')}
             <button class="btn-icon" onclick="viewStaffOrderItems(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="View Items">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
             </button>
-            ${o.status === 'processing' ? `
-            <button class="btn-icon" onclick="printOrderLabel(${JSON.stringify(o).replace(/"/g, '&quot;')})" title="Print Parcel Label">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:14px;height:14px;"><polyline points="6 9 6 2 18 2 18 9"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
-            </button>` : ''}
           </td>
         </tr>`).join('')
-    : '<tr><td colspan="10" class="table-empty">No orders yet</td></tr>';
+    : '<tr><td colspan="9" class="table-empty">No orders yet</td></tr>';
   renderPager('staffOrdersPagination', orders.length, staffOrdersPage, 'changeStaffOrdersPage');
-  const selectAllCb = document.getElementById('staffOrdersSelectAll');
-  if (selectAllCb) selectAllCb.checked = false;
 }
 
 // ─── View Staff Order Items Modal ─────────────────────
@@ -4263,211 +4147,13 @@ function closeGenericModal() {
   if (typeof focusBarcodeInput === 'function') focusBarcodeInput();
 }
 
-// ══════════════════════════════════════════════════════
-// RETURNS & REFUNDS (revision, Nov 2026) — customer-submitted return
-// requests for this branch's orders. Server-scoped by branch; this view
-// just renders whatever GET /api/staff/returns gives back (admin's own
-// dashboard uses the same endpoint, unscoped). Uses showGenericModal/
-// closeGenericModal + showToast, the same shared helpers as the rest of
-// this dashboard.
-// ══════════════════════════════════════════════════════
-let _returnsRows      = [];
-let _returnsActiveTab = 'pending';
-let returnsPage       = 1;
-
-async function loadReturns() {
-  skTable('returnsBody', [], 7);
-  returnsPage = 1;
-  try {
-    const res = await fetch(`/api/staff/returns?status=${_returnsActiveTab}`);
-    _returnsRows = res.ok ? await res.json() : [];
-  } catch (e) {
-    console.error('Returns load error:', e);
-    showToast('Failed to load returns.', 'error');
-    _returnsRows = [];
-  }
-  // The nav badge itself is refreshed centrally by refreshStaffNavBadges()
-  // (called after every approve/reject/mark-refunded below); viewing the
-  // Pending tab can cheaply keep it in sync with what's already in hand.
-  if (_returnsActiveTab === 'pending') {
-    const badge = document.getElementById('returnsPendingBadge');
-    if (badge) {
-      const count = _returnsRows.length;
-      badge.textContent   = count > 99 ? '99+' : count;
-      badge.style.display = count > 0 ? 'inline-block' : 'none';
-    }
-  }
-  renderReturns();
-}
-window.loadReturns = loadReturns;
-
-function switchReturnsTab(tab) {
-  _returnsActiveTab = tab;
-  ['pending', 'approved', 'rejected', 'refunded'].forEach(t => {
-    const btn = document.getElementById(`returnsTab${t.charAt(0).toUpperCase()}${t.slice(1)}Btn`);
-    if (btn) btn.classList.toggle('active', t === tab);
-  });
-  loadReturns();
-}
-window.switchReturnsTab = switchReturnsTab;
-
-function changeReturnsPage(p) { returnsPage = p; renderReturns(); }
-window.changeReturnsPage = changeReturnsPage;
-
-function renderReturns() {
-  const tbody = document.getElementById('returnsBody');
-  if (!tbody) return;
-  if (!_returnsRows.length) {
-    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">Nothing here.</td></tr>';
-    document.getElementById('returnsPagination').innerHTML = '';
-    return;
-  }
-  const totalPages = Math.ceil(_returnsRows.length / ITEMS_PER_PAGE) || 1;
-  if (returnsPage > totalPages) returnsPage = totalPages;
-  tbody.innerHTML = paginate(_returnsRows, returnsPage).map(r => {
-    const order    = Array.isArray(r.order) ? r.order[0] : r.order;
-    const cust     = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
-    const custName = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
-    const requested = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
-    const itemCount = (r.return_request_item || []).length;
-    const action = r.status === 'pending'
-      ? `<button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openReturnReviewModal('${r.id}')">Review</button>`
-      : r.status === 'approved' && r.refund_method === 'cash'
-        ? `<button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="confirmReturnMarkRefunded('${r.id}')">Mark Refunded</button>`
-        : `<button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="openReturnReviewModal('${r.id}')">View</button>`;
-    return `<tr>
-      <td>${requested}</td>
-      <td>#${(r.order_id || '').slice(0,8).toUpperCase()}</td>
-      <td>${custName || '—'}</td>
-      <td>${itemCount} item(s)</td>
-      <td style="text-transform:uppercase;font-size:11px;">${r.refund_method || '—'}</td>
-      <td style="text-transform:capitalize;">${r.status}</td>
-      <td>${action}</td>
-    </tr>`;
-  }).join('');
-  renderPager('returnsPagination', _returnsRows.length, returnsPage, 'changeReturnsPage');
-}
-
-function openReturnReviewModal(returnId) {
-  const r = _returnsRows.find(x => String(x.id) === String(returnId));
-  if (!r) return;
-  const order    = Array.isArray(r.order) ? r.order[0] : r.order;
-  const cust     = order && (Array.isArray(order.customer) ? order.customer[0] : order.customer);
-  const custName = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
-  const requested = r.requested_at ? new Date(r.requested_at).toLocaleString() : '—';
-  const itemsHtml = (r.return_request_item || []).map(rri => {
-    const oi   = rri.order_item || {};
-    const prod = Array.isArray(oi.product) ? oi.product[0] : oi.product;
-    const opts = oi.selected_options && Object.keys(oi.selected_options).length
-      ? Object.entries(oi.selected_options).map(([k,v]) => `${k}: ${v}`).join(', ')
-      : '';
-    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-      <span>${prod?.product_name || '—'}${opts ? ` <span style="color:var(--text-muted);">(${opts})</span>` : ''}</span>
-      <span style="color:var(--text-muted);">x${rri.qty_returned}</span>
-    </div>`;
-  }).join('') || '<p style="color:var(--text-muted);text-align:center;">No items</p>';
-
-  const canAct = r.status === 'pending';
-
-  showGenericModal(`
-    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
-        <div>
-          <h3 style="margin:0;font-size:17px;">Return Request</h3>
-          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${(r.order_id || '').slice(0,8).toUpperCase()} — ${custName} — ${requested}</p>
-        </div>
-        <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
-      </div>
-
-      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;">
-        <span style="color:var(--text-muted);">Reason</span><br/>${r.reason || '—'}
-      </div>
-
-      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS TO RETURN</div>
-      ${itemsHtml}
-
-      <div style="margin-top:12px;font-size:12px;color:var(--text-muted);">
-        Refund method: <strong style="text-transform:uppercase;">${r.refund_method || '—'}</strong>
-        ${r.refund_method === 'gcash' ? ' — reversed automatically through PayMongo on approval.' : ' — hand back cash, then confirm with "Mark Refunded".'}
-      </div>
-
-      ${r.status === 'rejected' && r.rejection_reason
-        ? `<div style="background:rgba(239,68,68,0.08);border-left:3px solid #ef4444;border-radius:8px;padding:10px;margin-top:10px;font-size:12px;">Rejected: ${r.rejection_reason}</div>`
-        : ''}
-
-      ${canAct ? `
-        <label class="form-label" style="font-size:12px;margin-top:12px;">Rejection Reason (only needed if rejecting)</label>
-        <textarea id="returnRejectReason" class="form-input" style="width:100%;min-height:70px;margin-bottom:12px;" placeholder="Why is this return being rejected?"></textarea>
-      ` : ''}
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:0.5rem;">
-        <button class="btn btn-cancel" onclick="closeGenericModal()">Close</button>
-        ${canAct ? `
-          <button class="btn btn-cancel" style="border-color:#ef4444;color:#ef4444;" onclick="confirmReturnReject('${r.id}')">Reject</button>
-          <button class="btn btn-solid-green" onclick="confirmReturnApprove('${r.id}')">Approve</button>
-        ` : ''}
-      </div>
-    </div>
-  `);
-}
-window.openReturnReviewModal = openReturnReviewModal;
-
-async function confirmReturnApprove(returnId) {
-  try {
-    const res  = await fetch(`/api/staff/returns/${returnId}/approve`, { method: 'PUT' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.error || 'Failed to approve return.', 'error'); return; }
-    showToast(data.warning ? data.warning : 'Return approved.', data.warning ? 'error' : 'success');
-    closeGenericModal();
-    invalidateSection('returns');
-    invalidateSection('inventory');
-    loadReturns();
-    refreshStaffNavBadges();
-  } catch (e) {
-    console.error('Approve return error:', e);
-    showToast('Failed to approve return.', 'error');
-  }
-}
-window.confirmReturnApprove = confirmReturnApprove;
-
-async function confirmReturnReject(returnId) {
-  const reason = document.getElementById('returnRejectReason')?.value?.trim();
-  if (!reason) { showToast('Please enter a rejection reason — the customer will see it.', 'error'); return; }
-  try {
-    const res = await fetch(`/api/staff/returns/${returnId}/reject`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ rejection_reason: reason }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.error || 'Failed to reject return.', 'error'); return; }
-    showToast('Return rejected.');
-    closeGenericModal();
-    invalidateSection('returns');
-    loadReturns();
-    refreshStaffNavBadges();
-  } catch (e) {
-    console.error('Reject return error:', e);
-    showToast('Failed to reject return.', 'error');
-  }
-}
-window.confirmReturnReject = confirmReturnReject;
-
-async function confirmReturnMarkRefunded(returnId) {
-  try {
-    const res  = await fetch(`/api/staff/returns/${returnId}/mark-refunded`, { method: 'PUT' });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.error || 'Failed to mark refunded.', 'error'); return; }
-    showToast('Marked refunded.');
-    closeGenericModal();
-    invalidateSection('returns');
-    loadReturns();
-  } catch (e) {
-    console.error('Mark refunded error:', e);
-    showToast('Failed to mark refunded.', 'error');
-  }
-}
-window.confirmReturnMarkRefunded = confirmReturnMarkRefunded;
+// RETURNS & REFUNDS — removed from staff entirely (staff rework, Nov
+// 2026). Return review is admin-only now (see admin.js's own Returns
+// section, which already called these same /api/staff/returns/* endpoints
+// — only the decorator on the backend changed, from @staff_required to
+// @admin_required). Staff no longer handles online orders at all, and
+// returns only ever applied to online orders, so there's nothing
+// branch-scoped left for staff to review here.
 
 function viewStaffOrderItems(order) {
   const items    = order.order_item || [];
@@ -4726,455 +4412,14 @@ function applyStaffOrderFilters() {
 }
 window.filterStaffOrderType = filterStaffOrderType;
 
-// Order ids currently mid-update — guards against a fast double-click
-// firing two PUTs for the same order before the first one's response
-// comes back (final-defense follow-up, Nov 14 2026). The row's trigger
-// button has no handle passed into this function to disable directly, and
-// the backend's own "already processed" check isn't atomic, so two near-
-// simultaneous requests for a 'processing' transition could both pass it
-// and deduct stock twice. Keyed by order id (not a single global flag) so
-// updating one order never blocks acting on a different one.
-const _orderStatusUpdatesInFlight = new Set();
-
-async function updateOrderStatus(id, status) {
-  if (_orderStatusUpdatesInFlight.has(id)) return;
-  // Fired from the single contextual trigger button in orderStatusActionHtml
-  // (e.g. "Mark Out for Delivery") — no dropdown to snap back on cancel.
-  const confirmed = await showConfirmDialog('Confirm', `Change this order's status to "${(status || '').replace(/_/g, ' ')}"?`);
-  if (!confirmed) return;
-  if (_orderStatusUpdatesInFlight.has(id)) return;
-  _orderStatusUpdatesInFlight.add(id);
-  try {
-    const res  = await fetch(`/api/staff/orders/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast('Order status updated!');
-      loadOrders();
-      // Some transitions (e.g. -> processing) deduct real stock server-
-      // side, so Inventory/POS's separately-cached product lists need to
-      // drop their stale figures too, not just the orders list.
-      invalidateSection('inventory'); loadInventory();
-      invalidateSection('pos'); loadPosProducts();
-    }
-    else showToast(body.error || 'Failed to update status.', 'error');
-  } catch (e) { showToast('Error updating status.', 'error'); }
-  finally { _orderStatusUpdatesInFlight.delete(id); }
-}
-
-// Pending → Processing manual batch action removed (team decision, Oct 26
-// 2026) — the 30-min auto-advance in app.py already handles this step on
-// its own, so the "Move to Processing" button was redundant. The
-// DAILY_PROCESSING_CAP enforcement stays, it just lives purely in the
-// auto-advance check now, with no manual trigger left on this side.
-
-// ─── Deliveries for Today ──────────────────────────────
-// "To Dispatch" tab removed (team decision, Oct 26 2026) — see the matching
-// note in admin.js. "Out for Deliveries" is the first/default tab.
-let staffDeliveriesActiveTab = 'today';
-
-function staffSwitchDeliveriesTab(tab) {
-  staffDeliveriesActiveTab = tab;
-  const btns = {
-    today:     document.getElementById('staffDeliveriesTabTodayBtn'),
-    delivered: document.getElementById('staffDeliveriesTabDeliveredBtn'),
-    scheduled: document.getElementById('staffDeliveriesTabScheduledBtn'),
-    failed:    document.getElementById('staffDeliveriesTabFailedBtn'),
-    returned:  document.getElementById('staffDeliveriesTabReturnedBtn'),
-  };
-  const panels = {
-    today:     document.getElementById('staffDeliveriesTodayPanel'),
-    delivered: document.getElementById('staffDeliveriesDeliveredPanel'),
-    scheduled: document.getElementById('staffDeliveriesScheduledPanel'),
-    failed:    document.getElementById('staffDeliveriesFailedPanel'),
-    returned:  document.getElementById('staffDeliveriesReturnedPanel'),
-  };
-  Object.keys(panels).forEach(key => {
-    if (panels[key]) panels[key].style.display = tab === key ? '' : 'none';
-    if (btns[key])   btns[key].className = `deliv-tab${tab === key ? ' active' : ''}`;
-  });
-}
-
-function staffFullDeliveryAddress(order) {
-  const parts = (order.address || '').split('|');
-  const addr = parts.length > 1
-    ? [parts[0], parts[1], parts[2], parts[3]].filter(Boolean).join(', ')
-    : (order.address || '').trim() || '—';
-  const note = order.address_note || '';
-  return note
-    ? `${addr}<div style="color:var(--text-muted);font-size:11px;margin-top:2px;">📍 ${note}</div>`
-    : addr;
-}
-
-function renderStaffDeliveriesForToday(orders) {
-  if (!document.getElementById('staffDeliveriesTodayBody')) return; // card not on this page
-  const todayUTC = new Date().toISOString().slice(0, 10);
-  // 'not_remitted' folded in — see renderDeliveriesForToday in admin.js.
-  const ofd = orders.filter(o => o.status === 'out_for_delivery' || o.status === 'not_remitted');
-  // Courier-retry model + the Oct 26 2026 "To Dispatch" removal — see
-  // renderDeliveriesForToday in admin.js for the full reasoning. Every
-  // out_for_delivery order always has a dispatch_date now (stamped the
-  // moment it leaves Processing), so it lands straight into "Out for
-  // Deliveries" or "Scheduled for Retry" below, whichever date it matches.
-  const today      = ofd.filter(o => o.status === 'not_remitted'
-                        || (o.dispatch_date && o.dispatch_date.slice(0, 10) === todayUTC));
-  const scheduled  = ofd.filter(o => o.status === 'out_for_delivery' && o.dispatch_date && o.dispatch_date.slice(0, 10) > todayUTC);
-
-  loadStaffRemittanceSummary();
-
-  const scheduledBody = document.getElementById('staffDeliveriesScheduledBody');
-  if (scheduledBody) {
-    scheduledBody.innerHTML = scheduled.length
-      ? scheduled.map(o => {
-          const attempts = o.delivery_attempts || 0;
-          const retryBadge = attempts > 0
-            ? `<span class="badge badge--yellow" style="margin-left:6px;">RETRY ${attempts}/3</span>`
-            : '';
-          return `
-          <tr>
-            <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${retryBadge}</td>
-            <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-            <td>${staffFullDeliveryAddress(o)}</td>
-            <td>${o.dispatch_date}</td>
-            <td>${peso(o.total)}</td>
-          </tr>`;
-        }).join('')
-      : '<tr><td colspan="5" class="table-empty">No retries scheduled for a future day.</td></tr>';
-  }
-
-  document.getElementById('staffDeliveriesTodayBody').innerHTML = today.length
-    ? today.map(o => {
-        const notRemittedBadge = o.status === 'not_remitted'
-          ? `<span class="badge badge--red" style="margin-left:6px;">NOT REMITTED</span>`
-          : '';
-        return `
-        <tr>
-          <td><input type="checkbox" class="staff-delivery-today-select-cb" value="${o.order_id}"/></td>
-          <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code>${notRemittedBadge}</td>
-          <td>${o.customer ? `${o.customer.fname} ${o.customer.lname}` : 'Walk-in'}</td>
-          <td>${staffFullDeliveryAddress(o)}</td>
-          <td>${o.payment?.payment_method ? badge(o.payment.payment_method) : '—'}</td>
-          <td>${o.delivery_attempts || 0}/3</td>
-          <td style="display:flex;gap:6px;">
-            <button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="staffOpenRemitModal('${o.order_id}')">${o.payment?.payment_method === 'gcash' ? 'Mark Delivered' : 'Remit'}</button>
-            <button class="btn btn-cancel" style="font-size:11px;padding:4px 10px;" onclick="staffMarkOrderNotDelivered('${o.order_id}')">Not Delivered</button>
-          </td>
-        </tr>`;
-      }).join('')
-    : '<tr><td colspan="7" class="table-empty">No deliveries dispatched for today yet.</td></tr>';
-}
-
-function staffToggleAllTodayDeliverySelections(cb) {
-  document.querySelectorAll('.staff-delivery-today-select-cb').forEach(el => { el.checked = cb.checked; });
-}
-window.staffToggleAllTodayDeliverySelections = staffToggleAllTodayDeliverySelections;
-
-// Bulk Remit/Not-Delivered — branch-scoped mirror of admin.js's
-// bulkRemitSelectedOrders/bulkNotDeliveredSelectedOrders. Bulk Remit skips
-// the per-order typed-amount entry (adviser follow-up, Oct 26 2026).
-async function staffBulkRemitSelectedOrders() {
-  const ids = Array.from(document.querySelectorAll('.staff-delivery-today-select-cb:checked')).map(el => el.value);
-  if (!ids.length) { showToast('Select at least one order to remit.', 'error'); return; }
-  const confirmed = await showConfirmDialog('Confirm Bulk Remit', `Mark ${ids.length} order(s) as remitted/completed? Each order's full computed total will be used — no amount entry needed.`);
-  if (!confirmed) return;
-  try {
-    const res  = await fetch('/api/staff/orders/remit-bulk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: ids }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast(`Remitted ${body.completed.length} order(s)${body.skipped.length ? `, skipped ${body.skipped.length} (not eligible)` : ''}.`);
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to bulk remit.', 'error');
-    }
-  } catch (e) { showToast('Error during bulk remit.', 'error'); }
-}
-window.staffBulkRemitSelectedOrders = staffBulkRemitSelectedOrders;
-
-async function staffBulkNotDeliveredSelectedOrders() {
-  const ids = Array.from(document.querySelectorAll('.staff-delivery-today-select-cb:checked')).map(el => el.value);
-  if (!ids.length) { showToast('Select at least one order to mark not delivered.', 'error'); return; }
-  const confirmed = await showConfirmDialog('Confirm Bulk Not Delivered', `Record a failed delivery attempt for ${ids.length} order(s)?`);
-  if (!confirmed) return;
-  try {
-    const res  = await fetch('/api/staff/orders/not-delivered-bulk', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: ids }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      const finalCount = (body.results || []).filter(r => r.final).length;
-      showToast(`Recorded ${body.results.length} attempt(s)${finalCount ? ` — ${finalCount} returned/failed` : ''}.`);
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to bulk-record not-delivered.', 'error');
-    }
-  } catch (e) { showToast('Error during bulk not-delivered.', 'error'); }
-}
-window.staffBulkNotDeliveredSelectedOrders = staffBulkNotDeliveredSelectedOrders;
-
-// Manual "Close Remittance" (final-defense follow-up, Nov 10 2026) —
-// branch-scoped mirror of the admin button. Same effect as the automatic
-// 5pm flag, just triggered on demand; doesn't lock the Remit action out,
-// late remits just count toward tomorrow's totals per
-// _remittance_business_date in app.py.
-async function staffCloseRemittanceNow() {
-  const confirmed = await showConfirmDialog('Close Remittance', 'Flag every still-pending delivery at your branch as Not Remitted right now, instead of waiting for the 5pm auto-flag?');
-  if (!confirmed) return;
-  try {
-    const res  = await fetch('/api/staff/orders/close-remittance', { method: 'POST' });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast(body.message || 'Remittance closed.');
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to close remittance.', 'error');
-    }
-  } catch (e) { showToast('Error closing remittance.', 'error'); }
-}
-window.staffCloseRemittanceNow = staffCloseRemittanceNow;
-
-// "Today's Remittance" strip — branch-scoped mirror of admin's
-// loadRemittanceSummary. See _remittance_summary in app.py.
-async function loadStaffRemittanceSummary() {
-  const el = document.getElementById('staffRemittanceSummaryStrip');
-  if (!el) return;
-  try {
-    const res  = await fetch('/api/staff/remittance-summary');
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) return;
-    document.getElementById('staffRemitExpectedTotal').textContent = peso(body.expected_total || 0);
-    document.getElementById('staffRemitExpectedCount').textContent = `(${body.expected_count || 0} order${body.expected_count === 1 ? '' : 's'})`;
-    document.getElementById('staffRemitActualTotal').textContent   = peso(body.actual_total || 0);
-    document.getElementById('staffRemitActualCount').textContent   = `(${body.actual_count || 0} order${body.actual_count === 1 ? '' : 's'})`;
-    document.getElementById('staffRemitRemainingTotal').textContent = peso(body.remaining_total || 0);
-
-    const countsEl = document.getElementById('staffDeliveriesCountsStrip');
-    if (countsEl) {
-      document.getElementById('staffDeliveriesCountTotal').textContent     = body.total_deliveries_count || 0;
-      document.getElementById('staffDeliveriesCountCompleted').textContent = body.completed_count || 0;
-      document.getElementById('staffDeliveriesCountFailed').textContent    = body.failed_attempts_count || 0;
-      document.getElementById('staffDeliveriesCountReturned').textContent  = body.returned_count || 0;
-      const nrEl = document.getElementById('staffDeliveriesCountNotRemitted');
-      if (nrEl) nrEl.textContent = body.not_remitted_count || 0;
-    }
-
-    // Order-level breakdown tabs — branch-scoped mirror of admin's.
-    const deliveredBody = document.getElementById('staffDeliveriesDeliveredBody');
-    if (deliveredBody) {
-      const rows = body.delivered_orders || [];
-      deliveredBody.innerHTML = rows.length
-        ? rows.map(o => `
-            <tr>
-              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
-              <td>${o.customer_name}</td>
-              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
-              <td>${peso(o.grand_total)}</td>
-            </tr>`).join('')
-        : '<tr><td colspan="4" class="table-empty">No orders remitted yet today.</td></tr>';
-    }
-
-    const failedBody = document.getElementById('staffDeliveriesFailedBody');
-    if (failedBody) {
-      const rows = body.failed_attempt_orders || [];
-      failedBody.innerHTML = rows.length
-        ? rows.map(o => `
-            <tr>
-              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
-              <td>${o.customer_name}</td>
-              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
-              <td>${o.delivery_attempts}/3</td>
-              <td>${peso(o.grand_total)}</td>
-            </tr>`).join('')
-        : '<tr><td colspan="5" class="table-empty">No failed attempts recorded today.</td></tr>';
-    }
-
-    const returnedBody = document.getElementById('staffDeliveriesReturnedBody');
-    if (returnedBody) {
-      const rows = body.returned_orders || [];
-      returnedBody.innerHTML = rows.length
-        ? rows.map(o => `
-            <tr>
-              <td><code style="font-family:'JetBrains Mono',monospace;font-size:11px;">${shortId(o.order_id)}</code></td>
-              <td>${o.customer_name}</td>
-              <td>${o.payment_method ? badge(o.payment_method) : '—'}</td>
-              <td>${peso(o.grand_total)}</td>
-            </tr>`).join('')
-        : '<tr><td colspan="4" class="table-empty">No orders returned/failed today.</td></tr>';
-    }
-  } catch (e) { console.error('Remittance summary error:', e); showToast('Could not load remittance summary.', 'error'); }
-}
-
-// (staffToggleAllDeliverySelections / staffDispatchSelectedOrders and the
-// "To Dispatch" tab they served were removed Oct 26 2026 — see admin.js.)
-
-// ─── Remit Modal ──────────────────────────────────────
-// Replaces the old instant/COD-only "Delivered" button (adviser revision,
-// Oct 25 2026). Every order in Out for Deliveries — GCash or COD — now
-// goes through this modal: full order details + the amount actually
-// remitted, which must match the order's total (items + shipping) before
-// Complete Order is allowed to go through. The backend re-validates the
-// same match server-side (see _validate_remittance in app.py) — the
-// client-side check here is only for immediate feedback.
-function staffOpenRemitModal(orderId) {
-  const order = staffOrders.find(o => o.order_id === orderId);
-  if (!order) { showToast('Order not found.', 'error'); return; }
-
-  const items    = order.order_item || [];
-  const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
-  const payment  = Array.isArray(order.payment) ? order.payment[0] : order.payment;
-  const paymentMethod = payment?.payment_method || null;
-
-  const subtotal   = Number(order.total || 0);
-  const shipping   = Number(order.shipping_fee || 0);
-  const grandTotal = Math.round((subtotal + shipping) * 100) / 100;
-
-  // GCash already collected the money through PayMongo at checkout, so
-  // there's nothing to count/type/match — skip the Remit modal entirely
-  // and just confirm the physical delivery in one click.
-  if (paymentMethod === 'gcash') {
-    staffConfirmGcashDelivered(orderId, grandTotal);
-    return;
-  }
-
-  const addrParts  = (order.address || '').split('|');
-  const addrString = addrParts.length > 1
-    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
-    : order.address || '—';
-
-  const itemsHtml = items.length
-    ? items.map(i => {
-        const opts = i.selected_options && Object.keys(i.selected_options).length
-          ? ` <span style="color:var(--text-muted);">(${Object.values(i.selected_options).join(', ')})</span>`
-          : '';
-        return `
-          <div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-            <span>${i.product?.product_name || '—'}${opts} <span style="color:var(--text-muted);">x${i.qty}</span></span>
-            <span style="font-weight:600;">₱${Number(i.price * i.qty).toFixed(2)}</span>
-          </div>`;
-      }).join('')
-    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
-
-  showGenericModal(`
-    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
-        <div>
-          <h3 style="margin:0;font-size:17px;">Remit &amp; Complete Order</h3>
-          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${shortId(order.order_id)}</p>
-        </div>
-        <button onclick="closeGenericModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
-      </div>
-
-      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
-        <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
-        <div><span style="color:var(--text-muted);">Payment Method</span><br/>${paymentMethod ? badge(paymentMethod) : '—'}</div>
-        <div style="grid-column:1/-1;"><span style="color:var(--text-muted);">Delivery Address</span><br/><strong>${addrString && addrString.trim() ? addrString : 'No address provided'}</strong></div>
-      </div>
-
-      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS ORDERED</div>
-      ${itemsHtml}
-
-      <div style="margin-top:12px;padding-top:12px;border-top:1px solid var(--border);font-size:13px;">
-        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Subtotal</span><span>₱${subtotal.toFixed(2)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:3px 0;"><span>Shipping Fee</span><span>${shipping === 0 ? 'FREE' : '₱' + shipping.toFixed(2)}</span></div>
-        <div style="display:flex;justify-content:space-between;padding:6px 0;margin-top:4px;border-top:1px solid var(--border);font-weight:700;font-size:15px;"><span>Total Amount Due</span><span style="color:#16a34a;">₱${grandTotal.toFixed(2)}</span></div>
-      </div>
-
-      <div style="margin-top:1rem;">
-        <label class="form-label" style="font-size:12px;">Amount Remitted</label>
-        <input type="number" id="staffRemitAmountInput" class="form-input" step="0.01" min="0" placeholder="Enter the amount remitted for this order" style="width:100%;" oninput="document.getElementById('staffRemitAmountError').style.display='none';"/>
-        <div id="staffRemitAmountError" style="display:none;color:#dc2626;font-size:12px;margin-top:6px;"></div>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1.5rem;">
-        <button class="btn btn-cancel" onclick="closeGenericModal()">Cancel</button>
-        <button class="btn btn-solid-green" onclick="staffSubmitRemitAmount('${order.order_id}', ${grandTotal})">Complete Order</button>
-      </div>
-    </div>
-  `);
-}
-
-async function staffSubmitRemitAmount(orderId, grandTotal) {
-  const input   = document.getElementById('staffRemitAmountInput');
-  const errorEl = document.getElementById('staffRemitAmountError');
-  const amount  = parseFloat(input ? input.value : NaN);
-
-  if (isNaN(amount)) {
-    errorEl.textContent   = 'Enter the amount remitted.';
-    errorEl.style.display = 'block';
-    return;
-  }
-  if (Math.abs(amount - grandTotal) > 0.01) {
-    errorEl.textContent   = `Remitted amount (₱${amount.toFixed(2)}) does not match the order total (₱${grandTotal.toFixed(2)}).`;
-    errorEl.style.display = 'block';
-    return;
-  }
-
-  try {
-    const res = await fetch(`/api/staff/orders/${orderId}/delivered`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount_remitted: amount }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      closeGenericModal();
-      showToast('Order remitted and marked delivered.');
-      loadOrders();
-      return;
-    }
-    errorEl.textContent   = body.error || 'Failed to complete the order.';
-    errorEl.style.display = 'block';
-  } catch (e) {
-    errorEl.textContent   = 'Error completing the order.';
-    errorEl.style.display = 'block';
-  }
-}
-
-// One-click delivered confirmation for GCash orders — same /delivered
-// endpoint the typed-amount Remit flow uses (amount_remitted still gets
-// sent so the backend's match check passes), just without a modal or
-// typing, since the payment already happened online.
-async function staffConfirmGcashDelivered(orderId, grandTotal) {
-  const ok = await showConfirmDialog('Mark as Delivered', `Already paid ₱${grandTotal.toFixed(2)} via GCash — mark this order as delivered now?`);
-  if (!ok) return;
-  try {
-    const res  = await fetch(`/api/staff/orders/${orderId}/delivered`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ amount_remitted: grandTotal }),
-    });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast('Order marked delivered — already paid via GCash.');
-      loadOrders();
-      return;
-    }
-    showToast(body.error || 'Failed to complete the order.', 'error');
-  } catch (e) {
-    showToast('Error completing the order.', 'error');
-  }
-}
-
-async function staffMarkOrderNotDelivered(orderId) {
-  const confirmed = await showConfirmDialog('Confirm', 'Record a failed delivery attempt for this order?');
-  if (!confirmed) return;
-  try {
-    const res  = await fetch(`/api/staff/orders/${orderId}/not-delivered`, { method: 'POST' });
-    const body = await res.json().catch(() => ({}));
-    if (res.ok) {
-      showToast(body.message || 'Delivery attempt recorded.');
-      loadOrders();
-    } else {
-      showToast(body.error || 'Failed to record delivery attempt.', 'error');
-    }
-  } catch (e) { showToast('Error recording delivery attempt.', 'error'); }
-}
+// orderStatusActionHtml/updateOrderStatus and the entire "Deliveries for
+// Today" module (staffSwitchDeliveriesTab, renderStaffDeliveriesForToday,
+// staffOpenRemitModal, staffBulkRemitSelectedOrders, staffCloseRemittanceNow,
+// staffMarkOrderNotDelivered, etc.) removed entirely (staff rework, Nov
+// 2026) — staff no longer handles the online-order delivery/remittance
+// lifecycle at all; that whole flow is admin-only now. Walk-in orders are
+// created straight to 'completed' via staff_place_order, so none of this
+// ever applied to them anyway.
 
 // ══════════════════════════════════════════════════════
 // SALES SUMMARY
@@ -5990,7 +5235,6 @@ document.addEventListener('DOMContentLoaded', async () => {
   _loadedSections.add('pos'); await loadPosProducts();
   await loadPosDiscounts();
   startConnectivityWatch();
-  staffSwitchDeliveriesTab('today');
   _startNotifPolling();
   refreshStaffNavBadges();
 

@@ -299,7 +299,7 @@ var pageTitles = {
   products:        ['Products',          'Manage product catalog and details'],
   inventory:       ['Inventory',         'Manage stock levels and movements'],
   orders:          ['Orders',            'Manage online customer orders'],
-  warehouse:       ['Warehouse',         'Online fulfillment stock, unassigned orders, and pullout history'],
+  warehouse:       ['Warehouse',         'Online fulfillment stock, purchase order receiving, and branch distribution'],
   feedback:        ['Feedback & Inquiries', 'Review and respond to customer feedback and inquiries'],
   returns:         ['Returns & Refunds',  'Review and resolve customer return requests'],
   purchase_orders: ['Purchase Orders',   'Manage purchase orders & stock requests'],
@@ -1094,11 +1094,10 @@ function populateBranchSelects(...selectIds) {
 // contained and low-risk to add.
 async function refreshNavBadges() {
   try {
-    const [products, orders, stockRequests, unassignedOrders, feedbackRows, pendingReturns] = await Promise.all([
+    const [products, orders, stockRequests, feedbackRows, pendingReturns] = await Promise.all([
       fetch('/api/admin/products').then(r => r.json()),
       fetch('/api/admin/orders?limit=80').then(r => r.json()),
       fetch('/api/admin/stock-requests').then(r => r.json()),
-      fetch('/api/admin/orders/unassigned').then(r => r.json()),
       fetch('/api/admin/feedback?status=open').then(r => r.json()),
       fetch('/api/staff/returns?status=pending').then(r => r.json()),
     ]);
@@ -1133,14 +1132,9 @@ async function refreshNavBadges() {
       poBadge.style.display = pendingReqs.length > 0 ? 'inline' : 'none';
     }
 
-    // Warehouse nav badge — unassigned online orders waiting for admin to
-    // route them to a branch (revision, Nov 2026).
-    const unassignedCount = Array.isArray(unassignedOrders) ? unassignedOrders.length : 0;
-    const whBadge = document.getElementById('warehouseUnassignedBadge');
-    if (whBadge) {
-      whBadge.textContent   = unassignedCount > 99 ? '99+' : unassignedCount;
-      whBadge.style.display = unassignedCount > 0 ? 'inline-block' : 'none';
-    }
+    // Warehouse nav badge removed (staff rework, Nov 2026) — the Unassigned
+    // Orders queue it counted no longer exists; online orders are never
+    // branch-assigned any more, they're processed directly from Orders.
 
     // Feedback nav badge — open (unanswered) feedback/inquiries.
     const openFeedbackCount = Array.isArray(feedbackRows) ? feedbackRows.length : 0;
@@ -5065,67 +5059,86 @@ function closeModal() {
 }
 
 // ══════════════════════════════════════════════════════
-// WAREHOUSE (revision, Nov 2026) — the single online-fulfillment
-// stock pool, the Unassigned Orders branch-assignment queue, and the
-// Item Pullout history. Admin-only; staff never see any of this (see
-// staff.js's Orders section + the branch-guard fix in app.py's
-// staff_mark_delivered).
+// WAREHOUSE (reworked, Nov 2026) — the single online-fulfillment stock
+// pool and the Item Pullout log. Admin-only.
+//
+// Staff rework removed the old Unassigned Orders tab entirely — online
+// orders are never routed to a branch any more; admin processes the full
+// online-order lifecycle directly from the Orders module. This module is
+// now purely about warehouse STOCK: Purchase Orders land here first (see
+// _po_add_warehouse_stock in app.py), online orders draw from here, and
+// the new "Distribute to Branch" action (below) is how stock actually
+// reaches a branch's own branch_stock afterward — logged into the same
+// Item Pullout log as online-order pulls.
 // ══════════════════════════════════════════════════════
-let _warehouseUnassigned   = [];
 let _warehouseStockData    = { stock: [], variant_stock: [] };
 let _warehousePullout      = [];
-let _warehouseActiveTab    = 'unassigned';
-let _assignBranchInFlight  = new Set();
+let _warehouseActiveTab    = 'stock';
 
 // Pagination (user request, Nov 2026) — same renderPagerCustom design
 // used elsewhere (Orders, Products, etc.), 10 rows/page, one page
 // counter per tab so switching tabs doesn't reset another tab's page.
 const WAREHOUSE_PAGE_SIZE   = 10;
-let warehouseUnassignedPage = 1;
 let warehouseStockPage      = 1;
 let warehousePulloutPage    = 1;
 
+// Stock-level / search filtering for the Warehouse Stock table — same
+// thresholds and filter shape as the branch Inventory view's Branch Stock
+// Summary (bsLevelOf/branchStockLevelVal), so the two views read
+// consistently even though this one shows a single combined pool instead
+// of one card per branch.
+let warehouseStockLevelVal  = '';
+let warehouseStockSearchVal = '';
+
+function filterWarehouseStockLevel(val) {
+  warehouseStockLevelVal = val;
+  warehouseStockPage = 1;
+  renderWarehouseStock();
+}
+window.filterWarehouseStockLevel = filterWarehouseStockLevel;
+
+function filterWarehouseStock(val) {
+  warehouseStockSearchVal = (val || '').trim().toLowerCase();
+  warehouseStockPage = 1;
+  renderWarehouseStock();
+}
+window.filterWarehouseStock = filterWarehouseStock;
+
+function _warehouseStockLevelOf(q) {
+  q = Number(q);
+  if (q === 0) return 'out';
+  if (q > 0 && q <= 5) return 'critical';
+  if (q > 0 && q <= 10) return 'low';
+  return 'ok';
+}
+const _warehouseLevelRank = { out: 3, critical: 2, low: 1, ok: 0 };
+
 async function loadWarehouse() {
-  skTable('warehouseUnassignedBody', [], 7);
   skTable('warehouseStockBody', [], 5);
   skTable('warehousePulloutBody', [], 7);
-  warehouseUnassignedPage = 1;
   warehouseStockPage      = 1;
   warehousePulloutPage    = 1;
   if (!allBranches.length) await loadBranches();
   try {
-    const [unassignedRes, stockRes, pulloutRes] = await Promise.all([
-      fetch('/api/admin/orders/unassigned'),
+    const [stockRes, pulloutRes] = await Promise.all([
       fetch('/api/admin/warehouse-stock'),
       fetch('/api/admin/warehouse-pullout?limit=200'),
     ]);
-    _warehouseUnassigned = unassignedRes.ok ? await unassignedRes.json() : [];
     _warehouseStockData  = stockRes.ok ? await stockRes.json() : { stock: [], variant_stock: [] };
     _warehousePullout    = pulloutRes.ok ? await pulloutRes.json() : [];
   } catch (e) {
     console.error('Warehouse load error:', e);
     showToast('Failed to load warehouse data.', 'error');
   }
-  updateWarehouseUnassignedBadge();
-  renderWarehouseUnassigned();
   renderWarehouseStock();
   renderWarehousePullout();
   switchWarehouseTab(_warehouseActiveTab);
 }
 window.loadWarehouse = loadWarehouse;
 
-function updateWarehouseUnassignedBadge() {
-  const badge = document.getElementById('warehouseUnassignedBadge');
-  if (!badge) return;
-  const count = _warehouseUnassigned.length;
-  badge.textContent   = count > 99 ? '99+' : count;
-  badge.style.display = count > 0 ? 'inline-block' : 'none';
-}
-
 function switchWarehouseTab(tab) {
   _warehouseActiveTab = tab;
   const panels = {
-    unassigned: ['warehouseTabUnassignedBtn', 'warehouseUnassignedPanel'],
     stock:      ['warehouseTabStockBtn', 'warehouseStockPanel'],
     pullout:    ['warehouseTabPulloutBtn', 'warehousePulloutPanel'],
   };
@@ -5138,205 +5151,15 @@ function switchWarehouseTab(tab) {
 }
 window.switchWarehouseTab = switchWarehouseTab;
 
-function changeWarehouseUnassignedPage(p) { warehouseUnassignedPage = p; renderWarehouseUnassigned(); }
-window.changeWarehouseUnassignedPage = changeWarehouseUnassignedPage;
-
-function renderWarehouseUnassigned() {
-  const tbody = document.getElementById('warehouseUnassignedBody');
-  if (!tbody) return;
-  if (!_warehouseUnassigned.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="table-empty">No unassigned orders — the queue is clear.</td></tr>';
-    document.getElementById('warehouseUnassignedPagination').innerHTML = '';
-    updateWarehouseBulkToolbar();
-    return;
-  }
-  const totalPages = Math.ceil(_warehouseUnassigned.length / WAREHOUSE_PAGE_SIZE) || 1;
-  if (warehouseUnassignedPage > totalPages) warehouseUnassignedPage = totalPages;
-  const start = (warehouseUnassignedPage - 1) * WAREHOUSE_PAGE_SIZE;
-  const paged = _warehouseUnassigned.slice(start, start + WAREHOUSE_PAGE_SIZE);
-  tbody.innerHTML = paged.map(o => {
-    const cust      = Array.isArray(o.customer) ? o.customer[0] : o.customer;
-    const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
-    const itemCount = (o.order_item || []).length;
-    const placed    = o.created_at ? new Date(o.created_at).toLocaleString() : '—';
-    return `<tr>
-      <td><input type="checkbox" class="warehouse-select-cb" value="${o.order_id}" onchange="updateWarehouseBulkToolbar()"/></td>
-      <td>${o.order_id.slice(0,8).toUpperCase()}</td>
-      <td>${custName || '—'}</td>
-      <td>${itemCount} item(s)</td>
-      <td>₱${Number(o.total || 0).toFixed(2)}</td>
-      <td>${o.fulfillment_type === 'pickup' ? 'Pickup' : 'Delivery'}</td>
-      <td>${placed}</td>
-      <td><button class="btn btn-solid-green" style="font-size:11px;padding:4px 10px;" onclick="openAssignBranchModal('${o.order_id}')">Assign Branch</button></td>
-    </tr>`;
-  }).join('');
-  renderPagerCustom('warehouseUnassignedPagination', _warehouseUnassigned.length, warehouseUnassignedPage, WAREHOUSE_PAGE_SIZE, 'changeWarehouseUnassignedPage');
-  const selectAllCb = document.getElementById('warehouseSelectAllCb');
-  if (selectAllCb) selectAllCb.checked = false;
-  updateWarehouseBulkToolbar();
-}
-
-// Bulk "Assign Selected to Branch" (user request, Nov 2026) — same
-// checkbox-column + toolbar pattern as the Orders table's bulk actions.
-function toggleAllWarehouseSelections(cb) {
-  document.querySelectorAll('.warehouse-select-cb').forEach(el => { el.checked = cb.checked; });
-  updateWarehouseBulkToolbar();
-}
-window.toggleAllWarehouseSelections = toggleAllWarehouseSelections;
-
-function updateWarehouseBulkToolbar() {
-  const count = document.querySelectorAll('.warehouse-select-cb:checked').length;
-  const countEl = document.getElementById('warehouseBulkSelectedCount');
-  const btn     = document.getElementById('warehouseBulkAssignBtn');
-  if (countEl) countEl.textContent = count;
-  if (btn) {
-    btn.disabled      = count === 0;
-    btn.style.opacity = count === 0 ? '0.45' : '1';
-    btn.style.cursor  = count === 0 ? 'not-allowed' : 'pointer';
-  }
-}
-window.updateWarehouseBulkToolbar = updateWarehouseBulkToolbar;
-
-function openBulkAssignBranchModal() {
-  const ids = Array.from(document.querySelectorAll('.warehouse-select-cb:checked')).map(el => el.value);
-  if (!ids.length) { showToast('Select at least one order first.', 'error'); return; }
-  const branchOptions = allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
-
-  showModal(`
-    <div style="padding:1.5rem;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
-        <h3 style="margin:0;font-size:17px;">Assign ${ids.length} Order(s) to Branch</h3>
-        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
-      </div>
-      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">Every selected order will be routed to the same branch. Orders that no longer qualify (already assigned, etc.) by the time this runs are skipped automatically.</p>
-      <label class="form-label" style="font-size:12px;">Fulfilling Branch</label>
-      <select id="bulkAssignBranchSelect" class="form-input" style="width:100%;margin-bottom:12px;">
-        <option value="">Select branch</option>
-        ${branchOptions}
-      </select>
-      <div style="display:flex;justify-content:flex-end;gap:8px;">
-        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-solid-green" onclick="confirmBulkAssignBranch(${JSON.stringify(ids)})">Assign</button>
-      </div>
-    </div>
-  `, '480px', true);
-}
-window.openBulkAssignBranchModal = openBulkAssignBranchModal;
-
-async function confirmBulkAssignBranch(orderIds) {
-  const branchId = document.getElementById('bulkAssignBranchSelect')?.value;
-  if (!branchId) { showToast('Please select a branch.', 'error'); return; }
-  try {
-    const res = await fetch('/api/admin/orders/assign-branch-bulk', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ order_ids: orderIds, branch_id: branchId }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.error || 'Failed to bulk assign branch.', 'error'); return; }
-    showToast(`Assigned ${data.updated.length} order(s)${data.skipped.length ? `, skipped ${data.skipped.length} (no longer eligible)` : ''}.`);
-    closeModal();
-    invalidateSection('warehouse');
-    invalidateSection('orders');
-    loadWarehouse();
-  } catch (e) {
-    console.error('Bulk assign branch error:', e);
-    showToast('Failed to bulk assign branch.', 'error');
-  }
-}
-window.confirmBulkAssignBranch = confirmBulkAssignBranch;
-
-function openAssignBranchModal(orderId) {
-  const order = _warehouseUnassigned.find(o => o.order_id === orderId);
-  if (!order) return;
-  const cust      = Array.isArray(order.customer) ? order.customer[0] : order.customer;
-  const custName  = cust ? `${cust.fname || ''} ${cust.lname || ''}`.trim() : '—';
-  const addrParts  = (order.address || '').split('|');
-  const addrString = addrParts.length > 1
-    ? [addrParts[0], addrParts[1], addrParts[2], addrParts[3]].filter(Boolean).join(', ')
-    : order.address || '—';
-  const itemsHtml = (order.order_item || []).length
-    ? order.order_item.map(i => {
-        const prod = Array.isArray(i.product) ? i.product[0] : i.product;
-        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid var(--border);font-size:12px;">
-          <span>${prod?.product_name || '—'}</span><span style="color:var(--text-muted);">x${i.qty}</span>
-        </div>`;
-      }).join('')
-    : '<p style="color:var(--text-muted);text-align:center;">No items</p>';
-  const branchOptions = allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
-
-  showModal(`
-    <div style="padding:1.5rem;max-height:85vh;overflow-y:auto;">
-      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
-        <div>
-          <h3 style="margin:0;font-size:17px;">Assign to Branch</h3>
-          <p style="margin:4px 0 0;font-size:13px;color:var(--text-muted);">#${order.order_id.slice(0,8).toUpperCase()} — ${custName}</p>
-        </div>
-        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
-      </div>
-
-      <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;font-size:13px;">
-        <span style="color:var(--text-muted);">${order.fulfillment_type === 'pickup' ? 'Pickup order' : 'Delivery Address'}</span><br/>
-        <strong>${order.fulfillment_type === 'pickup' ? 'Customer will pick up at the assigned branch' : (addrString || 'No address provided')}</strong>
-      </div>
-
-      <div style="margin-bottom:0.5rem;font-size:12px;font-weight:600;color:var(--text-muted);">ITEMS</div>
-      ${itemsHtml}
-
-      <div style="margin-top:1rem;">
-        <label class="form-label" style="font-size:12px;">Fulfilling Branch</label>
-        <select id="assignBranchSelect" class="form-input" style="width:100%;">
-          <option value="">Select branch</option>
-          ${branchOptions}
-        </select>
-      </div>
-
-      <div style="display:flex;justify-content:flex-end;gap:8px;margin-top:1.5rem;">
-        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
-        <button class="btn btn-solid-green" onclick="confirmAssignBranch('${order.order_id}')">Assign</button>
-      </div>
-    </div>
-  `, '480px', true);
-}
-window.openAssignBranchModal = openAssignBranchModal;
-
-async function confirmAssignBranch(orderId) {
-  if (_assignBranchInFlight.has(orderId)) return;
-  const select   = document.getElementById('assignBranchSelect');
-  const branchId = select ? select.value : '';
-  if (!branchId) { showToast('Please select a branch.', 'error'); return; }
-  _assignBranchInFlight.add(orderId);
-  try {
-    const res = await fetch(`/api/admin/orders/${orderId}/assign-branch`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ branch_id: branchId }),
-    });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) { showToast(data.error || 'Failed to assign branch.', 'error'); return; }
-    showToast('Order assigned to branch.');
-    closeModal();
-    invalidateSection('warehouse');
-    invalidateSection('orders');
-    loadWarehouse();
-  } catch (e) {
-    console.error('Assign branch error:', e);
-    showToast('Failed to assign branch.', 'error');
-  } finally {
-    _assignBranchInFlight.delete(orderId);
-  }
-}
-window.confirmAssignBranch = confirmAssignBranch;
-
 function changeWarehouseStockPage(p) { warehouseStockPage = p; renderWarehouseStock(); }
 window.changeWarehouseStockPage = changeWarehouseStockPage;
 
 function renderWarehouseStock() {
   const tbody = document.getElementById('warehouseStockBody');
   if (!tbody) return;
-  const rows = _warehouseStockData.stock || [];
-  if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="5" class="table-empty">No warehouse stock recorded yet.</td></tr>';
+  const allRows = _warehouseStockData.stock || [];
+  if (!allRows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No warehouse stock recorded yet.</td></tr>';
     document.getElementById('warehouseStockPagination').innerHTML = '';
     return;
   }
@@ -5344,27 +5167,116 @@ function renderWarehouseStock() {
   (_warehouseStockData.variant_stock || []).forEach(v => {
     (variantsByProduct[v.product_id] = variantsByProduct[v.product_id] || []).push(v);
   });
+
+  // Worst alert level across the pool quantity AND its own variant rows —
+  // same "variant can be worse than the aggregate" logic as bsWorstLevel
+  // in the branch Inventory view.
+  const worstLevel = (r) => {
+    let level = _warehouseStockLevelOf(r.quantity);
+    let variantDriven = false;
+    (variantsByProduct[r.product_id] || []).forEach(v => {
+      const l = _warehouseStockLevelOf(v.quantity);
+      if (_warehouseLevelRank[l] > _warehouseLevelRank[level]) { level = l; variantDriven = true; }
+    });
+    return { level, variantDriven };
+  };
+
+  const rows = allRows.filter(r => {
+    const prod = Array.isArray(r.product) ? r.product[0] : r.product;
+    const { level } = worstLevel(r);
+    if (warehouseStockLevelVal === 'critical_stock' && level !== 'critical') return false;
+    if (warehouseStockLevelVal === 'low_stock'       && level !== 'low')      return false;
+    if (warehouseStockLevelVal === 'out_of_stock'    && level !== 'out')      return false;
+    if (warehouseStockSearchVal && !(prod?.product_name || '').toLowerCase().includes(warehouseStockSearchVal)) return false;
+    return true;
+  });
+
+  if (!rows.length) {
+    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No products match this filter.</td></tr>';
+    document.getElementById('warehouseStockPagination').innerHTML = '';
+    return;
+  }
+
   const totalPages = Math.ceil(rows.length / WAREHOUSE_PAGE_SIZE) || 1;
   if (warehouseStockPage > totalPages) warehouseStockPage = totalPages;
   const start = (warehouseStockPage - 1) * WAREHOUSE_PAGE_SIZE;
   const paged = rows.slice(start, start + WAREHOUSE_PAGE_SIZE);
+
   tbody.innerHTML = paged.map(r => {
     const prod     = Array.isArray(r.product) ? r.product[0] : r.product;
     const variants = variantsByProduct[r.product_id] || [];
-    const variantsLabel = variants.length
-      ? variants.map(v => `${Object.values(v.options || {}).join('/')}: ${v.quantity}`).join(', ')
-      : '—';
-    const updated = r.updated_at ? new Date(r.updated_at).toLocaleString() : '—';
-    return `<tr>
-      <td>${prod?.product_name || '—'}</td>
+    const hasVariants = variants.length > 0;
+    const updated  = r.updated_at ? new Date(r.updated_at).toLocaleString() : '—';
+
+    const imgUrl = prod?.image_url;
+    const imgHtml = imgUrl
+      ? `<img src="${imgUrl}" class="product-img-cell" style="width:32px;height:32px;" alt="${prod?.product_name || ''}"/>`
+      : '<div class="product-img-placeholder"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="width:14px;height:14px;"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>';
+
+    const { level, variantDriven } = worstLevel(r);
+    const qtyClass = level === 'out' ? 'out-stock' : level === 'critical' ? 'critical-stock' : level === 'low' ? 'low-stock' : 'in-stock';
+    const badge    = level === 'out'
+      ? '<span class="badge badge--gray">Out of Stock</span>'
+      : level === 'critical'
+        ? '<span class="badge badge--red">Critical Level</span>'
+        : level === 'low'
+          ? '<span class="badge badge--yellow">Low Stock</span>'
+          : '<span class="badge badge--green">In Stock</span>';
+    const variantNote = variantDriven ? ' <span style="font-size:10px;opacity:0.75;">(variant)</span>' : '';
+    const expandBtn = hasVariants
+      ? `<span class="inv-expand-btn" style="margin-left:6px;font-size:10px;color:var(--text-muted);cursor:pointer;" onclick="toggleWarehouseVariantRow('${r.product_id}',this)">▶</span>`
+      : '';
+
+    return `<tr style="cursor:${hasVariants ? 'pointer' : 'default'};" ${hasVariants ? `onclick="toggleWarehouseVariantRow('${r.product_id}',this.querySelector('.inv-expand-btn'))"` : ''}>
+      <td></td>
+      <td><div style="display:flex;align-items:center;gap:8px;">${imgHtml}<span style="font-size:12px;font-weight:600;">${prod?.product_name || '—'}</span>${expandBtn}</div></td>
       <td>${prod?.category || '—'}</td>
-      <td>${r.quantity}</td>
-      <td style="font-size:11px;">${variantsLabel}</td>
+      <td style="text-align:center;"><span class="branch-stock-qty ${qtyClass}">${r.quantity}</span>${variantNote}</td>
+      <td>${badge}</td>
       <td>${updated}</td>
+    </tr>
+    <tr id="whVarRow_${r.product_id}" style="display:none;background:var(--surface);">
+      <td colspan="6" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>
     </tr>`;
   }).join('');
   renderPagerCustom('warehouseStockPagination', rows.length, warehouseStockPage, WAREHOUSE_PAGE_SIZE, 'changeWarehouseStockPage');
 }
+
+// Variant breakdown for one warehouse-pool product — unlike
+// toggleInvVariantRow (branch Inventory), this never needs its own fetch:
+// every warehouse variant row is already loaded into _warehouseStockData
+// up front (one combined pool, no per-branch scoping), so this just
+// toggles the pre-rendered detail row.
+function toggleWarehouseVariantRow(productId, btnEl) {
+  const row = document.getElementById('whVarRow_' + productId);
+  if (!row) return;
+  if (row.style.display !== 'none') {
+    row.style.display = 'none';
+    if (btnEl) btnEl.textContent = '▶';
+    return;
+  }
+  row.style.display = '';
+  if (btnEl) btnEl.textContent = '▼';
+
+  const cont = row.querySelector('.inv-variant-content');
+  const variants = (_warehouseStockData.variant_stock || []).filter(v => v.product_id === productId);
+  if (!variants.length) {
+    cont.innerHTML = '<span style="font-size:12px;color:var(--text-muted);">No variant stock recorded yet.</span>';
+    return;
+  }
+  const chips = variants.map(v => {
+    const opts  = Object.entries(v.options || {}).map(([k, val]) => `${k}: ${val}`).join(', ');
+    const qty   = v.quantity || 0;
+    const color = qty === 0 ? 'var(--text)' : qty <= 5 ? '#ef4444' : qty <= 10 ? '#f59e0b' : 'var(--g-400)';
+    const bg    = qty === 0 ? 'rgba(107,114,128,0.08)' : qty <= 5 ? 'rgba(239,68,68,0.05)' : qty <= 10 ? 'rgba(245,158,11,0.05)' : 'rgba(22,163,74,0.05)';
+    return `<div style="padding:5px 10px;border-radius:8px;border:1.5px solid ${color};background:${bg};font-size:12px;display:inline-block;margin:2px;">`
+      + `<span style="font-weight:500;">${opts}</span>`
+      + `<span style="margin-left:8px;font-weight:700;color:${color};">${qty} units</span>`
+      + (qty === 0 ? ' ⚠️' : '') + '</div>';
+  }).join('');
+  cont.innerHTML = `<div style="display:flex;flex-wrap:wrap;gap:4px;">${chips}</div>`;
+}
+window.toggleWarehouseVariantRow = toggleWarehouseVariantRow;
 
 function openWarehouseAdjustModal() {
   const products = (_warehouseStockData.stock || []).map(r => {
@@ -5423,6 +5335,78 @@ async function confirmWarehouseAdjust() {
 }
 window.confirmWarehouseAdjust = confirmWarehouseAdjust;
 
+// Distribute to Branch (new, staff rework Nov 2026) — pushes warehouse
+// stock down into one branch's own branch_stock, for that branch's walk-
+// in/POS shelf. This is the other half of the rework: Purchase Orders now
+// land in the warehouse first (see the PO module), and this is how stock
+// then actually reaches a branch from there. Logged into the shared Item
+// Pullout log.
+function openWarehouseDistributeModal() {
+  const products = (_warehouseStockData.stock || []).map(r => {
+    const prod = Array.isArray(r.product) ? r.product[0] : r.product;
+    return { product_id: r.product_id, name: prod?.product_name || '—', quantity: r.quantity };
+  });
+  const productOptions = products.map(p => `<option value="${p.product_id}">${p.name} (${p.quantity} in warehouse)</option>`).join('');
+  const branchOptions   = allBranches.map(b => `<option value="${b.branch_id}">${b.branch_name}</option>`).join('');
+  showModal(`
+    <div style="padding:1.5rem;">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:1rem;">
+        <h3 style="margin:0;font-size:17px;">Distribute to Branch</h3>
+        <button onclick="closeModal()" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:18px;">✕</button>
+      </div>
+      <p style="font-size:12px;color:var(--text-muted);margin:0 0 12px;">Moves stock out of the warehouse pool and into the selected branch's own shelf stock, for walk-in/POS sales.</p>
+      <label class="form-label" style="font-size:12px;">Product</label>
+      <select id="whDistProduct" class="form-input" style="width:100%;margin-bottom:12px;">
+        <option value="">Select product</option>
+        ${productOptions}
+      </select>
+      <label class="form-label" style="font-size:12px;">Destination Branch</label>
+      <select id="whDistBranch" class="form-input" style="width:100%;margin-bottom:12px;">
+        <option value="">Select branch</option>
+        ${branchOptions}
+      </select>
+      <label class="form-label" style="font-size:12px;">Quantity</label>
+      <input type="number" id="whDistQty" min="1" class="form-input" style="width:100%;margin-bottom:12px;" placeholder="e.g. 20"/>
+      <label class="form-label" style="font-size:12px;">Note (optional)</label>
+      <input type="text" id="whDistNote" class="form-input" style="width:100%;margin-bottom:12px;" placeholder="e.g. Weekly restock"/>
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-cancel" onclick="closeModal()">Cancel</button>
+        <button class="btn btn-solid-green" onclick="confirmWarehouseDistribute()">Distribute</button>
+      </div>
+    </div>
+  `, '480px', true);
+}
+window.openWarehouseDistributeModal = openWarehouseDistributeModal;
+
+async function confirmWarehouseDistribute() {
+  const productId = document.getElementById('whDistProduct')?.value;
+  const branchId   = document.getElementById('whDistBranch')?.value;
+  const qtyRaw     = document.getElementById('whDistQty')?.value;
+  const note       = document.getElementById('whDistNote')?.value || '';
+  const qty = parseInt(qtyRaw, 10);
+  if (!productId) { showToast('Please select a product.', 'error'); return; }
+  if (!branchId)   { showToast('Please select a destination branch.', 'error'); return; }
+  if (!qty || qty <= 0 || isNaN(qty)) { showToast('Please enter a quantity greater than zero.', 'error'); return; }
+  try {
+    const res = await fetch('/api/admin/warehouse-stock/distribute', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ product_id: productId, branch_id: branchId, quantity: qty, note }),
+    });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) { showToast(data.error || 'Failed to distribute stock.', 'error'); return; }
+    showToast('Stock distributed to branch.');
+    closeModal();
+    invalidateSection('warehouse');
+    invalidateSection('inventory');
+    loadWarehouse();
+  } catch (e) {
+    console.error('Warehouse distribute error:', e);
+    showToast('Failed to distribute stock.', 'error');
+  }
+}
+window.confirmWarehouseDistribute = confirmWarehouseDistribute;
+
 function changeWarehousePulloutPage(p) { warehousePulloutPage = p; renderWarehousePullout(); }
 window.changeWarehousePulloutPage = changeWarehousePulloutPage;
 
@@ -5439,10 +5423,17 @@ function renderWarehousePullout() {
   const start = (warehousePulloutPage - 1) * WAREHOUSE_PAGE_SIZE;
   const paged = _warehousePullout.slice(start, start + WAREHOUSE_PAGE_SIZE);
   tbody.innerHTML = paged.map(p => {
-    const prod      = Array.isArray(p.product) ? p.product[0] : p.product;
-    const staff     = Array.isArray(p.staff) ? p.staff[0] : p.staff;
-    const order     = Array.isArray(p.order) ? p.order[0] : p.order;
-    const branchObj = order && (Array.isArray(order.branch) ? order.branch[0] : order.branch);
+    const prod       = Array.isArray(p.product) ? p.product[0] : p.product;
+    const staff       = Array.isArray(p.staff) ? p.staff[0] : p.staff;
+    const order       = Array.isArray(p.order) ? p.order[0] : p.order;
+    const orderBranch = order && (Array.isArray(order.branch) ? order.branch[0] : order.branch);
+    const distBranch  = Array.isArray(p.to_branch) ? p.to_branch[0] : p.to_branch;
+    // Two event types share this log (staff rework, Nov 2026): an
+    // online-order fulfillment pull (order_id set) or a warehouse→branch
+    // distribution (to_branch_id set, order_id null).
+    const sourceLabel = p.order_id
+      ? `#${p.order_id.slice(0,8).toUpperCase()}${orderBranch ? ' → ' + orderBranch.branch_name : ''}`
+      : (distBranch ? `Distributed → ${distBranch.branch_name}` : '—');
     const variantLabel = p.variant_options && Object.keys(p.variant_options).length
       ? Object.entries(p.variant_options).map(([k,v]) => `${k}: ${v}`).join(', ')
       : '—';
@@ -5450,7 +5441,7 @@ function renderWarehousePullout() {
     const staffName = staff ? `${staff.fname || ''} ${staff.lname || ''}`.trim() : 'System';
     return `<tr>
       <td>${pulledAt}</td>
-      <td>${p.order_id ? p.order_id.slice(0,8).toUpperCase() : '—'}${branchObj ? ' → ' + branchObj.branch_name : ''}</td>
+      <td>${sourceLabel}</td>
       <td>${prod?.product_name || '—'}</td>
       <td style="font-size:11px;">${variantLabel}</td>
       <td>${p.quantity}</td>
@@ -10159,9 +10150,10 @@ function openPODetail(poId) {
 
   // Fetched separately (not part of the PO payload itself) — these are the
   // actual inventory rows this PO's receiving wrote, matched by po_number
-  // appearing in each row's note (see _po_add_branch_stock's 'PO received —
-  // {po_number}' tag). Lets the admin see exactly what stock moved from
-  // this PO without switching to Inventory or the Sales Report.
+  // appearing in each row's note (see _po_add_warehouse_stock's 'PO received
+  // into warehouse — {po_number}' tag). Lets the admin see exactly what
+  // stock moved from this PO without switching to Inventory or the Sales
+  // Report.
   loadPOLinkedInventory(po);
 
   // Action buttons based on status
@@ -10195,34 +10187,12 @@ function openPODetail(poId) {
           </div>`;
       }
 
-      // Adviser follow-up (Oct 26 2026): show each branch's CURRENT stock
-      // next to its distribution input, so admin can see at a glance
-      // whether a branch actually needs this much (avoids overstocking one
-      // branch while another stays short).
-      const prodRecord  = allProducts.find(p => p.product_id === item.product_id);
-      const branchStockMap = {};
-      (prodRecord?.branch_stock || []).forEach(bs => {
-        branchStockMap[bs.branch_id || bs.branch?.branch_id] = bs.quantity;
-      });
-
-      // If this item came from a staff stock request, requesting_branch_id
-      // (set at Create-PO time — see submitCreatePO) names which branch
-      // actually asked for it. Pre-fill that branch's distribution with the
-      // full amount being received, instead of leaving every branch at 0 —
-      // admin can still override it before saving.
-      const branchInputs = allBranches.map(b => {
-        const isRequestingBranch = item.requesting_branch_id && b.branch_id === item.requesting_branch_id;
-        const defaultVal = isRequestingBranch ? outstanding : 0;
-        const currentStock = branchStockMap[b.branch_id];
-        return `<div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
-          <label style="font-size:13.5px;font-weight:500;min-width:130px;">${b.branch_name}${isRequestingBranch ? ' <span style="color:var(--g-400);font-size:11.5px;">(requested)</span>' : ''}</label>
-          <input type="number" id="dist_${idx}_${b.branch_id}" min="0" value="${defaultVal}"
-            data-item="${idx}" data-branch="${b.branch_id}"
-            oninput="this.value=this.value.replace(/[^0-9]/g,'');validatePODistribution()"
-            style="width:76px;padding:7px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:14px;"/>
-          <span style="font-size:12.5px;color:var(--text-muted);">units ${currentStock !== undefined ? `<span style="color:var(--text-muted);">(currently ${currentStock})</span>` : ''}</span>
-        </div>`;
-      }).join('');
+      // PO rework (Nov 2026): received stock now lands wholly in the
+      // warehouse pool, not split across branches at receiving time — so
+      // there's no per-branch input here any more. It reaches a branch
+      // afterward via the separate "Distribute to Branch" action on the
+      // Warehouse module's Stock tab.
+      const prodRecord = allProducts.find(p => p.product_id === item.product_id);
 
       // Unit Cost + Supplier are entered HERE instead of at Create PO (Oct
       // 26 2026 adviser follow-up) — different products on one PO may come
@@ -10262,10 +10232,7 @@ function openPODetail(poId) {
                 style="flex:1;padding:7px 10px;border-radius:7px;border:1.5px solid var(--border);background:var(--surface);color:var(--text-primary);font-size:14px;"/>
             </div>
           </div>
-          <div style="font-size:12px;font-weight:600;color:var(--text-muted);margin-bottom:10px;text-transform:uppercase;letter-spacing:0.4px;">📦 Distribute to Branches</div>
-          ${branchInputs}
-          <div id="distError_${idx}" style="font-size:12.5px;color:#ef4444;margin-top:6px;display:none;"></div>
-          <div id="distCount_${idx}" style="font-size:12.5px;color:var(--text-muted);margin-top:6px;"></div>
+          <div style="font-size:12px;color:var(--text-muted);display:flex;align-items:center;gap:6px;">📦 Goes into the warehouse pool — distribute to a branch afterward from the Warehouse module.</div>
         </div>`;
     };
 
@@ -10309,17 +10276,22 @@ function closePODetailModal() {
   document.getElementById('poDetailModal')?.classList.remove('open');
 }
 
-// ─── PO Receive & Distribute Validation ──────────────────
+// ─── PO Receive Validation ────────────────────────────────
 // A batch can legitimately receive SOME items and not others (e.g. the
 // supplier delivered 2 of 3 products today) — so "receiving now: 0" for a
 // line item is a valid "skip it this round" state, not an error. What IS
-// still required: whatever amount IS entered for a line must have its
-// branch distribution add up exactly, and at least one line in the batch
-// must be > 0 (otherwise there's nothing to submit).
+// still required: at least one line in the batch must be > 0, and any line
+// being received needs a Unit Cost and Supplier.
+//
+// PO rework (Nov 2026): the old per-branch distribution check is gone —
+// every item received now goes wholly into the warehouse pool, nothing to
+// reconcile across branches here any more. Kept the function name
+// (validatePODistribution) since every oninput handler in the receive rows
+// still calls it by that name.
 function validatePODistribution() {
-  // The receive/distribute rows live in poDetailContent, not the footer —
-  // the footer only holds the Close/Save Receipt buttons (moved out so a
-  // tall sibling in the same flex row can't stretch those buttons).
+  // The receive rows live in poDetailContent, not the footer — the footer
+  // only holds the Close/Save Receipt buttons (moved out so a tall sibling
+  // in the same flex row can't stretch those buttons).
   var content  = document.getElementById('poDetailContent');
   var btn      = document.getElementById('markReceivedBtn');
   if (!content) return;
@@ -10343,45 +10315,8 @@ function validatePODistribution() {
       recvQty = maxQty;
     }
 
-    var distTotal  = 0;
-    allBranches.forEach(function(b) {
-      var inp = document.getElementById('dist_' + idx + '_' + b.branch_id);
-      if (inp) distTotal += parseInt(inp.value || '0');
-    });
-
-    var errEl   = document.getElementById('distError_' + idx);
-    var countEl = document.getElementById('distCount_' + idx);
     var skipped = recvQty <= 0;
-    var over    = !skipped && distTotal > recvQty;
-    var under   = !skipped && distTotal < recvQty;
-    var matches = !skipped && distTotal === recvQty;
-
     if (!skipped) anyReceiving = true;
-
-    if (countEl) {
-      countEl.textContent = skipped
-        ? 'Not receiving this item in this batch'
-        : 'Distributed: ' + distTotal + ' / ' + recvQty + ' receiving now';
-      countEl.style.color = matches ? 'var(--g-400)' : (over || under) ? '#ef4444' : 'var(--text-muted)';
-    }
-    if (errEl) {
-      if (over) {
-        errEl.textContent = '⚠ Total distributed (' + distTotal + ') exceeds the quantity being received (' + recvQty + ')';
-        errEl.style.display = '';
-      } else if (under) {
-        var remaining = recvQty - distTotal;
-        errEl.textContent = '⚠ Total distributed (' + distTotal + ') must equal the quantity being received (' + recvQty + ') — allocate the remaining ' + remaining + ' unit' + (remaining === 1 ? '' : 's');
-        errEl.style.display = '';
-      } else {
-        errEl.style.display = 'none';
-      }
-    }
-
-    // Branch distribution must add up EXACTLY to the quantity being
-    // received THIS batch (when that quantity is > 0) — partial allocation
-    // (e.g. receiving 20, distributed only 10) would silently lose track
-    // of the other 10 units, so it's rejected the same as over-allocating.
-    if (!skipped && !matches) allValid = false;
 
     // Cost & Supplier are now entered HERE, not at Create PO (Oct 26 2026
     // adviser follow-up) — require both for any line actually being
@@ -10407,7 +10342,8 @@ async function submitPOReceive(poId) {
   var po       = allPOs.find(function(p) { return p.po_id === poId; });
   if (!po) return;
 
-  // Build per-item received quantities + branch distributions
+  // Build per-item received quantities — lands wholly in the warehouse
+  // pool now, so no branch distribution to collect (PO rework, Nov 2026).
   var itemsPayload = [];
   var items = po.po_item || [];
   itemDivs.forEach(function(div) {
@@ -10415,14 +10351,9 @@ async function submitPOReceive(poId) {
     var item      = items[parseInt(idx)];
     if (!item) return;
     var recvQty   = parseInt(document.getElementById('recv_' + idx)?.value || '0');
-    var branches  = [];
-    allBranches.forEach(function(b) {
-      var qty = parseInt(document.getElementById('dist_' + idx + '_' + b.branch_id)?.value || '0');
-      if (qty > 0) branches.push({ branch_id: b.branch_id, quantity: qty });
-    });
-    var unitCost = parseFloat(document.getElementById('cost_' + idx)?.value || '0');
-    var supplier = (document.getElementById('supplier_' + idx)?.value || '').trim();
-    itemsPayload.push({ po_item_id: item.po_item_id, product_id: item.product_id, received_quantity: recvQty, branches: branches, unit_cost: unitCost, supplier: supplier });
+    var unitCost  = parseFloat(document.getElementById('cost_' + idx)?.value || '0');
+    var supplier  = (document.getElementById('supplier_' + idx)?.value || '').trim();
+    itemsPayload.push({ po_item_id: item.po_item_id, product_id: item.product_id, received_quantity: recvQty, unit_cost: unitCost, supplier: supplier });
   });
 
   var btn = document.getElementById('markReceivedBtn');
@@ -10473,20 +10404,14 @@ async function submitPOReceive(poId) {
       const receiptItems = itemsPayload
         .filter(function(e) { return e.received_quantity > 0 && !failedIds.has(e.po_item_id); })
         .map(function(e) {
-          const srcItem  = items.find(function(it) { return it.po_item_id === e.po_item_id; }) || {};
-          const noteText = (e.branches || [])
-            .map(function(b) {
-              const br = allBranches.find(function(x) { return x.branch_id === b.branch_id; });
-              return (br ? br.branch_name : b.branch_id) + ': ' + b.quantity;
-            })
-            .join(', ');
+          const srcItem = items.find(function(it) { return it.po_item_id === e.po_item_id; }) || {};
           return {
             product_name:    srcItem.product?.product_name,
             variant_options: srcItem.variant_options,
             quantity:        e.received_quantity,
             unit_cost:       e.unit_cost,
             supplier:        e.supplier,
-            branch_note:     noteText,
+            branch_note:     'Warehouse',
           };
         });
       if (receiptItems.length) {
@@ -10507,7 +10432,7 @@ async function submitPOReceive(poId) {
   }
 }
 
-async function updatePOStatus(poId, status, branchId = null, branches = null) {
+async function updatePOStatus(poId, status) {
   const po = allPOs.find(p => p.po_id === poId);
   const activeBtnId = status === 'received' ? 'markReceivedBtn' : status === 'ordered' ? 'markOrderedBtn' : 'cancelPOBtn';
   const otherBtnId  = status === 'ordered' ? 'cancelPOBtn' : status === 'cancelled' ? 'markOrderedBtn' : null;
@@ -10523,7 +10448,7 @@ async function updatePOStatus(poId, status, branchId = null, branches = null) {
     const res = await fetch(`/api/admin/purchase-orders/${poId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ status, po_number: po?.po_number, branch_id: branchId, branches: branches }),
+      body: JSON.stringify({ status, po_number: po?.po_number }),
     });
     if (res.ok) {
       showToast(`PO marked as ${status}!`);

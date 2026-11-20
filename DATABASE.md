@@ -20,6 +20,24 @@ branch ────────────────────────�
   ├──< stock_transfer (from_branch / to_branch) >── staff (requested_by / resolved_by)
   └──< purchase_order >──< po_item (supplier, requesting_branch_id per line item) >── product
 
+-- Central warehouse pool (revision, Nov 2026) — ONLINE orders and the
+-- mobile catalog no longer read branch_stock at all; they're backed by
+-- this single, branch-independent pool instead. branch_stock/variant_stock
+-- above remain the source of truth for walk-in/POS only.
+warehouse_stock ── product
+warehouse_variant_stock ── product
+warehouse_pullout >── order (online fulfillment pulls) / branch (Distribute-to-Branch pulls)
+  -- Every unit leaving the warehouse pool, either reason, is one row here.
+
+-- Post-delivery customer returns (revision, Nov 2026) — distinct from the
+-- admin/staff direct per-item "Process Return" on a completed order
+-- (still uses order_item.returned_qty directly, see below).
+return_request >── order
+  └──< return_request_item >── order_item
+
+-- CRM (revision, Nov 2026)
+feedback >── customer, order (optional), staff (responded_by)
+
 user ──< staff
 user ──< customer (role-shared: `user.role` is admin / staff / customer)
 user ──< mfa_device
@@ -33,6 +51,8 @@ login_sessions ──< user / staff / branch (Admin + Staff login audit trail)
 ```
 
 > **Source of truth note:** this document was reconciled against a live `pg_dump`-style export of the actual Supabase schema. A few tables and columns existed in production but weren't previously documented here — those are now included below (`sales_transaction`, `variant_stock`, `stock_transfer`, and several columns on `order`, `product`, `payment`, `customer`, `user`, `po_item`). Anywhere this doc previously described something incorrectly (e.g. `otp_codes` keying, `cart.status` values), it's been corrected to match what the database actually enforces. **This latest reconciliation pass (Oct 26 2026) also surfaced a real, unfixed production bug — see the ⚠️ warning under the `order` table below.**
+>
+> **Warehouse-based online fulfillment (revision, Nov 2026):** online orders and the mobile app's product catalog now read from a single, branch-independent stock pool (`warehouse_stock`/`warehouse_variant_stock`, tables 23–24 below) instead of `branch_stock`/`variant_stock`. `branch_stock`/`variant_stock` remain the source of truth for the **staff POS / walk-in** channel only — they're no longer touched by anything online. Purchase Orders now land in the warehouse first (see `po_item` below); admin's new **Distribute to Branch** action is what pushes warehouse stock down into a specific branch's own `branch_stock` afterward, logged alongside online-order pulls in the new `warehouse_pullout` table (25). `cart.branch_id` and `product.available_at` are soft-deprecated as a result (see their rows below) — not dropped yet, but no longer written or read for anything that matters.
 
 ---
 
@@ -125,7 +145,7 @@ Stores the product catalog with variants, weight, and pricing.
 | `variants` | TEXT[] | DEFAULT '{}' | Legacy flat variant list, predates `option_groups`; not used by the current UI |
 | `variant_overrides` | JSONB | DEFAULT '[]' | Per-**combination** overrides (Option B — for a product with 2+ option groups, e.g. Color+Size together): `[{"options":{"Color":"Red","Size":"M"},"price":"199.00","image":"<url>","barcode":"123456789012"}]`. `price`/`image`/`barcode` are each optional per entry. Resale price only — never touches `base_price`/cost |
 | `barcode` | TEXT | UNIQUE, NULLABLE | Auto-generated 12-digit numeric code (internal store code, not a registered GS1 prefix) for the base/no-variant product — printable as Code128/EAN-13 and scannable in POS. Per-choice and per-combo variants get their own codes stored inline on `option_groups`/`variant_overrides` above instead of a separate column |
-| `available_at` | VARCHAR | DEFAULT 'both', CHECK | `triple_e`, `fiel_collins`, or `both` — a legacy manual branch-availability flag. **Not used for actual visibility anymore** — `branch_stock.quantity > 0` is what controls whether a product shows on the mobile app (see `branch_stock` below). Column still exists in the schema but the application no longer reads it for that purpose |
+| `available_at` | VARCHAR | DEFAULT 'both', CHECK | `triple_e`, `fiel_collins`, or `both` — a legacy manual branch-availability flag. **Not used for actual visibility at all anymore.** Originally superseded by `branch_stock.quantity > 0`; since the Nov 2026 warehouse revision, mobile visibility is controlled by `warehouse_stock`/`warehouse_variant_stock` instead (see table 23–24 below), and `branch_stock` only matters for the staff POS/walk-in channel. Soft-deprecated via `COMMENT ON COLUMN` (see SQL section) — column still exists but nothing reads it for visibility anymore |
 | `net_weight` | DECIMAL(10,2) | DEFAULT 0 | Product weight/volume for shipping |
 | `net_weight_unit` | VARCHAR(10) | DEFAULT 'kg' | Unit: `kg`, `gram`, `mL`, `L` |
 | `status` | VARCHAR | NOT NULL, DEFAULT 'active', CHECK | `active` or `inactive` |
@@ -135,7 +155,7 @@ Stores the product catalog with variants, weight, and pricing.
 ---
 
 ### 6. `branch_stock`
-Tracks per-product, per-branch stock quantity. This is the **primary source of truth** for stock and product visibility.
+Tracks per-product, per-branch stock quantity. This is the **source of truth for the staff POS/walk-in channel** — as of the Nov 2026 warehouse revision, it no longer has anything to do with mobile/online visibility (see the note below).
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
@@ -145,7 +165,7 @@ Tracks per-product, per-branch stock quantity. This is the **primary source of t
 | `quantity` | INT | DEFAULT 0 | Current stock at this branch |
 | `updated_at` | TIMESTAMP | DEFAULT now() | Last updated |
 
-> **Note:** A product only appears on the mobile app if its `branch_stock.quantity > 0` for that branch. Products with zero stock across all branches are hidden.
+> **Note (superseded, Nov 2026):** this used to control mobile-app visibility directly (`branch_stock.quantity > 0`). As of the warehouse revision, the mobile app and online orders read `warehouse_stock`/`warehouse_variant_stock` instead (tables 23–24) — a single pool, not per-branch. `branch_stock` now only drives what's visible/sellable in the **staff POS** for walk-in customers at that specific branch. The two pools are independent: Purchase Orders land in the warehouse first, and stock only reaches `branch_stock` via admin's **Distribute to Branch** action or the existing manual Add Stock / Transfer Stock actions.
 
 ---
 
@@ -161,7 +181,7 @@ Tracks per-**variant**, per-branch stock quantity — the variant-level counterp
 | `quantity` | INT | DEFAULT 0 | Current stock of this exact variant at this branch |
 | `updated_at` | TIMESTAMP | DEFAULT now() | Last updated |
 
-> **Note:** For a product with `option_groups` set (i.e. it has variants), the POS/mobile app checks `variant_stock` rather than `branch_stock` for availability and the editable-quantity/barcode-scanner stock clamp.
+> **Note:** For a product with `option_groups` set (i.e. it has variants), the **staff POS** checks `variant_stock` rather than `branch_stock` for availability and the editable-quantity/barcode-scanner stock clamp. (Superseded for mobile, Nov 2026: the mobile app now checks `warehouse_variant_stock` instead — see table 24.)
 
 ---
 
@@ -249,7 +269,7 @@ Stores individual items within each order.
 | `qty` | INT | NOT NULL, DEFAULT 1 | Quantity ordered |
 | `price` | DECIMAL(10,2) | NOT NULL | Price at time of order |
 | `selected_options` | JSONB | DEFAULT '{}' | Customer's selected variants: `{"Size":"M","Color":"Blue"}` |
-| `returned_qty` | INT | NOT NULL, DEFAULT 0 | How many units of this line item have been returned so far (via the admin/staff "Process Return" action on a `completed` order). Capped at `qty` — the return endpoint rejects any request that would push it past `qty` |
+| `returned_qty` | INT | NOT NULL, DEFAULT 0 | How many units of this line item have been returned so far — shared by **both** return paths (the admin/staff direct "Process Return" on a `completed` order, and the newer customer-initiated `return_request` flow below, table 26). Capped at `qty` — both paths reject any request that would push it past `qty` |
 
 ---
 
@@ -294,7 +314,7 @@ Stores active cart items for customers.
 | `cart_id` | UUID | **PK**, DEFAULT uuid_generate_v4() | Unique cart item identifier |
 | `customer_id` | UUID | NOT NULL, **FK** → customer.customer_id | Cart owner |
 | `product_id` | UUID | NOT NULL, **FK** → product.product_id | Product in cart |
-| `branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | Branch the product is from |
+| `branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | **DEPRECATED (Nov 2026):** customers no longer pick a branch — the warehouse is one pool shared by all branches. Soft-deprecated via `COMMENT ON COLUMN` (see SQL section); no longer written on new cart rows, safe to drop once confirmed unused |
 | `quantity` | INT | NOT NULL, DEFAULT 1 | Quantity in cart |
 | `selected_options` | JSONB | DEFAULT '{}' | Selected variants: `{"Size":"M","Color":"Blue"}` |
 | `status` | VARCHAR | NOT NULL, DEFAULT 'active', CHECK | `active`, `checked_out`, or `abandoned` |
@@ -351,8 +371,10 @@ Individual items within each purchase order.
 | `unit_cost` | DECIMAL(10,2) | DEFAULT 0 | Cost per unit — entered at **Receive & Distribute** time (not at PO creation); `0` until received |
 | `variant_options` | JSONB | NULLABLE | Which variant this line item is for, if the product has variants |
 | `received_quantity` | INT | NOT NULL, DEFAULT 0 | Cumulative units actually received so far (may be < quantity if the supplier shorted the order — PO stays `partially_received` until this reaches `quantity`) |
-| `requesting_branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | Which branch this line item is being restocked for — auto-fills the Receive & Distribute split so that branch gets its share by default; set from a stock request's branch when a PO item originates from "Use Approved Requests," otherwise left `NULL` and filled manually |
+| `requesting_branch_id` | UUID | NULLABLE, **FK** → branch.branch_id | Historical/reference field from when a received PO line went straight to a branch's `branch_stock`. **Superseded (PO rework, Nov 2026):** every received line now lands in the warehouse pool first (`_po_add_warehouse_stock()`), regardless of this field — getting it from the warehouse to a specific branch is now a separate step via admin's **Distribute to Branch** action. Still set from a stock request's branch when a PO item originates from "Use Approved Requests," kept for traceability |
 | `supplier` | TEXT | NULLABLE | Supplier name for **this line item specifically**. Brought back into the **Create PO** modal (Nov 12 2026 final-defense follow-up) as a per-row field, auto-filled from `GET /api/admin/products/<id>/supplier` (the supplier recorded on that product's very first Add Stock entry) but editable — still overridable at Receive & Distribute time too (datalist-backed, sourced from `GET /api/admin/suppliers`). Different items on the same PO can have different suppliers; this is what replaced the old per-PO `purchase_order.supplier` field above |
+
+> **PO receiving (superseded, Nov 2026):** receiving used to split stock straight into whichever branch(es) admin picked. As of the PO rework, **every** received line lands in `warehouse_stock`/`warehouse_variant_stock` first, unconditionally — `_po_add_branch_stock()` was removed from the codebase. Stock only reaches a branch's own `branch_stock` afterward, via a separate admin action (Distribute to Branch, see table 23's note).
 
 ---
 
@@ -444,6 +466,107 @@ Staff-initiated branch-to-branch stock transfer request, requiring the **destina
 | `rejection_note` | TEXT | NULLABLE | Optional note from the destination branch when rejecting |
 
 > **Note on stock timing:** stock numbers stay untouched at the source branch while a transfer is `pending` — they only move at the moment of approval (re-validated against the source branch's *current* stock at that moment, not just at request time). One `inventory` row is logged per approved transfer (`from_branch_id`/`to_branch_id` both set on the same row), matching Admin's own instant-transfer logging convention. The source branch can cancel its own request while still `pending`; the destination branch is the only one who can approve/reject.
+
+---
+
+### 23. `warehouse_stock`
+**New, Nov 2026.** The central online-fulfillment stock pool — one row per product, shared by every branch (no `branch_id`). Mirrors `branch_stock`'s shape. This is what `/api/products` reads for mobile-app visibility and quantity; `branch_stock` is never consulted for that anymore.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `product_id` | UUID | **FK** → product.product_id ON DELETE CASCADE, UNIQUE | Product — one row per product, enforced by a UNIQUE constraint |
+| `quantity` | INT | DEFAULT 0 | Current warehouse-pool stock for this product |
+| `updated_at` | TIMESTAMPTZ | DEFAULT now() | Last updated |
+
+> **How stock gets in:** a received Purchase Order line (`_po_add_warehouse_stock()`), or admin's manual **Adjust Stock** action on the Warehouse module. **How stock leaves:** an online order entering `processing` (`_deduct_order_item_stock()`, same critical-stock-reserve rule as walk-in), or admin's **Distribute to Branch** action pushing a chosen quantity down into one branch's `branch_stock`. Every unit leaving either way is logged to `warehouse_pullout` (table 25). Admin-only — surfaced in the admin dashboard's Warehouse module (Warehouse Stock tab), which also shows a color-coded stock-level badge and expandable per-variant breakdown matching the branch Inventory view's level of detail, just combined into one pool instead of one card per branch.
+
+---
+
+### 24. `warehouse_variant_stock`
+**New, Nov 2026.** Variant-level counterpart to `warehouse_stock` — mirrors `variant_stock`'s shape, minus `branch_id`.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `product_id` | UUID | **FK** → product.product_id ON DELETE CASCADE | Product |
+| `options` | JSONB | NOT NULL | The specific variant combination, e.g. `{"Size":"M","Color":"Blue"}` |
+| `quantity` | INT | DEFAULT 0 | Current warehouse-pool stock for this exact variant |
+| `updated_at` | TIMESTAMPTZ | DEFAULT now() | Last updated |
+
+> A `(product_id, options)` unique index (`uq_warehouse_variant_stock`) was added once an upsert-on-conflict seeding pass needed one — see the SQL section. For a product with `option_groups` set, `/api/products` checks this table (not `variant_stock`) to compute mobile-visible quantity.
+
+---
+
+### 25. `warehouse_pullout`
+**New, Nov 2026.** The "Item Pullout System" — a trail of every unit leaving the warehouse pool, whichever of the two reasons caused it. Read-only history, surfaced in the admin Warehouse module's "Item Pullout Log" tab.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `order_id` | UUID | NULLABLE, **FK** → "order".order_id ON DELETE CASCADE | Set for an online-order fulfillment pull (order entering `processing`); `NULL` for a Distribute-to-Branch pull |
+| `product_id` | UUID | NOT NULL, **FK** → product.product_id | Product pulled |
+| `variant_options` | JSONB | NULLABLE | Which variant, if any — null for a non-variant product |
+| `quantity` | INT | NOT NULL | Units pulled |
+| `pulled_by` | UUID | NULLABLE, **FK** → staff.staff_id | Staff/admin on session at the time (null for a purely system-driven pull) |
+| `pulled_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | When pulled |
+| `note` | TEXT | NULLABLE | e.g. `"Online order #ABC123 entered processing"` or a Distribute-to-Branch note naming the destination branch |
+
+> Originally scoped to online-order pulls only; widened (`staff_rework_warehouse_pullout_to_branch.sql`) to also log Distribute-to-Branch events once that admin action was added, so every warehouse exit has one consistent audit trail regardless of reason.
+
+---
+
+### 26. `return_request`
+**New, Nov 2026.** Post-delivery return/refund requests **initiated by the customer** from the mobile app — distinct from the admin/staff direct "Process Return" on a completed order (which still writes straight to `order_item.returned_qty` with no request/approval step). Decided with panel/adviser input: a 12-hour window after the order is marked `completed`, refund method tracked from how the order was originally paid (not a customer choice), reviewable by admin or staff at the order's fulfilling branch.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `order_id` | UUID | NOT NULL, **FK** → "order".order_id ON DELETE CASCADE | The completed order being returned |
+| `requested_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | When the customer submitted the request |
+| `window_expires_at` | TIMESTAMPTZ | NOT NULL | `requested_at` + 12h (`RETURN_WINDOW_HOURS`), computed app-side on insert — not a generated column |
+| `reason` | TEXT | NOT NULL | Customer's stated reason |
+| `status` | TEXT | NOT NULL, DEFAULT 'pending', CHECK | `pending`, `approved`, `rejected`, `refunded` |
+| `reviewed_by` | UUID | NULLABLE, **FK** → staff.staff_id | Admin/staff who approved or rejected |
+| `reviewed_at` | TIMESTAMPTZ | NULLABLE | When reviewed |
+| `rejection_reason` | TEXT | NULLABLE | Required when rejecting — shown to the customer |
+| `refund_method` | TEXT | NULLABLE, CHECK | `cash` or `gcash` — set from the order's original `payment.payment_method` at submission time, never chosen by the customer |
+| `refunded_at` | TIMESTAMPTZ | NULLABLE | When the refund actually completed |
+
+> **Approval flow:** on approve, stock is restored straight to the **warehouse** pool (`warehouse_stock`/`warehouse_variant_stock`) regardless of which branch originally fulfilled the order — online orders always draw from there, so that's also where a return gives it back — and `order_item.returned_qty` is bumped (shared accounting with the admin/staff direct-return path). A `gcash` refund is attempted automatically via PayMongo at approval time and the row moves straight to `refunded` on success; if the PayMongo call fails, the row stays `approved` with a warning for manual follow-up. A `cash` refund stays `approved` until staff/admin confirms the physical handoff via a separate "mark refunded" action. Only one non-terminal (`pending`/`approved`/`refunded`) request is allowed per order at a time.
+
+---
+
+### 27. `return_request_item`
+**New, Nov 2026.** Line items within a `return_request` — which order items, and how many units of each.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `return_request_id` | UUID | NOT NULL, **FK** → return_request.id ON DELETE CASCADE | Parent return request |
+| `order_item_id` | UUID | NOT NULL, **FK** → order_item.order_item_id | Which order line item |
+| `qty_returned` | INT | NOT NULL | Units being returned — validated against `order_item.qty - order_item.returned_qty` remaining at submission time |
+
+---
+
+### 28. `feedback`
+**New, Nov 2026.** Lightweight CRM — customer feedback and inquiries submitted from the mobile app, reviewed by admin.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | UUID | **PK**, DEFAULT gen_random_uuid() | Unique record identifier |
+| `customer_id` | UUID | NULLABLE, **FK** → customer.customer_id | Submitting customer |
+| `order_id` | UUID | NULLABLE, **FK** → "order".order_id | Related order, if the feedback/inquiry is about one |
+| `type` | TEXT | NOT NULL, CHECK | `feedback` or `inquiry` |
+| `subject` | VARCHAR | NULLABLE | Short subject line |
+| `message` | TEXT | NOT NULL | Body |
+| `status` | TEXT | NOT NULL, DEFAULT 'open', CHECK | `open`, `responded`, `closed` |
+| `admin_response` | TEXT | NULLABLE | Admin's reply |
+| `responded_by` | UUID | NULLABLE, **FK** → staff.staff_id | Admin who responded |
+| `created_at` | TIMESTAMPTZ | NOT NULL, DEFAULT now() | When submitted |
+| `responded_at` | TIMESTAMPTZ | NULLABLE | When admin responded |
+
+> Customer-facing: `POST /api/feedback` (submit), `GET /api/feedback` (own history). Admin-facing: `GET /api/admin/feedback` (optionally filtered by `type`), `PUT /api/admin/feedback/<id>/respond`, `PUT /api/admin/feedback/<id>/close`.
 
 ---
 
@@ -674,7 +797,120 @@ ALTER TABLE public."order"
 -- instead of inserting — this constraint is a defense-in-depth backstop,
 -- not the primary dedup check.
 ALTER TABLE "order" ADD COLUMN IF NOT EXISTS client_offline_id TEXT UNIQUE;
+
+-- ============================================================================
+-- REVISION (Nov 2026): central warehouse pool for online fulfillment +
+-- post-delivery returns/refunds + lightweight CRM. Run as one block in the
+-- Supabase SQL editor; every CREATE uses IF NOT EXISTS so re-running is
+-- harmless. Confirmed run on the live project.
+-- ============================================================================
+
+-- Soft-deprecate columns made obsolete by the revision — no data dropped,
+-- just marked so nobody re-reads old docs and starts relying on them again.
+COMMENT ON COLUMN cart.branch_id IS
+  'DEPRECATED (revision, Nov 2026): customers no longer pick a branch. Stop writing this on new cart rows. Safe to DROP once the mobile app update ships.';
+COMMENT ON COLUMN product.available_at IS
+  'DEPRECATED (revision, Nov 2026): already unused for visibility before this revision; now fully superseded by warehouse_stock for the online channel. Safe to DROP.';
+
+-- warehouse_stock: central online-fulfillment stock pool (no branch_id).
+CREATE TABLE IF NOT EXISTS warehouse_stock (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID REFERENCES product(product_id) ON DELETE CASCADE,
+  quantity   INT DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now(),
+  UNIQUE(product_id)
+);
+
+-- warehouse_variant_stock: variant-level counterpart.
+CREATE TABLE IF NOT EXISTS warehouse_variant_stock (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  product_id UUID REFERENCES product(product_id) ON DELETE CASCADE,
+  options    JSONB NOT NULL,
+  quantity   INT DEFAULT 0,
+  updated_at TIMESTAMPTZ DEFAULT now()
+);
+-- Needed once an upsert-on-conflict seed/rebalance script required a target:
+CREATE UNIQUE INDEX IF NOT EXISTS uq_warehouse_variant_stock
+  ON warehouse_variant_stock (product_id, options);
+
+-- warehouse_pullout: trail of every unit leaving the warehouse pool.
+CREATE TABLE IF NOT EXISTS warehouse_pullout (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id        UUID REFERENCES "order"(order_id) ON DELETE CASCADE,
+  product_id      UUID NOT NULL REFERENCES product(product_id),
+  variant_options JSONB,
+  quantity        INT NOT NULL,
+  pulled_by       UUID REFERENCES staff(staff_id),
+  pulled_at       TIMESTAMPTZ NOT NULL DEFAULT now(),
+  note            TEXT
+);
+-- order_id started out NOT NULL (online-order pulls only); widened to
+-- nullable in a follow-up migration once Distribute-to-Branch pulls (which
+-- have no order) needed to log here too:
+ALTER TABLE warehouse_pullout ALTER COLUMN order_id DROP NOT NULL;
+
+-- return_request / return_request_item: customer-initiated post-delivery
+-- returns & refunds. Kept as its own table rather than widening
+-- order.status again — that CHECK constraint has already needed two
+-- emergency fixes this term.
+CREATE TABLE IF NOT EXISTS return_request (
+  id                UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  order_id          UUID NOT NULL REFERENCES "order"(order_id) ON DELETE CASCADE,
+  requested_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  window_expires_at TIMESTAMPTZ NOT NULL, -- requested_at + 12h, computed app-side on insert
+  reason            TEXT NOT NULL,
+  status            TEXT NOT NULL DEFAULT 'pending', -- pending | approved | rejected | refunded
+  reviewed_by       UUID REFERENCES staff(staff_id),
+  reviewed_at       TIMESTAMPTZ,
+  rejection_reason  TEXT,
+  refund_method     TEXT, -- cash | gcash
+  refunded_at       TIMESTAMPTZ,
+  CONSTRAINT return_request_status_check CHECK (status IN ('pending','approved','rejected','refunded')),
+  CONSTRAINT return_request_refund_method_check CHECK (refund_method IS NULL OR refund_method IN ('cash','gcash'))
+);
+
+CREATE TABLE IF NOT EXISTS return_request_item (
+  id                 UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  return_request_id  UUID NOT NULL REFERENCES return_request(id) ON DELETE CASCADE,
+  order_item_id      UUID NOT NULL REFERENCES order_item(order_item_id),
+  qty_returned       INT NOT NULL
+);
+
+-- feedback: CRM — customer feedback & inquiries.
+CREATE TABLE IF NOT EXISTS feedback (
+  id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  customer_id     UUID REFERENCES customer(customer_id),
+  order_id        UUID REFERENCES "order"(order_id),
+  type            TEXT NOT NULL, -- feedback | inquiry
+  subject         VARCHAR,
+  message         TEXT NOT NULL,
+  status          TEXT NOT NULL DEFAULT 'open', -- open | responded | closed
+  admin_response  TEXT,
+  responded_by    UUID REFERENCES staff(staff_id),
+  created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+  responded_at    TIMESTAMPTZ,
+  CONSTRAINT feedback_type_check CHECK (type IN ('feedback','inquiry')),
+  CONSTRAINT feedback_status_check CHECK (status IN ('open','responded','closed'))
+);
+
+-- Grants — as of Oct 30 2026 Supabase stopped auto-granting Data API
+-- (PostgREST) access to new tables on existing projects; without these the
+-- Flask app's supabase-py client gets a permission-denied error on every
+-- one of the tables above.
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.warehouse_stock         TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.warehouse_variant_stock TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.warehouse_pullout       TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.return_request          TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.return_request_item     TO anon, authenticated, service_role;
+GRANT SELECT, INSERT, UPDATE, DELETE ON public.feedback                TO anon, authenticated, service_role;
+
+-- Helpful indexes.
+CREATE INDEX IF NOT EXISTS idx_warehouse_pullout_order_id ON warehouse_pullout(order_id);
+CREATE INDEX IF NOT EXISTS idx_return_request_order_id    ON return_request(order_id);
+CREATE INDEX IF NOT EXISTS idx_feedback_customer_id       ON feedback(customer_id);
 ```
+
+> **Operational note (Nov 2026):** when the warehouse tables above were first created, `warehouse_stock`/`warehouse_variant_stock` were seeded by copying `SUM(branch_stock.quantity)`/`SUM(variant_stock.quantity)` per product straight in — **without** deducting anything from the branches, so the two pools briefly double-counted the same physical inventory. A follow-up one-off data-migration script rescaled both sides down to a true split (warehouse ≈ 20% of original, branches ≈ 80%) to correct this. That script is a one-time data operation, not a schema change, so it isn't reproduced here — but if you're reconciling stock totals from around this date and the numbers look like they used to be roughly double, this is why.
 
 > **Note on completeness:** the tables/columns documented above that aren't reflected in the migration log — `sales_transaction`, `variant_stock`, `product.staff_id`/`available_at`/`variants`, `order.cart_id`/`ref_no`/`address_note`/`cancel_reason`/`cancelled_by`/`is_offline_sync`/`processing_started_at`/`dispatch_date`/`delivery_attempts`, `payment`'s `cash_on_delivery` method, `customer.address_note`, `user.active_session_token`, `staff.position` — were already present in production before this changelog started being kept during the panel-revision work this term. Their original creation SQL isn't tracked here; they're documented above purely from the live schema audit.
 
@@ -684,7 +920,10 @@ ALTER TABLE "order" ADD COLUMN IF NOT EXISTS client_offline_id TEXT UNIQUE;
 
 | Rule | Description |
 |---|---|
-| **Branch visibility** | Products only show on mobile if `branch_stock.quantity > 0` for that branch (`product.available_at` is a legacy column no longer used for this) |
+| **Branch vs. warehouse visibility (revision, Nov 2026)** | Two independent pools now. **Mobile/online:** a product shows only if `warehouse_stock.quantity` (or the best `warehouse_variant_stock` combo) is above the critical reserve level — `branch_stock` is never read for this. **Staff POS/walk-in:** a product/variant is sellable only if `branch_stock`/`variant_stock.quantity > 0` at that staff member's branch, same as before. `product.available_at` and `cart.branch_id` are both soft-deprecated and read by neither path |
+| **Online fulfillment — warehouse pool** | Online orders draw exclusively from `warehouse_stock`/`warehouse_variant_stock`, deducted once the order enters `processing` (same timing rule as walk-in), never from any branch's `branch_stock` — `order.branch_id` plays no role in where stock comes from for an online order. Every pull is logged to `warehouse_pullout`. Purchase Orders land in the warehouse first; stock only reaches a branch via admin's **Distribute to Branch** action (or the pre-existing manual Add Stock/Transfer Stock actions, which remain branch-direct and untouched by this revision) |
+| **Returns — two separate paths** | (1) **Admin/staff direct** — Process Return on a `completed` order, writes straight to `branch_stock`/`variant_stock`/`order_item.returned_qty`, no approval step (unchanged, see the rule further down). (2) **Customer-initiated** (`return_request`/`return_request_item`, new Nov 2026) — mobile app, 12-hour window after `completed_at`, admin/staff-at-branch approves/rejects, refund method mirrors how the order was paid (GCash auto-reversed via PayMongo, cash confirmed manually), approved stock always restores to the **warehouse** regardless of fulfilling branch. Both paths share `order_item.returned_qty` so the remaining-returnable math never double-counts across them |
+| **Feedback & Inquiries (CRM)** | Customer submits via `POST /api/feedback` (`type`: `feedback` or `inquiry`); admin reviews/responds via `GET/PUT /api/admin/feedback` routes. Independent of Returns — not tied to an order unless the customer attaches one |
 | **VAT** | 12% VAT Inclusive applied on POS walk-in receipts |
 | **Shipping tiers (reworked 2026-10-22)** | 4-zone model modeled on real courier (J&T) pricing — same-region cheapest, same-island mid-tier, inter-island priciest — plus a light-item bracket under 500g so a small item isn't charged the same as something near 5kg: **South Cotabato** — always free, any weight. **Region XII (SOCCSKSARGEN)** — ₱70 flat under 500g, else ₱120 base + ₱30/kg over 5kg. **Rest of Mindanao mainland** (Region IX/X/XI, CARAGA, BARMM) — ₱90 flat under 500g, else ₱150 base + ₱32/kg over 5kg. **Luzon/Visayas** (inter-island) — ₱120 flat under 500g, else ₱200 base + ₱35/kg over 5kg. Computed server-side in `_compute_shipping_fee()` (never trusts the client-sent amount), mirrored in mobile's `CheckoutScreen.js calculateShipping()` |
 | **Price history logging** | Every time an admin/staff edit actually changes a product's resale `price`, `price_history` gets one new row (old price, new price, who, when) — logged only when the value actually changed, not on every save. Read via `GET /api/admin/price-history` (optionally filtered to one product), surfaced in the admin Products table's "Price History" button |
@@ -700,8 +939,8 @@ ALTER TABLE "order" ADD COLUMN IF NOT EXISTS client_offline_id TEXT UNIQUE;
 | **One-session-per-user** | `user.active_session_token` holds the current valid session; logging in elsewhere issues a new token and invalidates the old session |
 | **OTP expiry** | Mobile: 5 minutes, Web: 15 minutes |
 | **Web login MFA** | An unrecognized browser (no matching `mfa_device` row) must verify a 6-digit email code before login completes; once verified, that specific browser is trusted indefinitely via the `tefc_mfa_token` cookie |
-| **Stock deduction timing** | Deducted from `branch_stock` (and `variant_stock` for variant products) only once an order enters `processing` (tracked via `order.processing_started_at`), not at checkout/Pending |
-| **PO stock received** | Admin selects which branch(es) receive the stock per item (`po_item.received_quantity` tracks the cumulative total across batches); every received line requires `unit_cost > 0` and a non-empty `supplier` before it's accepted (see the PO Unit Cost & Supplier rule below). Updates `branch_stock`, `variant_stock`, and logs an `inventory` row per branch distributed to |
+| **Stock deduction timing** | Deducted only once an order enters `processing` (tracked via `order.processing_started_at`), not at checkout/Pending — from `warehouse_stock`/`warehouse_variant_stock` for an online order, or from `branch_stock`/`variant_stock` for a walk-in order (see the warehouse-vs-branch rule above) |
+| **PO stock received (superseded, Nov 2026)** | Every received line now lands in `warehouse_stock`/`warehouse_variant_stock` first, unconditionally — `po_item.received_quantity` still tracks the cumulative total across batches, and every received line still requires `unit_cost > 0` and a non-empty `supplier` (see the PO Unit Cost & Supplier rule below). It no longer writes to any branch's `branch_stock` directly; that's a separate step now (Distribute to Branch) |
 | **Partial PO receiving** | A receive batch can arrive short of what was ordered. Each item's write is isolated, so one item failing to save can't roll back a sibling item that already succeeded. `purchase_order.status` is computed from the actual `received_quantity` totals after the batch (`received` only once every item's running total meets its ordered quantity, otherwise `partially_received`) — never just set blindly to `received`. A receipt is issued for the batch either way, not only on a full receive |
 | **Whole-number quantity validation** | Every direct quantity-entry endpoint (stock request creation, Add Stock, branch stock add, stock transfer creation, PO item quantities) rejects non-whole-number input server-side (decimals, non-numeric strings, booleans) rather than silently coercing it, mirrored client-side by a sanitizing input handler that strips non-digit characters as they're typed |
 | **Stock request batching** | Multiple items submitted together in one "Generate Stock Request" action share a `batch_id`; admin reviews and approves/rejects the whole batch as one action unless some items in it were already decided (e.g. a dropped connection left some approved and some pending), in which case only the still-pending ones remain actionable |
