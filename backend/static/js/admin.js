@@ -5836,6 +5836,11 @@ function viewOrderItems(order) {
   const items    = order.order_item || [];
   const customer = order.customer ? `${order.customer.fname} ${order.customer.lname}` : 'Walk-in';
   const customerPhone = order.customer?.phone_number || '';
+  // Branch is only meaningful for walk-in/POS orders — online orders are
+  // fulfilled from the shared warehouse, not a specific branch, so this is
+  // only shown below when order.order_type === 'walk_in'.
+  const branchObj = Array.isArray(order.branch) ? order.branch[0] : order.branch;
+  const branch    = branchObj?.branch_name || order.branch_name || '—';
 
   // Parse delivery address
   const addrParts  = (order.address || '').split('|');
@@ -5887,6 +5892,8 @@ function viewOrderItems(order) {
       <div style="background:var(--surface-2);border-radius:8px;padding:12px;margin-bottom:1rem;display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;">
         <div><span style="color:var(--text-muted);">Customer</span><br/><strong>${customer}</strong></div>
         <div><span style="color:var(--text-muted);">Phone Number</span><br/><strong>${customerPhone || '—'}</strong></div>
+        ${order.order_type === 'walk_in' ? `
+        <div><span style="color:var(--text-muted);">Branch</span><br/><strong>${branch}</strong></div>` : ''}
         <div><span style="color:var(--text-muted);">Served By</span><br/><strong>${(() => { const s = Array.isArray(order.staff) ? order.staff[0] : order.staff; return s ? `${s.fname} ${s.lname}` : '—'; })()}</strong></div>
         <div><span style="color:var(--text-muted);">Type</span><br/>${badge(order.order_type)}</div>
         <div><span style="color:var(--text-muted);">Status</span><br/>${badge(order.status)}</div>
