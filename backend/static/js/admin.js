@@ -5194,7 +5194,7 @@ function renderWarehouseStock() {
   if (!tbody) return;
   const allRows = _warehouseStockData.stock || [];
   if (!allRows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No warehouse stock recorded yet.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No warehouse stock recorded yet.</td></tr>';
     document.getElementById('warehouseStockPagination').innerHTML = '';
     return;
   }
@@ -5227,7 +5227,7 @@ function renderWarehouseStock() {
   });
 
   if (!rows.length) {
-    tbody.innerHTML = '<tr><td colspan="6" class="table-empty">No products match this filter.</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="7" class="table-empty">No products match this filter.</td></tr>';
     document.getElementById('warehouseStockPagination').innerHTML = '';
     return;
   }
@@ -5261,6 +5261,16 @@ function renderWarehouseStock() {
     const expandBtn = hasVariants
       ? `<span class="inv-expand-btn" style="margin-left:6px;font-size:10px;color:var(--text-muted);cursor:pointer;" onclick="toggleWarehouseVariantRow('${r.product_id}',this)">▶</span>`
       : '';
+    // Critical/out rows get the same "Generate PO" shortcut as the branch
+    // Inventory view (quickCreatePOForBranchProduct) — admin already has
+    // PO-creation authority, so this skips straight to a pre-filled Create
+    // PO draft. Left unlocked to any branch ("📦 Both Branches") since POs
+    // land in the warehouse pool first, not a specific branch.
+    const poActionBtn = (level === 'critical' || level === 'out')
+      ? `<button class="btn-icon" onclick="event.stopPropagation();quickCreatePOForWarehouseProduct('${r.product_id}');" title="Generate PO">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:15px;height:15px;"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+        </button>`
+      : '';
 
     return `<tr style="cursor:${hasVariants ? 'pointer' : 'default'};" ${hasVariants ? `onclick="toggleWarehouseVariantRow('${r.product_id}',this.querySelector('.inv-expand-btn'))"` : ''}>
       <td></td>
@@ -5269,9 +5279,10 @@ function renderWarehouseStock() {
       <td style="text-align:center;"><span class="branch-stock-qty ${qtyClass}">${r.quantity}</span>${variantNote}</td>
       <td>${badge}</td>
       <td>${updated}</td>
+      <td onclick="event.stopPropagation();">${poActionBtn}</td>
     </tr>
     <tr id="whVarRow_${r.product_id}" style="display:none;background:var(--surface);">
-      <td colspan="6" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>
+      <td colspan="7" style="padding:0;"><div class="inv-variant-content" style="padding:8px 16px;"></div></td>
     </tr>`;
   }).join('');
   renderPagerCustom('warehouseStockPagination', rows.length, warehouseStockPage, WAREHOUSE_PAGE_SIZE, 'changeWarehouseStockPage');
@@ -9251,6 +9262,42 @@ function quickCreatePOForBranchProduct(productId, branchId) {
 }
 window.quickCreatePOForBranchProduct = quickCreatePOForBranchProduct;
 
+// Same shortcut as quickCreatePOForBranchProduct above, but triggered from a
+// critical/out-of-stock row in the Warehouse Stock table instead of a
+// branch's Stock Summary. The warehouse pool isn't branch-scoped, so the
+// prefilled PO row is left unlocked to any branch ("📦 Both Branches" in
+// the Branch-For selector) — Purchase Orders land in the warehouse first,
+// and "Distribute to Branch" is the separate step that sends stock out from
+// there afterward. Variant rows come from _warehouseStockData.variant_stock
+// (product_id + options + quantity, no branch_id) rather than
+// product.variant_stock, since that's the shape the Warehouse panel already
+// loaded into memory.
+function quickCreatePOForWarehouseProduct(productId) {
+  const p = allProducts.find(pr => pr.product_id === productId);
+  if (!p) return;
+
+  const levelOf = q => {
+    q = Number(q);
+    if (q === 0) return 'out';
+    if (q > 0 && q <= 5) return 'critical';
+    return 'ok';
+  };
+  const criticalVariants = (_warehouseStockData.variant_stock || [])
+    .filter(v => v.product_id === productId && levelOf(v.quantity) !== 'ok');
+
+  openCreatePOModal();
+  document.getElementById('poItemsWrap').innerHTML = '';
+
+  if (criticalVariants.length) {
+    criticalVariants.forEach(v => fillPORowForProduct(p, v, null, null, null));
+  } else {
+    fillPORowForProduct(p, null, null, null, null);
+  }
+
+  updatePOTotal();
+}
+window.quickCreatePOForWarehouseProduct = quickCreatePOForWarehouseProduct;
+
 // Adds one Create-PO item row and fills it in for `product`, optionally
 // locked to one specific variant (`variantRow`, an entry from
 // product.variant_stock — or a plain {options} object — with its own
@@ -10849,4 +10896,4 @@ function closeLogoutModal() {
 }
 function confirmLogout() {
   window.location.href = _logoutUrl;
-}
+}2
