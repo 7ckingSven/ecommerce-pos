@@ -2335,7 +2335,16 @@ def api_mark_order_received(order_id):
         order = order_res.data[0]
         if str(order.get('customer_id')) != str(customer_id):
             return jsonify({'error': 'Unauthorized.'}), 403
-        if order.get('status') != 'out_for_delivery':
+        # 'not_remitted' is the closing-hour (5pm) auto-flag applied to any
+        # order still out_for_delivery that hasn't been remitted yet (see
+        # _auto_flag_not_remitted_orders) — purely an internal admin/staff
+        # remittance-tracking distinction. From the customer's point of
+        # view the parcel is still just "out for delivery," so they must
+        # still be able to confirm receipt here. Without this, a customer
+        # loses the ability to mark an order received the moment it crosses
+        # 5pm unremitted — found during final-defense testing (Nov 2026):
+        # mobile never recognized this status at all.
+        if order.get('status') not in ('out_for_delivery', 'not_remitted'):
             return jsonify({'error': 'Order is not out for delivery.'}), 400
 
         # completed_at was missing here (bug found while wiring the return

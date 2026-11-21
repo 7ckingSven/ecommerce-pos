@@ -44,8 +44,16 @@ function getDeliveryEstimate(order) {
   };
 }
 
+// 'not_remitted' is a closing-hour (5pm) internal status the web dashboards
+// apply to an order still out_for_delivery that hasn't been remitted yet
+// (see _auto_flag_not_remitted_orders in app.py) — it's a remittance-tracking
+// detail for admin/staff, not a real change in what's happening to the
+// parcel. The customer should keep seeing it exactly like "out for delivery"
+// everywhere here, same purple as that status rather than falling back to
+// the muted gray a genuinely-unknown status would get (which read as
+// "already resolved" — found during final-defense testing, Nov 2026).
 function statusColor(s, COLORS) {
-  const map = { pending:'#eab308', processing:'#3b82f6', out_for_delivery:'#8b5cf6', completed: COLORS.primary, cancelled:'#ef4444' };
+  const map = { pending:'#eab308', processing:'#3b82f6', out_for_delivery:'#8b5cf6', not_remitted:'#8b5cf6', completed: COLORS.primary, cancelled:'#ef4444' };
   return map[s] || COLORS.textMuted;
 }
 
@@ -93,7 +101,7 @@ const CANCEL_REASON_OPTIONS = [
 // Orders list hierarchy — active orders (pending/processing/out for delivery)
 // always float above Completed/Cancelled, and within the same tier the
 // oldest order shows first (FIFO), matching the Staff/Admin web orders view.
-const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, completed: 4, cancelled: 4 };
+const ORDER_STATUS_PRIORITY = { pending: 1, processing: 2, out_for_delivery: 3, not_remitted: 3, completed: 4, cancelled: 4 };
 const ORDER_DONE_TIER = 4; // completed/cancelled
 function sortOrdersHierarchy(list) {
   return [...list].sort((a, b) => {
@@ -222,7 +230,13 @@ export default function OrdersScreen({ navigation }) {
     { key: 'processing', label: 'Processing' }, { key: 'out_for_delivery', label: 'Delivery' },
     { key: 'completed', label: 'Completed' }, { key: 'cancelled', label: 'Cancelled' },
   ];
-  const filteredOrders = sortOrdersHierarchy(activeTab === 'all' ? orders : orders.filter(o => o.status === activeTab));
+  // The "Delivery" tab (key: out_for_delivery) also folds in 'not_remitted'
+  // orders — same internal-status reasoning as statusColor/the progress
+  // tracker above; a not_remitted order is still just "out for delivery" to
+  // the customer, and should never only show up under "All".
+  const filteredOrders = sortOrdersHierarchy(activeTab === 'all' ? orders : orders.filter(o =>
+    o.status === activeTab || (activeTab === 'out_for_delivery' && o.status === 'not_remitted')
+  ));
 
   async function markAsReceived(orderId) {
     setMarkingReceived(true);
@@ -494,7 +508,7 @@ export default function OrdersScreen({ navigation }) {
                 </View>
                 <View style={[styles.statusBadge, { backgroundColor: statusColor(item.status, COLORS) + '20' }]}>
                   <Text style={[styles.statusText, { color: statusColor(item.status, COLORS) }]}>
-                    {item.status === 'out_for_delivery' ? 'Out for Delivery' : item.status?.replace(/_/g,' ').toUpperCase()}
+                    {(item.status === 'out_for_delivery' || item.status === 'not_remitted') ? 'Out for Delivery' : item.status?.replace(/_/g,' ').toUpperCase()}
                   </Text>
                 </View>
               </View>
@@ -630,9 +644,9 @@ export default function OrdersScreen({ navigation }) {
               )}
 
               {/* Bottom-right action button — Mark as Received / Cancel Order */}
-              {(item.status === 'out_for_delivery' || getCancelWindow(item).canCancel) && (
+              {((item.status === 'out_for_delivery' || item.status === 'not_remitted') || getCancelWindow(item).canCancel) && (
                 <View style={styles.cardActionRow}>
-                  {item.status === 'out_for_delivery' && (
+                  {(item.status === 'out_for_delivery' || item.status === 'not_remitted') && (
                     <TouchableOpacity
                       style={[styles.cardReceivedBtn, markingReceived && { opacity: 0.7 }]}
                       onPress={() => markAsReceived(item.order_id)}
@@ -696,7 +710,19 @@ export default function OrdersScreen({ navigation }) {
                   { key:'completed',        label:'Completed',   icon:'check-circle'},
                 ].map((step, i, arr) => {
                   const statuses   = ['pending','processing','out_for_delivery','completed'];
-                  const curIdx     = statuses.indexOf(selectedOrder?.status === 'cancelled' ? 'pending' : selectedOrder?.status);
+                  // 'not_remitted' isn't one of the 4 tracker steps (it's an
+                  // internal admin/staff remittance flag, not a real step in
+                  // the customer's delivery journey) — map it onto the same
+                  // index as 'out_for_delivery' so the tracker still shows
+                  // "On the Way" as current instead of indexOf returning -1
+                  // and making every step, including "Completed", render as
+                  // not-done (which read as the order being stuck/finished
+                  // rather than still on its way) — found during
+                  // final-defense testing, Nov 2026.
+                  const trackerStatus = selectedOrder?.status === 'cancelled' ? 'pending'
+                    : selectedOrder?.status === 'not_remitted' ? 'out_for_delivery'
+                    : selectedOrder?.status;
+                  const curIdx     = statuses.indexOf(trackerStatus);
                   const stepIdx    = statuses.indexOf(step.key);
                   const isDone     = curIdx >= stepIdx;
                   const isCurrent  = curIdx === stepIdx;
@@ -827,7 +853,7 @@ export default function OrdersScreen({ navigation }) {
             </ScrollView>
 
             {/* Mark as Order Received Button */}
-            {selectedOrder?.status === 'out_for_delivery' && (
+            {(selectedOrder?.status === 'out_for_delivery' || selectedOrder?.status === 'not_remitted') && (
               <TouchableOpacity
                 style={[styles.receivedBtn, markingReceived && { opacity: 0.7 }]}
                 onPress={() => markAsReceived(selectedOrder.order_id)}

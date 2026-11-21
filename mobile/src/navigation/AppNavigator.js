@@ -118,8 +118,14 @@ function MainTabs({ navigation }) {
       try {
         const { getOrders } = require('../services/orderService');
         const orders = await getOrders();
+        // 'not_remitted' (closing-hour remittance flag — see app.py's
+        // _auto_flag_not_remitted_orders) is still an active, unresolved
+        // order from the customer's side — left out of this list it made
+        // the Orders tab badge quietly drop as soon as 5pm passed, which
+        // read as the order being done even though it still needed the
+        // customer to confirm receipt (final-defense testing, Nov 2026).
         const active = (orders || []).filter(o =>
-          ['pending','processing','out_for_delivery'].includes(o.status)
+          ['pending','processing','out_for_delivery','not_remitted'].includes(o.status)
         ).length;
         setOrderCount(active);
       } catch (e) {}
