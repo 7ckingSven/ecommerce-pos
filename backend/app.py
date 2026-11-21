@@ -931,6 +931,27 @@ DAILY_PROCESSING_CAP = 30
 # a small reserve buffer instead of selling all the way down to zero.
 CRITICAL_STOCK_LEVEL = 5
 
+def _embedded_rows(embedded):
+    """Normalize a Supabase/PostgREST embedded-relationship value to a list.
+
+    Bug fix (Nov 2026): PostgREST returns an embedded relation as a list of
+    rows when the relationship is one-to-many, but as a single row (a plain
+    dict) when it infers a to-one relationship instead. warehouse_stock has
+    (at most) one row per product_id, so PostgREST embeds product ->
+    warehouse_stock as a single dict, not a list — the call sites below used
+    to assume it was always a list and did `for w in wh_rows: w.get(...)`,
+    which on a dict iterates its KEYS (plain strings), crashing with
+    "AttributeError: 'str' object has no attribute 'get'" on every single
+    /api/products and /api/products/<id> call. This normalizes either shape
+    (dict, list, or None) to a list so the rest of the code can stay the
+    same.
+    """
+    if isinstance(embedded, dict):
+        return [embedded]
+    if isinstance(embedded, list):
+        return embedded
+    return []
+
 def _auto_advance_processing_orders():
     """Lazy/opportunistic check for the automatic Processing -> Out for
     Delivery transition. No background scheduler exists anywhere in this
@@ -2115,9 +2136,9 @@ def api_products():
                 # the single warehouse_stock pool, not a sum of branches'
                 # branch_stock. Same critical-reserve hiding rule applied
                 # against the warehouse quantity instead of a branch's.
-                wh_rows      = p.get('warehouse_stock') or []
+                wh_rows      = _embedded_rows(p.get('warehouse_stock'))
                 wh_qty       = sum(int(w.get('quantity') or 0) for w in wh_rows)
-                wh_variants  = p.get('warehouse_variant_stock') or []
+                wh_variants  = _embedded_rows(p.get('warehouse_variant_stock'))
                 if wh_variants:
                     best_available = max(int(v.get('quantity') or 0) for v in wh_variants)
                 else:
@@ -2152,8 +2173,8 @@ def api_product_detail(product_id):
         if not res.data:
             return jsonify({'error': 'Product not found.'}), 404
         p = res.data[0]
-        wh_rows     = p.get('warehouse_stock') or []
-        wh_variants = p.get('warehouse_variant_stock') or []
+        wh_rows     = _embedded_rows(p.get('warehouse_stock'))
+        wh_variants = _embedded_rows(p.get('warehouse_variant_stock'))
         p['quantity']             = sum(int(w.get('quantity') or 0) for w in wh_rows)
         p['branch_available_qty'] = max((int(v.get('quantity') or 0) for v in wh_variants), default=p['quantity'])
         return jsonify(p), 200
@@ -2194,6 +2215,16 @@ def api_get_cart():
         res = supabase_retry(lambda: supabase.table('cart').select(
             '*, branch_id, product(product_id, product_name, price, image_url, image_urls, brand, category, net_weight, net_weight_unit, option_groups, variant_overrides, discount(discount_name, percentage), warehouse_stock(quantity), warehouse_variant_stock(quantity, options))'
         ).eq('customer_id', customer_id).eq('status', 'active').execute())
+        # Same to-one embed as /api/products (see _embedded_rows) — normalize
+        # product.warehouse_stock/warehouse_variant_stock to arrays here so
+        # the app's own Array.isArray(...) check (CartScreen.js) actually
+        # finds the rows instead of silently falling back to an empty list
+        # and treating every item as having zero stock.
+        for row in (res.data or []):
+            prod = row.get('product')
+            if isinstance(prod, dict):
+                prod['warehouse_stock']         = _embedded_rows(prod.get('warehouse_stock'))
+                prod['warehouse_variant_stock']  = _embedded_rows(prod.get('warehouse_variant_stock'))
         return jsonify(res.data), 200
     except Exception as e:
         print(f"API cart error: {e}")
